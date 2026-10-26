@@ -4,7 +4,7 @@ mkdir -p "$HOME/agsbx"
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode; do
+for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -56,6 +56,19 @@ export CERT_DIR="$HOME/argosbx/cert"
 export CERT_CRT="$CERT_DIR/cert.crt"
 export CERT_KEY="$CERT_DIR/private.key"
 export certmode=${certmode:-''}
+export certsrc=${certsrc:-''}
+# certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
+# 自动逻辑：显式选择优先；否则总内存小于 256MB 时优先 acme（低内存机器不常驻 Caddy）；否则有 caddy 命令时用 Caddy，否则用 acme。
+# acme 分支不自动安装 acme.sh，需预先安装在 $HOME/.acme.sh/acme.sh，否则等待超时后回落自签。
+detect_certsrc(){
+  if [ "$certsrc" = "caddy" ]; then echo "caddy"; return; fi
+  if [ "$certsrc" = "acme" ]; then echo "acme"; return; fi
+  local mem_kb=""
+  mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
+  if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then echo "acme"; return; fi
+  if command -v caddy >/dev/null 2>&1; then echo "caddy"; return; fi
+  echo "acme"
+}
 # certmode：证书验证方式，空=自动，http=强制 HTTP，dns=强制 DNS。
 # 自动逻辑：显式选择优先；否则 Argo 开启时按已代理处理；否则查 ym 的 DNS，若解析 IP 已知且不等于本机 IP 则按已代理处理，否则 HTTP。
 # 注意：本机 IP 以 $HOME/agsbx/server_ip.log 为准，若该文件不存在则不做 DNS 对比，避免误判为已代理。
@@ -122,7 +135,7 @@ echo "更新Xray或Singbox内核命令：agsbx upx或ups 【或者】 主脚本 
 echo "重启脚本命令：agsbx res 【或者】 主脚本 res"
 echo "卸载脚本命令：agsbx del 【或者】 主脚本 del"
 echo "双栈VPS显示IPv4/IPv6节点配置命令：ippz=4或6 agsbx list 【或者】 ippz=4或6 主脚本 list"
-echo "域名证书：由 Caddy 申请（自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode），固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储）"
+echo "域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/argosbx/cert"
 echo "---------------------------------------------------------"
 echo
 }
@@ -1311,7 +1324,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -2731,22 +2744,40 @@ domain_cert_ready=0
 if [ -n "$ym" ]; then
   mkdir -p "$CERT_DIR"
   echo "$ym" > "$HOME/agsbx/ym"
+  certsrc_selected=$(detect_certsrc)
   certmode_selected=$(detect_certmode)
-  if [ "$certmode_selected" = "dns" ] && [ -z "$CLOUDFLARE_API_TOKEN" ] && [ -z "$CF_API_TOKEN" ]; then
-    if [ "$certmode" = "dns" ]; then
-      echo "已选 DNS 验证但未检测到 CLOUDFLARE_API_TOKEN 环境变量，仍按 DNS 写配置，Caddy 启动前请先设置该变量，否则等待超时后回落自签"
-    else
-      echo "自动判断为已代理、应走 DNS 验证，但未检测到 CLOUDFLARE_API_TOKEN 环境变量，回落 HTTP 验证试一次"
-      certmode_selected="http"
-    fi
-  fi
+  echo "$certsrc_selected" > "$HOME/agsbx/certsrc"
   echo "$certmode_selected" > "$HOME/agsbx/certmode"
-  echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
-  write_caddyfile
-  if command -v caddy >/dev/null 2>&1; then
-    caddy reload --config "$HOME/argosbx/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用 $HOME/argosbx/Caddyfile 启动 Caddy，脚本仍会继续等待证书"
+  if [ "$certsrc_selected" = "acme" ]; then
+    echo "域名证书来源：acme.sh（验证方式：$certmode_selected，低内存机器不常驻 Caddy），固定目录 $CERT_DIR"
+    if [ -x "$HOME/.acme.sh/acme.sh" ]; then
+      if [ "$certmode_selected" = "dns" ]; then
+        CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+      else
+        "$HOME/.acme.sh/acme.sh" --issue --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+      fi
+    else
+      echo "未检测到 acme.sh（$HOME/.acme.sh/acme.sh），请先安装 acme.sh，脚本仍会继续等待证书，超时回落自签"
+    fi
   else
-    echo "未检测到 caddy 命令，请先安装 Caddy 并用 $HOME/argosbx/Caddyfile 启动，脚本仍会继续等待证书"
+    if [ "$certmode_selected" = "dns" ] && [ -z "$CLOUDFLARE_API_TOKEN" ] && [ -z "$CF_API_TOKEN" ]; then
+      if [ "$certmode" = "dns" ]; then
+        echo "已选 DNS 验证但未检测到 CLOUDFLARE_API_TOKEN 环境变量，仍按 DNS 写配置，Caddy 启动前请先设置该变量，否则等待超时后回落自签"
+      else
+        echo "自动判断为已代理、应走 DNS 验证，但未检测到 CLOUDFLARE_API_TOKEN 环境变量，回落 HTTP 验证试一次"
+        certmode_selected="http"
+      fi
+    fi
+    echo "$certmode_selected" > "$HOME/agsbx/certmode"
+    echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
+    write_caddyfile
+    if command -v caddy >/dev/null 2>&1; then
+      caddy reload --config "$HOME/argosbx/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用 $HOME/argosbx/Caddyfile 启动 Caddy，脚本仍会继续等待证书"
+    else
+      echo "未检测到 caddy 命令，请先安装 Caddy 并用 $HOME/argosbx/Caddyfile 启动，脚本仍会继续等待证书"
+    fi
   fi
   if wait_domain_cert; then
     domain_cert_ready=1
