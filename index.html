@@ -483,6 +483,9 @@
           </select>
         </div>
         
+        <div class="row"><label>外部出口节点 <span class="pill">egress_nodes</span></label><textarea id="egress_nodes" rows="4" placeholder="一行一个链接，数量不限；例：socks5://用户:密码@地址:端口#名字&#10;vless://uuid@地址:443?security=reality&pbk=公钥&sid=短id&sni=域名&fp=chrome&flow=xtls-rprx-vision&type=tcp#名字"></textarea></div>
+        <div class="row"><label>本机出口 IP <span class="pill">egress_bind</span></label><input id="egress_bind" type="text" placeholder="逗号分隔，例：1.2.3.4,2001:db8::2；自动生成 bind1、bind2……"/></div>
+        <div class="row"><label>分流规则 <span class="pill">egress_rules</span></label><textarea id="egress_rules" rows="4" placeholder="一行一条，格式：类型:值=&gt;出口名；例：&#10;domain:example.com=&gt;socks-out&#10;ip:1.2.3.0/24=&gt;reality-out&#10;source:10.0.0.0/8=&gt;bind1&#10;inbound:vm-ws=&gt;bind2"></textarea></div>
         <div class="row"><label>IPv4/IPv6 配置导出 <span class="pill">ippz</span></label>
           <select id="ippz">
             <option value="">默认 自动</option>
@@ -581,7 +584,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
-  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];
+  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agn = document.getElementById('agn');
@@ -676,6 +679,9 @@
     document.getElementById('alns').value = '';
     document.getElementById('hyjpt').value = '';
     document.getElementById('name').value = '';
+    document.getElementById('egress_nodes').value = '';
+    document.getElementById('egress_bind').value = '';
+    document.getElementById('egress_rules').value = '';
     sub.value = '';
     updateSubState();
     argoSelect.value = '';
@@ -778,6 +784,10 @@
     uuidInput.value = crypto.randomUUID();
     render();
   });
+  ['egress_nodes', 'egress_bind', 'egress_rules'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', render);
+  });
 
   commandTypeRadios.forEach(radio => {
     radio.addEventListener('change', render);
@@ -795,7 +805,10 @@
     });
     optIds.forEach(id => {
       const el = document.getElementById(id);
-      const v = (el.value || '').trim();
+      let v = (el.value || '').trim();
+      if (id === 'egress_nodes' || id === 'egress_rules') {
+        v = v.split(/\r?\n/).map(s => s.trim()).filter(Boolean).join(';');
+      }
       if (v !== '' && !el.disabled) {
         m[id] = v;
       }
@@ -816,7 +829,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agn')) ordered.push('agn');
     if (keys.includes('agk')) ordered.push('agk');
