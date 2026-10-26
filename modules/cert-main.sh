@@ -12,10 +12,10 @@ if [ -n "$ym" ]; then
     if [ -x "$HOME/.acme.sh/acme.sh" ]; then
       if [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
         "$HOME/.acme.sh/acme.sh" --issue --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       fi
     else
       echo "未检测到 acme.sh（$HOME/.acme.sh/acme.sh），请先安装 acme.sh，脚本仍会继续等待证书，超时回落自签"
@@ -47,6 +47,11 @@ if [ -n "$ym" ]; then
   fi
   if wait_domain_cert; then
     domain_cert_ready=1
+  fi
+  if [ "$domain_cert_ready" = "1" ]; then
+    cert_install_watch
+  else
+    cert_remove_watch
   fi
 elif [ -n "$alns" ]; then
   echo "已设置域名证书模式但未提供节点域名 ym，无法使用 Caddy 域名证书，回落自签证书"

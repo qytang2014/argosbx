@@ -38,3 +38,9 @@ bash -n argosbx.sh
 bash tests/run_all.sh
 ```
 先构建，再测构建同步、语法、出口、证书、页面、上游纯净，任何一步失败就停。单独跑某一个见 `tests/README.md`。
+
+## 证书续期自动重启
+- acme：`--install-cert` 时带 `--reloadcmd "bash $HOME/bin/agsbx certrestart"`，续期后立即重启。
+- Caddy：没有续期钩子，改用每天 03:00 的 cron（`bash $HOME/bin/agsbx certwatch`），检查固定目录证书的 sha256 变化，变化且证书合法才重启。
+- 域名证书就绪时安装 watcher 和初始 hash，回落自签或卸载（`del`）时清理 cron。
+- 测试见 `tests/test_cert_watch.sh`。

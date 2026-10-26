@@ -7,5 +7,6 @@ cd "$ROOT"
 bash tests/test_build.sh
 bash tests/test_egress.sh
 bash tests/test_cert.sh
+bash tests/test_cert_watch.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"

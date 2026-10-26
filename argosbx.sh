@@ -3,7 +3,7 @@
 export LANG=en_US.UTF-8
 mkdir -p "$HOME/agsbx"
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
-case "${*##* }" in list|del|upx|ups|upa|res) ;; *)
+case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart) ;; *)
 cmd=""
 for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
@@ -188,6 +188,70 @@ wait_domain_cert(){
   done
   echo "域名证书超时未就绪：$ym，300 秒后回落自签证书"
   return 1
+}
+# Cert renewal auto-restart: Caddy has no post-renewal hook, and acme.sh
+# renewal alone does not restart sing-box/xray, so both paths are covered:
+#  - acme: --install-cert --reloadcmd "bash $HOME/bin/agsbx certrestart"
+#    runs immediately on acme renewal (see modules/cert-main.sh).
+#  - Caddy (and as a backstop for acme): a daily cron entry
+#    "bash $HOME/bin/agsbx certwatch" checks the cert hash in the fixed
+#    dir and restarts only the kernels whose config uses that cert.
+# Rules: hash is sha256 of the cert file (following symlinks); a change
+# is acted on only if the new cert parses and, when a domain is known,
+# matches that domain; an invalid cert never updates the recorded hash
+# and never triggers a restart, so the next run retries instead of
+# losing the change. Restart uses the existing sbrestart/xrestart
+# functions, which handle systemd / OpenRC / nohup the same way the
+# rest of the script does. If a kernel was stopped, sbrestart/xrestart
+# will start it again; that is intentional on renewal.
+cert_cert_hash(){ sha256sum "$CERT_CRT" 2>/dev/null | awk '{print $1}'; }
+cert_uses_domain_cert(){
+  { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; } || \
+  { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; }
+}
+cert_restart(){
+  cert_uses_domain_cert || { echo "域名证书未被 sing-box/xray 配置使用，跳过重启"; return 0; }
+  if [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; then
+    echo "证书已更新，重启 sing-box"; sbrestart
+  fi
+  if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
+    echo "证书已更新，重启 xray"; xrestart
+  fi
+}
+cert_watch(){
+  [ -s "$CERT_CRT" ] || return 0
+  local ym_watch="" cur="" old="" cert_text=""
+  ym_watch="${ym:-$(cat "$HOME/agsbx/ym" 2>/dev/null)}"
+  cur=$(cert_cert_hash); [ -n "$cur" ] || return 0
+  if [ ! -f "$HOME/agsbx/cert.hash" ]; then echo "$cur" > "$HOME/agsbx/cert.hash"; return 0; fi
+  old=$(cat "$HOME/agsbx/cert.hash" 2>/dev/null)
+  [ "$cur" != "$old" ] || return 0
+  if command -v openssl >/dev/null 2>&1; then
+    cert_text=$(openssl x509 -in "$CERT_CRT" -noout -subject -ext subjectAltName 2>/dev/null || openssl x509 -in "$CERT_CRT" -noout -subject 2>/dev/null)
+    [ -n "$cert_text" ] || { echo "新证书无法解析，跳过重启，下次再试"; return 0; }
+    if [ -n "$ym_watch" ]; then case "$cert_text" in *"$ym_watch"*) ;; *) echo "新证书域名不匹配 $ym_watch，跳过重启，下次再试"; return 0;; esac; fi
+  fi
+  echo "$cur" > "$HOME/agsbx/cert.hash"
+  echo "域名证书已变化（$ym_watch），重启相关内核"
+  cert_restart
+}
+cert_install_watch(){
+  local cur="" tmp=""
+  cur=$(cert_cert_hash); [ -n "$cur" ] && echo "$cur" > "$HOME/agsbx/cert.hash"
+  command -v crontab >/dev/null 2>&1 || { echo "未找到 crontab，证书续期 watcher 未安装，acme 续期仍可通过 reloadcmd 重启"; return 0; }
+  tmp=$(mktemp 2>/dev/null) || return 0
+  crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
+  printf '0 3 * * * bash "$HOME/bin/agsbx" certwatch >/dev/null 2>&1  # argosbx-certwatch\n' >> "$tmp"
+  crontab "$tmp" 2>/dev/null || echo "证书续期 watcher cron 安装失败，请手动添加：0 3 * * * bash \$HOME/bin/agsbx certwatch"
+  rm -f "$tmp"
+  echo "证书续期 watcher 已安装：每天 03:00 检查证书变化并重启相关内核"
+}
+cert_remove_watch(){
+  command -v crontab >/dev/null 2>&1 || return 0
+  local tmp=""; tmp=$(mktemp 2>/dev/null) || return 0
+  crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
+  crontab "$tmp" 2>/dev/null || true
+  rm -f "$tmp"
 }
 export argo=${argo:-''}
 export ARGO_DOMAIN=${agn:-''}
@@ -2813,7 +2877,16 @@ else
 nohup $HOME/agsbx/sing-box run -c $HOME/agsbx/sb.json >/dev/null 2>&1 &
 fi
 }
+if [ "$1" = "certwatch" ]; then
+cert_watch
+exit
+fi
+if [ "$1" = "certrestart" ]; then
+cert_restart
+exit
+fi
 if [ "$1" = "del" ]; then
+cert_remove_watch
 cleandel
 rm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"
 echo "卸载完成"
@@ -2944,10 +3017,10 @@ if [ -n "$ym" ]; then
     if [ -x "$HOME/.acme.sh/acme.sh" ]; then
       if [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
         "$HOME/.acme.sh/acme.sh" --issue --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       fi
     else
       echo "未检测到 acme.sh（$HOME/.acme.sh/acme.sh），请先安装 acme.sh，脚本仍会继续等待证书，超时回落自签"
@@ -2979,6 +3052,11 @@ if [ -n "$ym" ]; then
   fi
   if wait_domain_cert; then
     domain_cert_ready=1
+  fi
+  if [ "$domain_cert_ready" = "1" ]; then
+    cert_install_watch
+  else
+    cert_remove_watch
   fi
 elif [ -n "$alns" ]; then
   echo "已设置域名证书模式但未提供节点域名 ym，无法使用 Caddy 域名证书，回落自签证书"

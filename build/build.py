@@ -121,6 +121,7 @@ def main():
     cert = read("modules/cert.sh")
     egress = read("modules/egress.sh")
     cert_main = read("modules/cert-main.sh")
+    cert_watch = read("modules/cert-watch.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
     t = replace(t, "url='https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh'",
@@ -140,6 +141,8 @@ def main():
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
+    # --- cert-watch module (right after cert module) ---
+    t = t.replace(cert, cert + cert_watch, 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\n", "egress-exports-anchor")
@@ -172,6 +175,12 @@ def main():
     # The above line is intentionally not used; do the insertion properly:
     if "\n" + egress + "\nxrsbout(){" not in t:
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
+    # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
+    t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
+                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart) ;; *)', "top-case-exclusion", 1)
+    # --- certwatch/certrestart subcommands + del cleanup ---
+    t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
+                'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\negress_init\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "outbounds": [\n    {\n      "protocol": "freedom",\n      "tag": "direct",',
