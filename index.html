@@ -445,6 +445,13 @@
             <option value="dns">DNS 验证（需 Cloudflare API + DNS 插件 Caddy）</option>
           </select>
         </div>
+        <div class="row"><label>证书来源 <span class="pill">certsrc</span></label>
+          <select id="certsrc">
+            <option value="">默认 自动（低内存走 acme，否则走 Caddy）</option>
+            <option value="caddy">Caddy（需反代、内存够）</option>
+            <option value="acme">acme.sh（低内存、只要证书）</option>
+          </select>
+        </div>
         <div class="row"><label>Reality 域名 <span class="pill">reym</span></label><input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com" disabled/></div>
         <div class="row"><label>CDN优选IP域名 <span class="pill">cfip</span></label><input id="cfip" type="text" placeholder="支持2个优选IP域名(空格间隔)，留空默认优选域名" disabled></div>
         <div class="row"><label>启用域名IP证书TLS <span class="pill">alns</span></label>
@@ -574,7 +581,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
-  const optIds = ['warp','ippz','uuid','ym','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];
+  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agn = document.getElementById('agn');
@@ -663,6 +670,7 @@
     document.getElementById('uuid').value = '';
     document.getElementById('ym').value = '';
     document.getElementById('certmode').value = '';
+    document.getElementById('certsrc').value = '';
     document.getElementById('reym').value = '';
     document.getElementById('cfip').value = '';
     document.getElementById('alns').value = '';
@@ -808,7 +816,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agn')) ordered.push('agn');
     if (keys.includes('agk')) ordered.push('agk');
