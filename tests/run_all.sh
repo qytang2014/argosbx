@@ -10,5 +10,6 @@ bash tests/test_cert.sh
 bash tests/test_cert_watch.sh
 bash tests/test_reality_addr.sh
 bash tests/test_plain_addr.sh
+bash tests/test_container.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"

@@ -1,8 +1,8 @@
-# 构建说明（第 1 阶段：argosbx.sh 分层）
+# 构建说明（第 1 阶段：argosbx.sh 分层，第 2 步起含容器）
 
 ## 不要手改的文件
-- `argosbx.sh`、`index.html`（根目录）：**构建产物**，由 `build/build.py` 生成，手改下次构建会被覆盖。
-- `upstream/argosbx.sh`、`upstream/index.html`：**上游原版**，现在是 `yonggekkk/argosbx main@08c5416`，不要在里面加私有内容。注意上游 index.html 是 CRLF，构建时会统一转成 LF。
+- `argosbx.sh`、`index.html`（根目录）、`container/nodejs/start.sh`：**构建产物**，由 `build/build.py` 生成，手改下次构建会被覆盖。
+- `upstream/argosbx.sh`、`upstream/index.html`、`upstream/container/nodejs/start.sh`：**上游原版**，现在是 `yonggekkk/argosbx main@08c5416`，不要在里面加私有内容。注意上游 index.html 是 CRLF，构建时会统一转成 LF。容器原版与之前私有版只差项目链接一行（yonggekkk → qytang2014）。
 
 ## 可以改的文件
 - `modules/cert.sh`：证书 / Caddy / acme 功能。
@@ -14,8 +14,9 @@
 
 ## 构建
 ```
-python3 build/build.py  # 同时生成 argosbx.sh 和 index.html
+python3 build/build.py  # 同时生成 argosbx.sh、index.html、container/nodejs/start.sh
 bash -n argosbx.sh
+bash -n container/nodejs/start.sh
 ```
 
 ## 上游同步（以后）
@@ -29,8 +30,10 @@ bash -n argosbx.sh
 2. 在 `build/build.py` 里加插入锚点和钩子（如果需要）。
 3. 跑构建和测试，不要直接改 `argosbx.sh`，不要改 `upstream/argosbx.sh`。
 
-## 本阶段不做的事
-- `index.html`、容器版 `start.sh` 不动。
+## 容器（第 2 步，已做证书 + 域名地址，egress 对齐留到第 3 步后）
+- `modules/container-cert.sh`：容器证书选择函数。容器不发证：只有宿主已在 `$HOME/argosbx/cert/` 放好 cert.crt + private.key（且域名匹配 ym）时才用它（软链接到 cert.pem / private.key，容器重启后跟随宿主续期），否则回落本地自签；原版公开密钥下载兜底已删除。
+- 容器 TLS 链接（HY2/TUIC/AnyTLS）用 `$add` / `$sni` / `$tls_ins`：域名证书就绪时 `add=ym, sni=ym, insecure=0`，否则 `add=IP, sni=www.bing.com, insecure=1`。
+- 容器 Reality 与非 TLS 链接用复用的 `modules/reality-addr.sh`（`domain_addr`），SNI 仍是 `$reym`，CDN / Argo 链接不动，内核（sing-box / xray）仍从原版 release 下载。
 - 上游代码本身不做去重 / 优化，那会再次破坏上游同步。构建产物大小和原来基本一致，变小的是每个源文件的规模和改动范围。
 
 ## 测试
