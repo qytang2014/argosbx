@@ -94,7 +94,7 @@ echo "更新Xray或Singbox内核命令：agsbx upx或ups 【或者】 主脚本 
 echo "重启脚本命令：agsbx res 【或者】 主脚本 res"
 echo "卸载脚本命令：agsbx del 【或者】 主脚本 del"
 echo "双栈VPS显示IPv4/IPv6节点配置命令：ippz=4或6 agsbx list 【或者】 ippz=4或6 主脚本 list"
-echo "域名证书：由 Caddy（Cloudflare DNS 验证）申请，固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储）"
+echo "域名证书：由 Caddy（HTTP 验证）申请，固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储）"
 echo "---------------------------------------------------------"
 echo
 }
@@ -2703,7 +2703,7 @@ domain_cert_ready=0
 if [ -n "$ym" ]; then
   mkdir -p "$CERT_DIR"
   echo "$ym" > "$HOME/agsbx/ym"
-  echo "域名证书来源：Caddy（Cloudflare DNS 验证），固定目录 $CERT_DIR"
+  echo "域名证书来源：Caddy（HTTP 验证，Caddy 监听 80/443），固定目录 $CERT_DIR"
   if wait_domain_cert; then
     domain_cert_ready=1
   fi
