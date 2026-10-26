@@ -4,7 +4,7 @@ mkdir -p "$HOME/agsbx"
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do
+for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -50,6 +50,30 @@ export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
 export ym_vl_re=${reym:-''}
 export cdnym=${cdnym:-''}
+export ym=${ym:-''}
+export alns=${alns:-''}
+export CERT_DIR="$HOME/argosbx/cert"
+export CERT_CRT="$CERT_DIR/cert.crt"
+export CERT_KEY="$CERT_DIR/private.key"
+# Caddy 域名证书：固定目录 $HOME/argosbx/cert，内为指向 Caddy 证书存储的软链接。
+# wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
+wait_domain_cert(){
+  [ -n "$ym" ] || return 1
+  local waited=0 cert_text=""
+  while [ "$waited" -lt 300 ]; do
+    if [ -s "$CERT_CRT" ] && [ -s "$CERT_KEY" ] && [ -e "$CERT_CRT" ] && [ -e "$CERT_KEY" ]; then
+      if command -v openssl >/dev/null 2>&1; then
+        cert_text=$(openssl x509 -in "$CERT_CRT" -noout -subject -ext subjectAltName 2>/dev/null || openssl x509 -in "$CERT_CRT" -noout -subject 2>/dev/null)
+        case "$cert_text" in *"$ym"*) echo "域名证书已就绪：$ym（$CERT_DIR）"; return 0;; esac
+      fi
+    fi
+    [ "$waited" -eq 0 ] && echo "等待 Caddy 域名证书就绪：$ym（最长 300 秒，每 15 秒检查一次，目录 $CERT_DIR）"
+    sleep 15
+    waited=$((waited + 15))
+  done
+  echo "域名证书超时未就绪：$ym，300 秒后回落自签证书"
+  return 1
+}
 export argo=${argo:-''}
 export ARGO_DOMAIN=${agn:-''}
 export ARGO_AUTH=${agk:-''}
@@ -70,7 +94,7 @@ echo "更新Xray或Singbox内核命令：agsbx upx或ups 【或者】 主脚本 
 echo "重启脚本命令：agsbx res 【或者】 主脚本 res"
 echo "卸载脚本命令：agsbx del 【或者】 主脚本 del"
 echo "双栈VPS显示IPv4/IPv6节点配置命令：ippz=4或6 agsbx list 【或者】 ippz=4或6 主脚本 list"
-echo "申请本地IP域名证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)"
+echo "域名证书：由 Caddy（Cloudflare DNS 验证）申请，固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储）"
 echo "---------------------------------------------------------"
 echo
 }
@@ -569,7 +593,7 @@ cat > "$HOME/agsbx/sb.json" <<EOF
   "inbounds": [
 EOF
 insuuid
-if [ -s "/root/ygkkkca/private.key" ] && [ -n "$nvp" ]; then
+if [ "$domain_cert_ready" = "1" ] && [ -n "$nvp" ]; then
 nvp=nvpt
 if [ -z "$port_nv" ] && [ ! -e "$HOME/agsbx/port_nv" ]; then
 port_nv=$(shuf -i 10000-65535 -n 1)
@@ -593,8 +617,8 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
         ],
         "tls": {
             "enabled": true,
-            "certificate_path": "/root/ygkkkca/cert.crt",
-            "key_path": "/root/ygkkkca/private.key"
+            "certificate_path": "$CERT_CRT",
+            "key_path": "$CERT_KEY"
         }
     },
 EOF
@@ -1259,7 +1283,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -1409,8 +1433,8 @@ add=$server_ip
 jhins=1
 msins=true
 else
-sni=$(cat /root/ygkkkca/ca.log 2>/dev/null)
-add=$(cat /root/ygkkkca/ca.log 2>/dev/null)
+sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)
+add=$(cat "$HOME/agsbx/ym" 2>/dev/null)
 jhins=0
 msins=false
 fi
@@ -1501,7 +1525,7 @@ clxcpt1(){
 echo "- ${sxname}Xhttp-TCP-$hostname"
 }
 }
-if ! grep -A 26 'xhttp-h23' "$HOME/agsbx/xr.json" | grep -q 'ygkkkca' >/dev/null 2>&1; then
+if ! grep -A 26 'xhttp-h23' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert' >/dev/null 2>&1; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 echo "💣【 Vless-xhttp-tls-TCP 】节点信息如下："
 vl_xc2_link="vless://$uuid@$add:$port_xc?encryption=none&security=tls&sni=$sni&insecure=0&allowInsecure=0&hpkp=$sha&pcs=$sha&type=xhttp&path=$uuid-xc&mode=auto#${sxname}Vless-xhttp-tls-TCP-$hostname"
@@ -1586,7 +1610,7 @@ fi
 if grep xhttp-h3 "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-tls-UDP 】节点信息如下："
 port_xu=$(cat "$HOME/agsbx/port_xu")
-if ! grep -A 26 'xhttp-h3' "$HOME/agsbx/xr.json" | grep -q 'ygkkkca' >/dev/null 2>&1; then
+if ! grep -A 26 'xhttp-h3' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert' >/dev/null 2>&1; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
 vl_xu_link="vless://$uuid@$add:$port_xu?encryption=none&security=tls&sni=$sni&alpn=h3&insecure=0&allowInsecure=0&hpkp=$sha&pcs=$sha&type=xhttp&path=$uuid-xu&mode=auto#${sxname}Vless-xhttp-tls-UDP-$hostname"
@@ -1791,10 +1815,10 @@ fi
 if grep naive-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Naiveproxy 】节点信息如下："
 port_nv=$(cat "$HOME/agsbx/port_nv")
-nv1_link="naive+https://$uuid:$uuid@$(cat /root/ygkkkca/ca.log 2>/dev/null):$port_nv?security=tls&sni=$(cat /root/ygkkkca/ca.log 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h2-$hostname"
-nv2_link="naive+quic://$uuid:$uuid@$(cat /root/ygkkkca/ca.log 2>/dev/null):$port_nv?congestion_control=bbr&security=tls&sni=$(cat /root/ygkkkca/ca.log 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h3-$hostname"
-nv3_link="http2://$uuid:$uuid@$(cat /root/ygkkkca/ca.log 2>/dev/null):$port_nv?security=tls&sni=$(cat /root/ygkkkca/ca.log 2>/dev/null)&insecure=0&allowInsecure=0&padding=1&tfo=1#${sxname}naive-h2-$hostname"
-nv4_link="http3://$uuid:$uuid@$(cat /root/ygkkkca/ca.log 2>/dev/null):$port_nv?security=tls&sni=$(cat /root/ygkkkca/ca.log 2>/dev/null)&insecure=0&allowInsecure=0&padding=1&tfo=1#${sxname}naive-h3-$hostname"
+nv1_link="naive+https://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h2-$hostname"
+nv2_link="naive+quic://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?congestion_control=bbr&security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h3-$hostname"
+nv3_link="http2://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0&padding=1&tfo=1#${sxname}naive-h2-$hostname"
+nv4_link="http3://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0&padding=1&tfo=1#${sxname}naive-h3-$hostname"
 echo "$nv1_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$nv2_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$nv3_link" >> "$HOME/agsbx/jhsub.txt"
@@ -1812,7 +1836,7 @@ cat <<EOF
          {
             "type": "naive",
             "tag": "${sxname}naive-h3-$hostname",
-            "server": "$(cat /root/ygkkkca/ca.log 2>/dev/null)",
+            "server": "$(cat "$HOME/agsbx/ym" 2>/dev/null)",
             "server_port": $port_nv,
             "username": "$uuid",
             "password": "$uuid",
@@ -1822,13 +1846,13 @@ cat <<EOF
             "tls": {
                 "enabled": true,
                 "insecure": false,
-                "server_name": "$(cat /root/ygkkkca/ca.log 2>/dev/null)"
+                "server_name": "$(cat "$HOME/agsbx/ym" 2>/dev/null)"
             }
          },
 		 {
             "type": "naive",
             "tag": "${sxname}naive-h2-$hostname",
-            "server": "$(cat /root/ygkkkca/ca.log 2>/dev/null)",
+            "server": "$(cat "$HOME/agsbx/ym" 2>/dev/null)",
             "server_port": $port_nv,
             "username": "$uuid",
             "password": "$uuid",
@@ -1837,7 +1861,7 @@ cat <<EOF
             "tls": {
                 "enabled": true,
                 "insecure": false,
-                "server_name": "$(cat /root/ygkkkca/ca.log 2>/dev/null)"
+                "server_name": "$(cat "$HOME/agsbx/ym" 2>/dev/null)"
             }
          },
 EOF
@@ -1935,7 +1959,7 @@ echo "\"${sxname}any-reality-$hostname\","
 fi
 if grep -q 'hy2-sb' "$HOME/agsbx/sb.json" >/dev/null 2>&1 || grep -q 'hy2-xr' "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Hysteria2 】节点信息如下："
-if { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'hy2-sb' "$HOME/agsbx/sb.json" && ! grep -A 14 'hy2-sb' "$HOME/agsbx/sb.json" | grep -q 'ygkkkca'; } || { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'hy2-xr' "$HOME/agsbx/xr.json" && ! grep -A 20 'hy2-xr' "$HOME/agsbx/xr.json" | grep -q 'ygkkkca'; }; then
+if { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'hy2-sb' "$HOME/agsbx/sb.json" && ! grep -A 14 'hy2-sb' "$HOME/agsbx/sb.json" | grep -q 'argosbx/cert'; } || { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'hy2-xr' "$HOME/agsbx/xr.json" && ! grep -A 20 'hy2-xr' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert'; }; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
 port_hy2=$(cat "$HOME/agsbx/port_hy2")
@@ -2675,14 +2699,22 @@ SHA256=$(openssl x509 -in $HOME/agsbx/cert.crt -outform DER | sha256sum | awk '{
 echo "$SHA256" > "$HOME/agsbx/SHA256.txt"
 fi
 #fi
-if [ -n "$alns" ] && [ ! -s "/root/ygkkkca/private.key" ]; then
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
+domain_cert_ready=0
+if [ -n "$ym" ]; then
+  mkdir -p "$CERT_DIR"
+  echo "$ym" > "$HOME/agsbx/ym"
+  echo "域名证书来源：Caddy（Cloudflare DNS 验证），固定目录 $CERT_DIR"
+  if wait_domain_cert; then
+    domain_cert_ready=1
+  fi
+elif [ -n "$alns" ]; then
+  echo "已设置域名证书模式但未提供节点域名 ym，无法使用 Caddy 域名证书，回落自签证书"
 fi
 echo
-if [ -n "$alns" ] && [ -s "/root/ygkkkca/private.key" ]; then
-certificateHTA="/root/ygkkkca/cert.crt"
-keyHTA="/root/ygkkkca/private.key"
-echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"
+if [ "$domain_cert_ready" = "1" ]; then
+certificateHTA="$CERT_CRT"
+keyHTA="$CERT_KEY"
+echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用 Caddy 域名证书的TLS"
 else
 certificateHTA="$HOME/agsbx/cert.crt"
 keyHTA="$HOME/agsbx/private.key"
