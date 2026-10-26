@@ -1,0 +1,15 @@
+        <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后 TLS 协议用域名地址 + Caddy 证书，留空则用 IP / 自签；Reality 的 SNI 仍用 reym"/></div>
+        <div class="row"><label>证书验证方式 <span class="pill">certmode</span></label>
+          <select id="certmode">
+            <option value="">默认 自动（未代理用 HTTP，已代理/Argo 用 DNS）</option>
+            <option value="http">HTTP 验证（Caddy 监听 80/443）</option>
+            <option value="dns">DNS 验证（需 Cloudflare API + DNS 插件 Caddy）</option>
+          </select>
+        </div>
+        <div class="row"><label>证书来源 <span class="pill">certsrc</span></label>
+          <select id="certsrc">
+            <option value="">默认 自动（低内存走 acme，否则走 Caddy）</option>
+            <option value="caddy">Caddy（需反代、内存够）</option>
+            <option value="acme">acme.sh（低内存、只要证书）</option>
+          </select>
+        </div>

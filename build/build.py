@@ -3,7 +3,7 @@
 
 Usage (from repo root):
     python3 build/build.py
-Output: argosbx.sh (generated, do NOT edit by hand)
+Output: argosbx.sh and index.html (generated, do NOT edit by hand)
 
 Rules:
 - upstream/argosbx.sh is pristine upstream, never edited by hand.
@@ -42,6 +42,79 @@ def insert_after(t, anchor, text, name):
         print(f"BUILD FAIL: anchor missing: {name}", file=sys.stderr)
         sys.exit(1)
     return t.replace(anchor, anchor + text, 1)
+
+def build_index():
+    # Upstream index.html is CRLF; private built file is LF (browsers
+    # accept both, and all private edits were made in LF). Normalize
+    # first, then apply patches, so the built file matches private LF.
+    h = read("upstream/index.html").replace("\r\n", "\n")
+    cert_ui = read("modules/index-cert.html")
+    egress_ui = read("modules/index-egress.html")
+    h = replace(h, "<title>ArgoSBX一键SSH命令生成器-甬哥ygkkk</title>",
+                "<title>ArgoSBX一键SSH命令生成器-Vincent</title>", "index-title", 1)
+    upstream_header = """        甬哥Github项目：
+        <a href="https://github.com/yonggekkk" target="_blank">github.com/yonggekkk</a><br>
+        甬哥Blogger博客：
+        <a href="https://ygkkk.blogspot.com" target="_blank">ygkkk.blogspot.com</a><br>
+        甬哥YouTube频道：
+        <a href="https://www.youtube.com/@ygkkk" target="_blank">www.youtube.com/@ygkkk</a><br>
+        甬哥最新动态推特X：
+        <a href="https://x.com/ygkkkg" target="_blank">x.com/ygkkkg</a><br>"""
+    private_header = """        Vincent 的私人版本项目：
+        <a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a><br>"""
+    h = replace(h, upstream_header, private_header, "index-header", 1)
+    h = insert_after(h, '        <div class="row"><label>Reality 域名', cert_ui, "index-cert-ui") if False else h
+    # Insert cert UI before reym row (anchor is the reym row start)
+    if '        <div class="row"><label>Reality 域名' not in h:
+        print("BUILD FAIL: anchor missing: index-cert-ui", file=sys.stderr); sys.exit(1)
+    h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
+    h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
+                '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为 Caddy 域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
+    if '        <div class="row"><label>IPv4/IPv6 配置导出' not in h:
+        print("BUILD FAIL: anchor missing: index-egress-ui", file=sys.stderr); sys.exit(1)
+    h = h.replace('        <div class="row"><label>IPv4/IPv6 配置导出', egress_ui + '        <div class="row"><label>IPv4/IPv6 配置导出', 1)
+    h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
+                '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
+    h = replace(h, 'Acme-yg域名IP证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)</a></p>',
+                '        <p>域名证书：由 Caddy 申请（自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode），固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
+    h = replace(h, "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
+                "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-curl", 1)
+    h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
+                "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
+    h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules'];", "index-optids", 1)
+    h = replace(h, "    document.getElementById('uuid').value = '';",
+                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';", "index-reset-cert", 1)
+    h = replace(h, "    document.getElementById('name').value = '';",
+                "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';", "index-reset-egress", 1)
+    h = replace(h, """  generateUuidBtn.addEventListener('click', () => {
+    uuidInput.value = crypto.randomUUID();
+    render();
+  });""",
+                """  generateUuidBtn.addEventListener('click', () => {
+    uuidInput.value = crypto.randomUUID();
+    render();
+  });
+  ['egress_nodes', 'egress_bind', 'egress_rules'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', render);
+  });""", "index-egress-listeners", 1)
+    h = replace(h, """    optIds.forEach(id => {
+      const el = document.getElementById(id);
+      const v = (el.value || '').trim();""",
+                """    optIds.forEach(id => {
+      const el = document.getElementById(id);
+      let v = (el.value || '').trim();
+      if (id === 'egress_nodes' || id === 'egress_rules') {
+        v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
+      }""", "index-collect-egress", 1)
+    h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+    lines = h.split("\n", 1)
+    out = lines[0] + "\n<!-- GENERATED BY build/build.py - DO NOT EDIT BY HAND - sources: upstream/index.html + modules/index-*.html -->\n" + lines[1]
+    (ROOT / "index.html").write_text(out)
+    print(f"Built index.html: {len(out)} bytes, {out.count(chr(10))} lines")
+
 
 def main():
     t = read("upstream/argosbx.sh")
@@ -127,6 +200,7 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     out = lines[0] + "\n# GENERATED BY build/build.py - DO NOT EDIT BY HAND - sources: upstream/argosbx.sh + modules/*.sh\n" + lines[1]
     (ROOT / "argosbx.sh").write_text(out)
     print(f"Built argosbx.sh: {len(out)} bytes, {out.count(chr(10))} lines")
+    build_index()
 
 if __name__ == "__main__":
     main()
