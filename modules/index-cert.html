@@ -1,4 +1,4 @@
-        <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后 TLS 协议用域名地址 + Caddy 证书，留空则用 IP / 自签；Reality 的 SNI 仍用 reym"/></div>
+        <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后各协议地址优先用该域名（TLS 仍按证书就绪切换，Reality SNI 仍用 reym），留空则用 IP"/></div>
         <div class="row"><label>证书验证方式 <span class="pill">certmode</span></label>
           <select id="certmode">
             <option value="">默认 自动（未代理用 HTTP，已代理/Argo 用 DNS）</option>

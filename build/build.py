@@ -192,6 +192,44 @@ def main():
     t = replace(t, '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n      {\n        "ip_cidr": [ ${sip} ],',
                 '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n${egress_sb_rules}      {\n        "ip_cidr": [ ${sip} ],', "sb-routing-hook", 1)
 
+    # --- Reality address: domain (ym) when set, IP otherwise; SNI stays reym ---
+    reality_addr = read("modules/reality-addr.sh")
+    t = replace(t, 'ym_vl_re=$(cat "$HOME/agsbx/ym_vl_re" 2>/dev/null)\nif [ -e "$HOME/agsbx/xray" ]; then',
+                'ym_vl_re=$(cat "$HOME/agsbx/ym_vl_re" 2>/dev/null)\n' + reality_addr + 'if [ -e "$HOME/agsbx/xray" ]; then', "reality-addr-insert", 1)
+    t = replace(t, 'vl_xh_link="vless://$uuid@$server_ip:$port_xh?',
+                'vl_xh_link="vless://$uuid@$reality_addr:$port_xh?', "reality-xhttp-link", 1)
+    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?',
+                'vl_link="vless://$uuid@$reality_addr:$port_vl_re?', "reality-tcp-link", 1)
+    t = replace(t, 'ar_link="anytls://$uuid@$server_ip:$port_ar?',
+                'ar_link="anytls://$uuid@$reality_addr:$port_ar?', "reality-any-link", 1)
+    # sing-box client config for vless-reality (sbvlpt): server field only in that function
+    t = replace(t, '      "tag": "${sxname}vless-$hostname",\n      "server": "$server_ip",',
+                '      "tag": "${sxname}vless-$hostname",\n      "server": "$reality_addr",', "reality-sb-config", 1)
+    # clash client config for vless-reality (clvlpt)
+    t = replace(t, '- name: ${sxname}vless-reality-vision-$hostname               \n  type: vless\n  server: $server_ip',
+                '- name: ${sxname}vless-reality-vision-$hostname               \n  type: vless\n  server: $reality_addr', "reality-clash-config", 1)
+    # sing-box client config for any-reality (sbarpt)
+    t = replace(t, '        "tag": "${sxname}any-reality-$hostname",\n        "server": "$server_ip",',
+                '        "tag": "${sxname}any-reality-$hostname",\n        "server": "$reality_addr",', "reality-any-sb-config", 1)
+
+    # --- non-TLS protocols: domain address (ym) when set, IP otherwise ---
+    t = replace(t, 'vl_vx_link="vless://$uuid@$server_ip:$port_vx?',
+                'vl_vx_link="vless://$uuid@$domain_addr:$port_vx?', "plain-xhttp-enc-link", 1)
+    t = replace(t, 'vl_vw_link="vless://$uuid@$server_ip:$port_vw?',
+                'vl_vw_link="vless://$uuid@$domain_addr:$port_vw?', "plain-ws-enc-link", 1)
+    t = replace(t, '2022-blake3-aes-128-gcm:$sskey@$server_ip:$port_ss',
+                '2022-blake3-aes-128-gcm:$sskey@$domain_addr:$port_ss', "plain-ss-link", 1)
+    t = replace(t, '\\\"add\\\": \\\"$server_ip\\\", \\\"port\\\": \\\"$port_vm_ws\\\"',
+                '\\\"add\\\": \\\"$domain_addr\\\", \\\"port\\\": \\\"$port_vm_ws\\\"', "plain-vm-link", 1)
+    t = replace(t, '      "tag": "${sxname}Shadowsocks-2022-$hostname",\n       "server": "$server_ip",',
+                '      "tag": "${sxname}Shadowsocks-2022-$hostname",\n       "server": "$domain_addr",', "plain-ss-sb-config", 1)
+    t = replace(t, '- name: "${sxname}Shadowsocks-2022-$hostname"\n  type: ss\n  server: $server_ip',
+                '- name: "${sxname}Shadowsocks-2022-$hostname"\n  type: ss\n  server: $domain_addr', "plain-ss-clash-config", 1)
+    t = replace(t, '            "server": "$server_ip",\n            "server_port": $port_vm_ws,',
+                '            "server": "$domain_addr",\n            "server_port": $port_vm_ws,', "plain-vm-sb-config", 1)
+    t = replace(t, '- name: ${sxname}vmess-ws-$hostname                         \n  type: vmess\n  server: $server_ip',
+                '- name: ${sxname}vmess-ws-$hostname                         \n  type: vmess\n  server: $domain_addr', "plain-vm-clash-config", 1)
+
     # --- cert main block replacement (upstream acme-yg block -> private cert block) ---
     upstream_block = '''if [ -n "$alns" ] && [ ! -s "/root/ygkkkca/private.key" ]; then
 bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)

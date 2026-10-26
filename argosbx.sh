@@ -1742,6 +1742,19 @@ case "$server_ip" in
 esac
 echo
 ym_vl_re=$(cat "$HOME/agsbx/ym_vl_re" 2>/dev/null)
+# Domain address for protocols that do not use a domain certificate:
+# Reality (verified by public key, not by certificate) and the non-TLS
+# protocols (xhttp-enc, ws-enc, shadowsocks-2022, vmess-ws, which have
+# no SNI/certificate verification at all).
+# domain_addr = ym when set, otherwise the server IP. ym is read from
+# $HOME/agsbx/ym first (saved at install time, so `list` later also
+# uses the domain), then from the $ym variable.
+# reality_addr is the same value, kept as an alias for clarity.
+# TLS protocols are NOT changed here: they keep using $add/$sni, which
+# only switch to ym when the domain certificate is ready.
+domain_addr="$server_ip"
+if [ -s "$HOME/agsbx/ym" ]; then domain_addr=$(cat "$HOME/agsbx/ym" 2>/dev/null); elif [ -n "$ym" ]; then domain_addr="$ym"; fi
+reality_addr="$domain_addr"
 if [ -e "$HOME/agsbx/xray" ]; then
 private_key_x=$(cat "$HOME/agsbx/xrk/private_key" 2>/dev/null)
 public_key_x=$(cat "$HOME/agsbx/xrk/public_key" 2>/dev/null)
@@ -1757,7 +1770,7 @@ fi
 if grep xhttp-reality "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-reality-enc 】支持ENC加密，节点信息如下："
 port_xh=$(cat "$HOME/agsbx/port_xh")
-vl_xh_link="vless://$uuid@$server_ip:$port_xh?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=xhttp&path=$uuid-xh&mode=auto#${sxname}vl-xhttp-reality-enc-$hostname"
+vl_xh_link="vless://$uuid@$reality_addr:$port_xh?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=xhttp&path=$uuid-xh&mode=auto#${sxname}vl-xhttp-reality-enc-$hostname"
 echo "$vl_xh_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_xh_link"
 echo
@@ -1765,7 +1778,7 @@ fi
 if grep vless-xhttp "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-enc 】支持ENC加密，节点信息如下："
 port_vx=$(cat "$HOME/agsbx/port_vx")
-vl_vx_link="vless://$uuid@$server_ip:$port_vx?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-$hostname"
+vl_vx_link="vless://$uuid@$domain_addr:$port_vx?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-$hostname"
 echo "$vl_vx_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vx_link"
 echo
@@ -1781,7 +1794,7 @@ fi
 if grep vless-ws "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-ws-enc 】支持ENC加密，节点信息如下："
 port_vw=$(cat "$HOME/agsbx/port_vw")
-vl_vw_link="vless://$uuid@$server_ip:$port_vw?encryption=$enkey&flow=xtls-rprx-vision&type=ws&path=$uuid-vw#${sxname}vl-ws-enc-$hostname"
+vl_vw_link="vless://$uuid@$domain_addr:$port_vw?encryption=$enkey&flow=xtls-rprx-vision&type=ws&path=$uuid-vw#${sxname}vl-ws-enc-$hostname"
 echo "$vl_vw_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vw_link"
 echo
@@ -1939,7 +1952,7 @@ fi
 if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
 port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
-vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
+vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
 echo "$vl_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_link"
 echo
@@ -1948,7 +1961,7 @@ cat <<EOF
     {
       "type": "vless",
       "tag": "${sxname}vless-$hostname",
-      "server": "$server_ip",
+      "server": "$reality_addr",
       "server_port": $port_vl_re,
       "uuid": "$uuid",
       "flow": "xtls-rprx-vision",
@@ -1975,7 +1988,7 @@ clvlpt(){
 cat <<EOF
 - name: ${sxname}vless-reality-vision-$hostname               
   type: vless
-  server: $server_ip                          
+  server: $reality_addr                          
   port: $port_vl_re                                
   uuid: $uuid   
   network: tcp
@@ -1996,7 +2009,7 @@ fi
 if grep ss-2022 "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Shadowsocks-2022 】节点信息如下："
 port_ss=$(cat "$HOME/agsbx/port_ss")
-ss_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$server_ip:$port_ss" | base64 -w0)#${sxname}Shadowsocks-2022-$hostname"
+ss_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$port_ss" | base64 -w0)#${sxname}Shadowsocks-2022-$hostname"
 echo "$ss_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ss_link"
 echo
@@ -2005,7 +2018,7 @@ cat <<EOF
 {
        "type": "shadowsocks",
        "tag": "${sxname}Shadowsocks-2022-$hostname",
-       "server": "$server_ip",
+       "server": "$domain_addr",
        "server_port": $port_ss,
        "method": "2022-blake3-aes-128-gcm",
        "password": "$sskey",
@@ -2023,7 +2036,7 @@ clsspt(){
 cat <<EOF
 - name: "${sxname}Shadowsocks-2022-$hostname"
   type: ss
-  server: $server_ip
+  server: $domain_addr
   port: $port_ss
   cipher: 2022-blake3-aes-128-gcm
   password: "$sskey"
@@ -2039,14 +2052,14 @@ fi
 if grep vmess-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Vmess-ws 】节点信息如下："
 port_vm_ws=$(cat "$HOME/agsbx/port_vm_ws")
-vm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-$hostname\", \"add\": \"$server_ip\", \"port\": \"$port_vm_ws\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"www.bing.com\", \"path\": \"/$uuid-vm\", \"tls\": \"\"}" | base64 -w0)"
+vm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-$hostname\", \"add\": \"$domain_addr\", \"port\": \"$port_vm_ws\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"www.bing.com\", \"path\": \"/$uuid-vm\", \"tls\": \"\"}" | base64 -w0)"
 echo "$vm_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vm_link"
 echo
 sbvmpt(){
 cat <<EOF
 {
-            "server": "$server_ip",
+            "server": "$domain_addr",
             "server_port": $port_vm_ws,
             "tag": "${sxname}vmess-$hostname",
             "tls": {
@@ -2080,7 +2093,7 @@ clvmpt(){
 cat <<EOF
 - name: ${sxname}vmess-ws-$hostname                         
   type: vmess
-  server: $server_ip                        
+  server: $domain_addr                        
   port: $port_vm_ws                                     
   uuid: $uuid       
   alterId: 0
@@ -2217,7 +2230,7 @@ fi
 if grep anyreality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Any-Reality 】节点信息如下："
 port_ar=$(cat "$HOME/agsbx/port_ar")
-ar_link="anytls://$uuid@$server_ip:$port_ar?security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_s&sid=$short_id_s&type=tcp&headerType=none#${sxname}any-reality-$hostname"
+ar_link="anytls://$uuid@$reality_addr:$port_ar?security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_s&sid=$short_id_s&type=tcp&headerType=none#${sxname}any-reality-$hostname"
 echo "$ar_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ar_link"
 echo
@@ -2226,7 +2239,7 @@ cat <<EOF
     {
         "type": "anytls",
         "tag": "${sxname}any-reality-$hostname",
-        "server": "$server_ip",
+        "server": "$reality_addr",
         "server_port": $port_ar,
         "password": "$uuid",
         "idle_session_check_interval": "30s",
