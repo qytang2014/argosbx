@@ -85,6 +85,32 @@ def build_index():
                 "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];", "index-optids", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
                 "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
+    # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
+    # Listing vlpt under "Xray可选协议" was misleading once vlpt became
+    # dual-support: it is not Xray-only any more. The new first group holds
+    # vlpt + its kernel select side by side (grid label + select, same as
+    # the label + port rows), so the change is visible where the user
+    # actually picks protocols. The select keeps id vlpt_kernel, so optIds,
+    # reset, dynamic disabling and paste-back all keep working unchanged,
+    # and there is exactly one such element (it is NOT also in the global
+    # config card any more).
+    h = replace(h, '            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">\n',
+                '', "index-vlpt-out-of-xray", 1)
+    h = replace(h, '        <div class="protocol-group separator">\n          <h3>Xray可选协议：</h3>',
+                '''        <div class="protocol-group separator">
+          <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
+          <div class="protocol-grid">
+            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
+            <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
+            <select id="vlpt_kernel">
+              <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
+              <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
+              <option value="sb">强制 Sing-box</option>
+            </select>
+          </div>
+        </div>
+        <div class="protocol-group separator">
+          <h3>Xray可选协议：</h3>''', "index-vlpt-dual-group", 1)
     h = replace(h, """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';""",

@@ -25,7 +25,14 @@ done
 grep -Fq 'vlpt_on" != "sb"' "$C" || { echo "FAIL: built container missing vlpt_on sb branch"; FAIL=1; }
 grep -Fq 'vlpt_on" != "xray"' "$C" || { echo "FAIL: built container missing vlpt_on xray branch"; FAIL=1; }
 grep -Fq 'id="vlpt_kernel"' index.html || { echo "FAIL: generator missing vlpt_kernel select"; FAIL=1; }
+[ "$(grep -c 'id="vlpt_kernel"' index.html)" = "1" ] || { echo "FAIL: generator has duplicate vlpt_kernel elements"; FAIL=1; }
 grep -Fq '<option value="xray">强制 Xray' index.html || { echo "FAIL: generator missing vlpt_kernel xray option"; FAIL=1; }
+# vlpt must NOT sit in the Xray group any more: it lives in its own
+# dual-kernel group, which comes first, before the Xray group.
+grep -Fq '双内核可选协议' index.html || { echo "FAIL: generator missing dual-kernel group"; FAIL=1; }
+awk '/双内核可选协议/,/Xray可选协议/' index.html | grep -Fq 'data-proto="vlpt"' || { echo "FAIL: vlpt not in dual-kernel group"; FAIL=1; }
+awk '/双内核可选协议/,/Xray可选协议/' index.html | grep -Fq 'id="vlpt_kernel"' || { echo "FAIL: vlpt_kernel not next to vlpt"; FAIL=1; }
+awk '/Xray可选协议/,/Singbox可选协议/' index.html | grep -Fq 'data-proto="vlpt"' && { echo "FAIL: vlpt still listed under Xray group"; FAIL=1; }
 grep -Fq "vlpt_kernel" modules/vars.sh || { echo "FAIL: vars_save missing vlpt_kernel"; FAIL=1; }
 grep -Fq "vlpt_kernel" modules/container-vars.sh || { echo "FAIL: container_vars_save missing vlpt_kernel"; FAIL=1; }
 # xhpt link still uses the xray keypair (only vlpt display switches)
