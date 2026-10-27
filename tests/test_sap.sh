@@ -26,7 +26,7 @@ grep -q 'cf set-env "$APP_NAME" egress_nodes "$EGRESS_NODE"' sapsbx.sh || { echo
 grep -q 'cf set-env "$APP_NAME" egress_bind "$EGRESS_BIND"' sapsbx.sh || { echo "FAIL: cf set-env egress_bind"; FAIL=1; }
 grep -q 'cf set-env "$APP_NAME" egress_rules "$EGRESS_RULE"' sapsbx.sh || { echo "FAIL: cf set-env egress_rules"; FAIL=1; }
 # Private image, not upstream
-grep -q 'cf push "$APP_NAME" --docker-image qytang2014/argosbx' sapsbx.sh || { echo "FAIL: cf push image not private"; FAIL=1; }
+grep -q 'cf push "$APP_NAME" --docker-image ghcr.io/qytang2014/argosbx' sapsbx.sh || { echo "FAIL: cf push image not private"; FAIL=1; }
 grep -q 'ygkkk/argosbx' sapsbx.sh && { echo "FAIL: sapsbx.sh still references upstream image"; FAIL=1; }
 # sap.sh prompts for new vars, name-based sed (not line-number)
 for var in YMS EGRESS_NODES EGRESS_BINDS EGRESS_RULES; do

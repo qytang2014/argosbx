@@ -56,11 +56,11 @@ VPS服务器方式脚本地址：（再次进入快捷方式```bash saph.sh```�
 | AGKS | 单个或多个argo固定隧道token | 可选，留空填```no```，则启用临时隧道  | 使用argo固定域名时必填 |
 | DELAPP | 单个或多个应用程序名app | 优先独立执行 | 删除指定应用程序app，github或docker执行后务必还原留空状态 |
 | YMS | 单个或多个节点域名 ym | 可选，个别账号不启用填```no``` | SAP 容器不发证，ym 只用于 Reality / 非 TLS 链接的域名地址，不产生域名证书 |
-| EGRESS_NODES | 单个或多个出口节点 | 可选，个别账号不启用填```no``` | 单账号内用 ```;``` 分隔、不能含空格；仅私有容器镜像（qytang2014/argosbx）生效 |
+| EGRESS_NODES | 单个或多个出口节点 | 可选，个别账号不启用填```no``` | 单账号内用 ```;``` 分隔、不能含空格；仅私有容器镜像（ghcr.io/qytang2014/argosbx）生效 |
 | EGRESS_BINDS | 单个或多个出口绑定 IP | 可选，个别账号不启用填```no``` | 单账号内用 ```,``` 分隔本地 IP |
 | EGRESS_RULES | 单个或多个分流规则 | 可选，个别账号不启用填```no``` | 单账号内用 ```;``` 分隔、不能含空格；geo 规则每次容器启动都会重新下载数据库 |
 
-> 私有镜像：SAP 部署用的容器镜像已改为 ```qytang2014/argosbx```（见 ```container/README.md``` 的构建推送步骤，镜像必须公开，且容器模块一改就要重新打镜像、重新推送，SAP 重新 restage 才能生效）。
+> 私有镜像：SAP 部署用的容器镜像已改为 ```ghcr.io/qytang2014/argosbx```，只推 GHCR（见 ```container/README.md``` 和 ```.github/workflows/container-image.yml```；workflow 文件需手动上传一次，之后推送代码自动构建。镜像必须公开：GHCR 包默认继承私有仓库的可见性，第一次推送后要在 GHCR 包设置里改为公开，否则 SAP 拉不下来。容器模块一改，workflow 会自动重新打镜像，SAP 重新 restage 才能生效）。
 
 
 ---------------------------------------

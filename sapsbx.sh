@@ -256,7 +256,7 @@ for i in "${!CF_USERNAMES[@]}"; do
     fi
   else
     echo "🟡${APP_NAME} 未部署，开始部署……"
-    push_out="$(cf push "$APP_NAME" --docker-image qytang2014/argosbx -m 512M --health-check-type port 2>&1)"
+    push_out="$(cf push "$APP_NAME" --docker-image ghcr.io/qytang2014/argosbx -m 512M --health-check-type port 2>&1)"
     echo "$push_out"
     pushout
     if [ $? -ne 0 ]; then
