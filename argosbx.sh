@@ -720,7 +720,7 @@ ensure_caddy_download(){
   echo "预编译 Caddy 下载并替换成功"
   return 0
 }
-# Caddy 域名证书：固定目录 $HOME/agsbx/cert，内为指向 Caddy 证书存储的软链接。
+# 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时内为指向 Caddy 证书存储的软链接，acme 时直接安装到该目录）。
 # wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
 wait_domain_cert(){
   [ -n "$ym" ] || return 1
@@ -732,7 +732,7 @@ wait_domain_cert(){
         case "$cert_text" in *"$ym"*) echo "域名证书已就绪：$ym（$CERT_DIR）"; return 0;; esac
       fi
     fi
-    [ "$waited" -eq 0 ] && echo "等待 Caddy 域名证书就绪：$ym（最长 300 秒，每 15 秒检查一次，目录 $CERT_DIR）"
+    [ "$waited" -eq 0 ] && echo "等待域名证书就绪：$ym（最长 300 秒，每 15 秒检查一次，目录 $CERT_DIR）"
     sleep 15
     waited=$((waited + 15))
   done
@@ -4070,13 +4070,13 @@ if [ -n "$ym" ]; then
     cert_remove_watch
   fi
 elif [ -n "$alns" ]; then
-  echo "已设置域名证书模式但未提供节点域名 ym，无法使用 Caddy 域名证书，回落自签证书"
+  echo "已设置域名证书模式但未提供节点域名 ym，无法使用域名证书，回落自签证书"
 fi
 echo
 if [ "$domain_cert_ready" = "1" ]; then
 certificateHTA="$CERT_CRT"
 keyHTA="$CERT_KEY"
-echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用 Caddy 域名证书的TLS"
+echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用域名证书的TLS"
 else
 certificateHTA="$HOME/agsbx/selfsigned/cert.crt"
 keyHTA="$HOME/agsbx/selfsigned/private.key"

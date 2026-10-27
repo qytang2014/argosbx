@@ -46,6 +46,17 @@ for cls in [".egress-card", ".shortcut-commands-card", ".out"]:
     assert "grid-column: 1 / 3;" in m.group(0), f"FAIL: {cls} should span full width"
 assert "grid-row: 1 / 4" not in html, "FAIL: protocol card should no longer span 3 rows"
 assert ".grid-col, .egress-card, .shortcut-commands-card, .out" in html, "FAIL: mobile reset missing"
+# Cert wording: cert source is auto (acme on low memory, else
+# Caddy), so certmode/alns/footer must not assume Caddy only.
+assert "HTTP 验证（需 80 端口空闲）" in html, "FAIL: certmode http wording missing"
+assert "DNS 验证（需 Cloudflare API Token）" in html, "FAIL: certmode dns wording missing"
+assert "Caddy 监听 80/443" not in html, "FAIL: certmode should not assume Caddy"
+assert "DNS 插件 Caddy" not in html, "FAIL: certmode dns should not assume Caddy plugin"
+assert "为域名证书TLS，需配合节点域名 ym" in html, "FAIL: alns enabled wording missing"
+assert "Caddy 域名证书TLS" not in html, "FAIL: alns should not assume Caddy cert"
+assert "默认 关闭 (HY2/TUIC/Naive/Anytls/Xhttp-tls为自签证书TLS)" in html, "FAIL: alns closed should include Naive"
+assert "由证书来源申请" in html, "FAIL: footer should say cert source, not Caddy only"
+assert "由 Caddy 申请" not in html, "FAIL: footer should not assume Caddy only"
 # Every optId must have a matching element id in the page
 m = re.search(r"const optIds = \[([^\]]+)\]", html)
 assert m, "FAIL: optIds not found"

@@ -55,10 +55,10 @@ if [ -n "$ym" ]; then
     cert_remove_watch
   fi
 elif [ -n "$alns" ]; then
-  echo "已设置域名证书模式但未提供节点域名 ym，无法使用 Caddy 域名证书，回落自签证书"
+  echo "已设置域名证书模式但未提供节点域名 ym，无法使用域名证书，回落自签证书"
 fi
 echo
 if [ "$domain_cert_ready" = "1" ]; then
 certificateHTA="$CERT_CRT"
 keyHTA="$CERT_KEY"
-echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用 Caddy 域名证书的TLS"
+echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用域名证书的TLS"

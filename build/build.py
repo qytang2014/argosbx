@@ -69,7 +69,13 @@ def build_index():
         print("BUILD FAIL: anchor missing: index-cert-ui", file=sys.stderr); sys.exit(1)
     h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
     h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
-                '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为 Caddy 域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
+                '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
+    # alns closed option in upstream omits Naive while the enabled
+    # option includes it; align both, and drop the Caddy-only wording
+    # from the enabled option above (the cert may be Caddy-issued
+    # or acme-issued, both land in the same cert dir).
+    h = replace(h, '<option value="">默认 关闭 (HY2/TUIC/Anytls/Xhttp-tls为自签证书TLS)</option>',
+                '<option value="">默认 关闭 (HY2/TUIC/Naive/Anytls/Xhttp-tls为自签证书TLS)</option>', "index-alns-closed-naive", 1)
     # --- layout (user clarified 2026-10-27): left protocols, right
     # global/Argo/subscription, egress full width second row ---
     # Previously egress was inside outbound-warp, which made that
@@ -212,7 +218,7 @@ def build_index():
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
     h = replace(h, 'Acme-yg域名IP证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)</a></p>',
-                '        <p>域名证书：由 Caddy 申请（自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode），固定目录 $HOME/agsbx/cert（软链接指向 Caddy 证书存储），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
+                '        <p>域名证书：由证书来源申请（自动：低内存走 acme，否则走 Caddy；验证方式自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode/certsrc），固定目录 $HOME/agsbx/cert（Caddy 时为软链接指向 Caddy 证书存储，acme 时直接安装到该目录），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
     h = replace(h, "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-curl", 1)
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",

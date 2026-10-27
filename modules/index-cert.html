@@ -2,8 +2,8 @@
         <div class="row"><label>证书验证方式 <span class="pill">certmode</span></label>
           <select id="certmode">
             <option value="">默认 自动（未代理用 HTTP，已代理/Argo 用 DNS）</option>
-            <option value="http">HTTP 验证（Caddy 监听 80/443）</option>
-            <option value="dns">DNS 验证（需 Cloudflare API + DNS 插件 Caddy）</option>
+            <option value="http">HTTP 验证（需 80 端口空闲）</option>
+            <option value="dns">DNS 验证（需 Cloudflare API Token）</option>
           </select>
         </div>
         <div class="row"><label>证书来源 <span class="pill">certsrc</span></label>
