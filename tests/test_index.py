@@ -12,21 +12,28 @@ for needle in ["ArgoSBX一键SSH命令生成器-Vincent", "github.com/qytang2014
 # CURL/WGET must point to the private repo, not upstream
 assert "raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh" in html
 assert "raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh" not in html, "FAIL: index.html still points to upstream script URL"
-# Layout: egress is its own card (not inside global), subscription is
-# on the left, cards do not stretch, mobile truly stacks.
+# Layout (user clarified 2026-10-27): left protocols, right
+# global/Argo/subscription, egress full width second row, cards do
+# not stretch, mobile truly stacks.
 assert 'class="card egress-card"' in html, "FAIL: egress-card missing"
-egress_start = html.index('class="card egress-card"')
+proto_start = html.index('class="card protocol-port"')
+global_start = html.index('class="card outbound-warp"')
+argo_start = html.index('class="card argo-tunnel"')
 sub_start = html.index('class="card subscription-links"')
-assert egress_start < sub_start, "FAIL: egress card should come before subscription card in DOM"
-out_start = html.index('class="card outbound-warp"')
-out_end = html.index('</section>', out_start)
+egress_start = html.index('class="card egress-card"')
+assert proto_start < global_start < argo_start < sub_start < egress_start, "FAIL: DOM order should be protocols, global, Argo, subscription, egress"
+out_end = html.index('</section>', global_start)
 assert out_end < egress_start, "FAIL: egress should be outside outbound-warp"
 assert html.index('id="ippz"') < egress_start, "FAIL: ippz should stay in the global card"
 assert "align-items: start" in html, "FAIL: grid should align start, not stretch cards"
-for cls, col, row in [(".protocol-port", "1", "1"), (".egress-card", "1", "2"),
-                      (".subscription-links", "1", "3"), (".outbound-warp", "2", "1"),
-                      (".argo-tunnel", "2", "2")]:
-    m = re.search(rf"{re.escape(cls)} \{{[^}}]+\}}", html)
+for cls, col, row in [(".protocol-port", "1", "1"), (".outbound-warp", "2", "1"),
+                      (".argo-tunnel", "2", "2"), (".subscription-links", "2", "3"),
+                      (".egress-card", "1 / 3", "4"), (".shortcut-commands-card", "1 / 3", "5"),
+                      (".out", "1 / 3", "6")]:
+    # Main placement only: it starts at line start with 4 spaces.
+    # The mobile reset line lists several cards ending in ".out {",
+    # which a plain search would match first for .out.
+    m = re.search(rf"(?m)^    {re.escape(cls)} \{{[^}}]+\}}", html)
     assert m, f"FAIL: CSS for {cls} missing"
     assert f"grid-column: {col};" in m.group(0), f"FAIL: {cls} column should be {col}"
     assert f"grid-row: {row};" in m.group(0), f"FAIL: {cls} row should be {row}"

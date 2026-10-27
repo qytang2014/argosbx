@@ -70,22 +70,37 @@ def build_index():
     h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
     h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
                 '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为 Caddy 域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
-    # --- layout: egress out of the global card, into its own card ---
-    # Previously egress was inserted inside outbound-warp, before the
-    # ippz row, which made that card the tallest on the page and
-    # forced the left protocol card (spanning 3 rows) to stretch,
-    # leaving a large blank inside it. Now egress gets its own card,
-    # inserted after outbound-warp and before subscription-links, so
+    # --- layout (user clarified 2026-10-27): left protocols, right
+    # global/Argo/subscription, egress full width second row ---
+    # Previously egress was inside outbound-warp, which made that
+    # card the tallest and forced the left protocol card (spanning
+    # 3 rows) to stretch, leaving a large blank inside it. The first
+    # fix moved egress to the left, which left the right column
+    # short; the user then specified this layout, which they judge
+    # least empty on their screen: protocols alone on the left,
+    # global, Argo, then subscription stacked on the right, and
+    # egress as a full-width row below both. Upstream DOM order is
+    # protocols, global, subscription, Argo, shortcut, out, so swap
+    # subscription and Argo, then put egress after subscription, so
     # the DOM order (and the mobile stack order) is: protocols,
-    # global, egress, subscription, Argo, commands, output. The
-    # desktop placement below puts egress on the left, subscription
-    # also on the left, global and Argo on the right, regardless of
-    # DOM order. Field ids are unchanged, so collect/reset/dynamic
-    # disabling (all by id) keep working.
-    if '      <section class="card subscription-links">' not in h:
-        print("BUILD FAIL: anchor missing: index-egress-card", file=sys.stderr); sys.exit(1)
-    h = h.replace('      <section class="card subscription-links">',
-                  '      <section class="card egress-card">\n        <h2>外部出口与分流：</h2>\n' + egress_ui.rstrip("\n") + '\n      </section>\n\n      <section class="card subscription-links">', 1)
+    # global, Argo, subscription, egress, commands, output.
+    # Subscription is still before egress in reading order, but it
+    # sits at the bottom of the right column, directly above the
+    # full-width egress row, so the jump is short. Field ids are
+    # unchanged, so collect/reset/dynamic disabling (all by id)
+    # keep working.
+    if '      <section class="card subscription-links">' not in h or '      <section class="card argo-tunnel">' not in h:
+        print("BUILD FAIL: anchor missing: index-layout-swap", file=sys.stderr); sys.exit(1)
+    _sub_start = h.index('      <section class="card subscription-links">')
+    _sub_end = h.index('</section>', _sub_start) + len('</section>')
+    _argo_start = h.index('      <section class="card argo-tunnel">')
+    _argo_end = h.index('</section>', _argo_start) + len('</section>')
+    if not (_sub_start < _sub_end < _argo_start < _argo_end):
+        print("BUILD FAIL: anchor order: index-layout-swap", file=sys.stderr); sys.exit(1)
+    _sub_text = h[_sub_start:_sub_end]
+    _argo_text = h[_argo_start:_argo_end]
+    _egress_section = '      <section class="card egress-card">\n        <h2>外部出口与分流：</h2>\n' + egress_ui.rstrip("\n") + '\n      </section>'
+    h = h[:_sub_start] + _argo_text + '\n\n' + _sub_text + '\n\n' + _egress_section + h[_argo_end:]
     # --- layout CSS: no spanning, align start, mobile truly stacks ---
     # Root cause of the left blank: .protocol-port spanned rows 1-3,
     # so its height was the sum of the three right cards, not its own
@@ -105,7 +120,7 @@ def build_index():
                 """    .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto auto auto auto auto;
+      grid-template-rows: auto auto auto auto auto auto;
       gap: 20px;
       align-items: start;
     }""", "index-grid", 1)
@@ -157,25 +172,25 @@ def build_index():
       grid-column: 2;
       grid-row: 1;
     }
-    .egress-card {
-      grid-column: 1;
-      grid-row: 2;
-    }
-    .subscription-links {
-      grid-column: 1;
-      grid-row: 3;
-    }
     .argo-tunnel {
       grid-column: 2;
       grid-row: 2;
     }
-    .shortcut-commands-card {
+    .subscription-links {
+      grid-column: 2;
+      grid-row: 3;
+    }
+    .egress-card {
       grid-column: 1 / 3;
       grid-row: 4;
     }
-    .out {
+    .shortcut-commands-card {
       grid-column: 1 / 3;
       grid-row: 5;
+    }
+    .out {
+      grid-column: 1 / 3;
+      grid-row: 6;
     }""", "index-card-placement", 1)
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
