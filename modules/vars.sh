@@ -37,7 +37,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true

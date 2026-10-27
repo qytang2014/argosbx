@@ -82,9 +82,20 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'];", "index-optids", 1)
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];", "index-optids", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
-                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';", "index-reset-cert", 1)
+                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
+    h = replace(h, """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
+      reymInput.disabled = !isRealityEnabled;
+      if (!isRealityEnabled) reymInput.value = '';""",
+                """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
+      reymInput.disabled = !isRealityEnabled;
+      if (!isRealityEnabled) reymInput.value = '';
+      const vlptKernelSelect = document.getElementById('vlpt_kernel');
+      if (vlptKernelSelect) {
+        vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
+      }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
                 "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
     h = replace(h, """  generateUuidBtn.addEventListener('click', () => {
@@ -109,7 +120,7 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     h = replace(h, "      if (command === 'rep') {",
@@ -148,9 +159,69 @@ def main():
                      vars_mod + 'vars_merge "$1"\n', "vars-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
+                "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
     t = replace(t, 'export alns=\\"${alns}\\" ',
-                'export alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
+                'export alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" vlpt_kernel=\\"${vlpt_kernel}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
+
+    # --- vlpt dual-support (private): vlpt_kernel=auto/xray/sb ---
+    # vlpt_on is computed at the top of ins(), before the kernel branches:
+    #  explicit xray -> xray (old link kept, even if that forces dual kernels);
+    #  explicit sb   -> sb;
+    #  auto (default, incl. unset/invalid): xray if any xray-only protocol is
+    #  selected (xray is installed anyway, so moving vlpt would save nothing
+    #  and would break the link for no gain); sb if only sing-box protocols
+    #  are selected (the migration case: old vlpt-on-xray + sing-box install
+    #  becomes single sing-box, pbk/sid change, old link breaks by design);
+    #  otherwise (vlpt alone or vlpt + auto protocols only) xray, preserving
+    #  the current single-xray default. No backward-compat keep: unless
+    #  vlpt_kernel=xray is explicitly set, an old install is migrated.
+    vlpt_on = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+vlpt_on=""
+if [ -n "$vlp" ]; then
+  case "${vlpt_kernel:-auto}" in
+    xray) vlpt_on="xray" ;;
+    sb|singbox|sing-box) vlpt_on="sb" ;;
+    *)
+      if [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ]; then vlpt_on="xray";
+      elif [ "$nvp" = yes ] || [ "$tup" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || [ "$ssp" = yes ]; then vlpt_on="sb";
+      else vlpt_on="xray"; fi ;;
+  esac
+fi
+'''
+    t = replace(t, "ins(){\nif [ \"$nvp\" != yes ]",
+                "ins(){\n" + vlpt_on + "if [ \"$nvp\" != yes ]", "vlpt-on-compute", 1)
+    t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ]; then',
+                'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; then', "vlpt-ins-xray-only", 1)
+    t = replace(t, 'elif [ "$xhp" != yes ] && [ "$vlp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ]; then',
+                'elif [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ] && [ "$vlpt_on" != "xray" ]; then', "vlpt-ins-sb-only", 1)
+    t = replace(t, 'xhp="xhptargo"; vlp="vlptargo"; vxp="vxptargo"; vwp="vwptargo"; xup="xuptargo"; xcp="xcptargo"',
+                'xhp="xhptargo"; [ "$vlpt_on" = "sb" ] || vlp="vlptargo"; vxp="vxptargo"; vwp="vwptargo"; xup="xuptargo"; xcp="xcptargo"', "vlpt-sb-only-targo", 1)
+    # installxray vlpt block: only install on xray when vlpt_on=xray; if vlpt
+    # is selected but on sb, leave vlp alone (installsb already set it to
+    # vlpt); if vlpt is not selected, set the recovery dummy as before.
+    t = replace(t, 'if [ -n "$vlp" ]; then\nvlp=vlpt\n',
+                'if [ -n "$vlp" ] && [ "$vlpt_on" = "xray" ]; then\nvlp=vlpt\n', "vlpt-xray-guard", 1)
+    t = replace(t, 'else\nvlp=vlptargo\nfi\n}\n\ninstallsb(){',
+                'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n}\n\ninstallsb(){', "vlpt-xray-else", 1)
+    # installsb vlpt block, before the sspt block.
+    vlpt_sb = read("modules/vlpt-sb.sh")
+    t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
+                vlpt_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt-sb-block", 1)
+    # display: vlpt pbk/sid come from the kernel vlpt actually runs on.
+    # sb.json with vl-reality-sb wins; otherwise fall back to xray keypair
+    # (which is also the only case for old installs, where sb.json has no
+    # vlpt inbound). This detection works for fresh installs and for
+    # `list` (which re-reads the files from disk, with no vlpt_on in scope).
+    t = replace(t, 'short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)\nsskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)',
+                'short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)\nsskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi', "vlpt-display-pbk", 1)
+    t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then',
+                'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then', "vlpt-display-guard", 1)
+    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
+                'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none', "vlpt-link-pbk", 1)
+    t = replace(t, '          "public_key": "$public_key_x",\n          "short_id": "$short_id_x"',
+                '          "public_key": "$vlpt_pbk",\n          "short_id": "$vlpt_sid"', "vlpt-sb-config-pbk", 1)
+    t = replace(t, '    public-key: $public_key_x    \n    short-id: $short_id_x',
+                '    public-key: $vlpt_pbk    \n    short-id: $vlpt_sid', "vlpt-clash-pbk", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
@@ -300,7 +371,38 @@ def build_container():
     c = replace(c, 'echo "甬哥Github项目 ：github.com/yonggekkk"\necho "甬哥Blogger博客 ：ygkkk.blogspot.com"\necho "甬哥YouTube频道 ：www.youtube.com/@ygkkk"', 'echo "项目地址：github.com/qytang2014/argosbx"', "container-banner-project-url", 1)
     c = replace(c, 'echo "Argosbx脚本项目地址：https://github.com/yonggekkk/argosbx"',
                 'echo "Argosbx脚本项目地址：https://github.com/qytang2014/argosbx"', "container-project-link", 1)
-    c = replace(c, "export name=${name}", "export name=${name}\nexport ym=${ym}", "container-ym-export", 1)
+    c = replace(c, "export name=${name}", "export name=${name}\nexport ym=${ym}\nexport vlpt_kernel=${vlpt_kernel}", "container-ym-export", 1)
+    # --- vlpt dual-support, container (same rules as main, ports not flags) ---
+    vlpt_sb_c = read("modules/vlpt-sb-container.sh")
+    vlpt_on_c = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+vlpt_on=""
+if [ -n "$vlpt" ]; then
+  case "${vlpt_kernel:-auto}" in
+    xray) vlpt_on="xray" ;;
+    sb|singbox|sing-box) vlpt_on="sb" ;;
+    *)
+      if [ -n "$xhpt" ] || [ -n "$vxpt" ] || [ -n "$vwpt" ]; then vlpt_on="xray";
+      elif [ -n "$hypt" ] || [ -n "$tupt" ] || [ -n "$anpt" ] || [ -n "$arpt" ] || [ -n "$sspt" ]; then vlpt_on="sb";
+      else vlpt_on="xray"; fi ;;
+  esac
+fi
+'''
+    c = replace(c, 'ins(){\nif [ -z "$hypt" ]',
+                'ins(){\n' + vlpt_on_c + 'if [ -z "$hypt" ]', "container-vlpt-on-compute", 1)
+    c = replace(c, 'if [ -z "$hypt" ] && [ -z "$tupt" ] && [ -z "$anpt" ] && [ -z "$arpt" ] && [ -z "$sspt" ]; then',
+                'if [ -z "$hypt" ] && [ -z "$tupt" ] && [ -z "$anpt" ] && [ -z "$arpt" ] && [ -z "$sspt" ] && [ "$vlpt_on" != "sb" ]; then', "container-vlpt-ins-xray-only", 1)
+    c = replace(c, 'elif [ -z "$xhpt" ] && [ -z "$vlpt" ] && [ -z "$vxpt" ] && [ -z "$vwpt" ]; then',
+                'elif [ -z "$xhpt" ] && [ -z "$vxpt" ] && [ -z "$vwpt" ] && [ "$vlpt_on" != "xray" ]; then', "container-vlpt-ins-sb-only", 1)
+    c = replace(c, 'if [ -n "$vlpt" ]; then\nif [ -z "$vlpt" ] && [ ! -e "$HOME/agsbx/vlpt" ]; then',
+                'if [ -n "$vlpt" ] && [ "$vlpt_on" = "xray" ]; then\nif [ -z "$vlpt" ] && [ ! -e "$HOME/agsbx/vlpt" ]; then', "container-vlpt-xray-guard", 1)
+    c = replace(c, 'if [ -n "$sspt" ]; then\nif [ ! -e "$HOME/agsbx/sskey" ]; then',
+                vlpt_sb_c + 'if [ -n "$sspt" ]; then\nif [ ! -e "$HOME/agsbx/sskey" ]; then', "container-vlpt-sb-block", 1)
+    c = replace(c, 'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep xhttp-reality "$HOME/agsbx/xr.json"',
+                'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi\nif grep xhttp-reality "$HOME/agsbx/xr.json"', "container-vlpt-display-pbk", 1)
+    c = replace(c, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then\necho "💣【 Vless-tcp-reality-vision 】节点信息如下："',
+                'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then\necho "💣【 Vless-tcp-reality-vision 】节点信息如下："', "container-vlpt-display-guard", 1)
+    c = replace(c, 'vl_link="vless://$uuid@$server_ip:$vlpt?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reym&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
+                'vl_link="vless://$uuid@$server_ip:$vlpt?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reym&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none', "container-vlpt-link-pbk", 1)
     c = replace(c, "installsb(){", container_cert + "installsb(){", "container-cert-fn", 1)
     old_cert = """command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key" >/dev/null 2>&1
 command -v openssl >/dev/null 2>&1 && openssl req -new -x509 -days 36500 -key "$HOME/agsbx/private.key" -out "$HOME/agsbx/cert.pem" -subj "/CN=www.bing.com" >/dev/null 2>&1

@@ -41,7 +41,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -51,7 +51,7 @@ vars_merge "$1"
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -778,7 +778,7 @@ EOF
 else
 vwp=vwptargo
 fi
-if [ -n "$vlp" ]; then
+if [ -n "$vlp" ] && [ "$vlpt_on" = "xray" ]; then
 vlp=vlpt
 if [ -z "$port_vl_re" ] && [ ! -e "$HOME/agsbx/port_vl_re" ]; then
 port_vl_re=$(shuf -i 10000-65535 -n 1)
@@ -824,7 +824,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
     },  
 EOF
 else
-vlp=vlptargo
+[ -n "$vlp" ] || vlp=vlptargo
 fi
 }
 
@@ -1002,6 +1002,72 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
 EOF
 else
 arp=arptargo
+fi
+# vlpt on Sing-box (private module, vlpt dual-support).
+# Inserted into installsb() before the sspt block. Only runs when vlpt is
+# selected AND vlpt_on=sb (computed at the top of ins() from vlpt_kernel
+# and the other selected protocols). Otherwise it leaves vlp untouched:
+# if vlpt is selected but vlpt_on=xray, installxray() will install it;
+# if vlpt is not selected at all, the else branch sets vlp=vlptargo
+# (the recovery dummy, same as every other protocol block).
+# Reality keypair: generated exactly like the arpt block (sbk dir, reuse
+# if it already exists, so arpt + vlpt-sb share one keypair and one
+# pbk/sid pair). ym_vl_re defaults to apple.com, same as arpt/xray.
+if [ -n "$vlp" ] && [ "$vlpt_on" = "sb" ]; then
+vlp=vlpt
+if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
+echo "$ym_vl_re" > "$HOME/agsbx/ym_vl_re"
+echo "Reality域名：$ym_vl_re"
+mkdir -p "$HOME/agsbx/sbk"
+if [ ! -e "$HOME/agsbx/sbk/private_key" ]; then
+key_pair=$("$HOME/agsbx/sing-box" generate reality-keypair)
+private_key=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}' | tr -d '"')
+public_key=$(echo "$key_pair" | awk '/PublicKey/ {print $2}' | tr -d '"')
+short_id=$("$HOME/agsbx/sing-box" generate rand --hex 4)
+echo "$private_key" > "$HOME/agsbx/sbk/private_key"
+echo "$public_key" > "$HOME/agsbx/sbk/public_key"
+echo "$short_id" > "$HOME/agsbx/sbk/short_id"
+fi
+private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
+public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
+short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
+if [ -z "$port_vl_re" ] && [ ! -e "$HOME/agsbx/port_vl_re" ]; then
+port_vl_re=$(shuf -i 10000-65535 -n 1)
+echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
+elif [ -n "$port_vl_re" ]; then
+echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
+fi
+port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
+echo "Vless-tcp-reality-v端口（Sing-box）：$port_vl_re"
+cat >> "$HOME/agsbx/sb.json" <<EOF
+    {
+        "type": "vless",
+        "tag": "vl-reality-sb",
+        "listen": "::",
+        "listen_port": ${port_vl_re},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "flow": "xtls-rprx-vision"
+            }
+        ],
+        "tls": {
+            "enabled": true,
+            "server_name": "${ym_vl_re}",
+            "reality": {
+                "enabled": true,
+                "handshake": {
+                    "server": "${ym_vl_re}",
+                    "server_port": 443
+                },
+                "private_key": "$private_key_s",
+                "short_id": ["$short_id_s"]
+            }
+        }
+    },
+EOF
+else
+[ -n "$vlp" ] || vlp=vlptargo
 fi
 if [ -n "$ssp" ]; then
 ssp=sspt
@@ -1713,7 +1779,19 @@ fi
 fi
 }
 ins(){
-if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ]; then
+# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+vlpt_on=""
+if [ -n "$vlp" ]; then
+  case "${vlpt_kernel:-auto}" in
+    xray) vlpt_on="xray" ;;
+    sb|singbox|sing-box) vlpt_on="sb" ;;
+    *)
+      if [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ]; then vlpt_on="xray";
+      elif [ "$nvp" = yes ] || [ "$tup" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || [ "$ssp" = yes ]; then vlpt_on="sb";
+      else vlpt_on="xray"; fi ;;
+  esac
+fi
+if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; then
 installxray
 xrsbhy2
 xrsbvm
@@ -1721,14 +1799,14 @@ xrsbso
 warpsx
 xrsbout
 tup="tuptargo"; anp="anptargo"; arp="arptargo"; ssp="ssptargo"; nvp="nvptargo"
-elif [ "$xhp" != yes ] && [ "$vlp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ]; then
+elif [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ] && [ "$vlpt_on" != "xray" ]; then
 installsb
 xrsbhy2
 xrsbvm
 xrsbso
 warpsx
 xrsbout
-xhp="xhptargo"; vlp="vlptargo"; vxp="vxptargo"; vwp="vwptargo"; xup="xuptargo"; xcp="xcptargo"
+xhp="xhptargo"; [ "$vlpt_on" = "sb" ] || vlp="vlptargo"; vxp="vxptargo"; vwp="vwptargo"; xup="xuptargo"; xcp="xcptargo"
 else
 installsb
 installxray
@@ -1815,7 +1893,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -2003,6 +2081,7 @@ private_key_s=$(cat "$HOME/agsbx/sbk/private_key" 2>/dev/null)
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key" 2>/dev/null)
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)
 sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)
+if grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi
 fi
 if grep xhttp-reality "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-reality-enc 】支持ENC加密，节点信息如下："
@@ -2186,10 +2265,10 @@ cludpxcpt1(){
 echo "- ${sxname}Xhttp-UDP-$hostname"
 }
 fi
-if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
+if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
 port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
-vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
+vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
 echo "$vl_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_link"
 echo
@@ -2211,8 +2290,8 @@ cat <<EOF
         },
       "reality": {
           "enabled": true,
-          "public_key": "$public_key_x",
-          "short_id": "$short_id_x"
+          "public_key": "$vlpt_pbk",
+          "short_id": "$vlpt_sid"
         }
       }
     },
@@ -2234,8 +2313,8 @@ cat <<EOF
   flow: xtls-rprx-vision
   servername: $ym_vl_re                 
   reality-opts: 
-    public-key: $public_key_x    
-    short-id: $short_id_x                      
+    public-key: $vlpt_pbk    
+    short-id: $vlpt_sid                      
   client-fingerprint: chrome
 EOF
 }

@@ -40,7 +40,7 @@ container_vars_save(){
   local f="$HOME/agsbx/container_vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym egress_nodes egress_bind egress_rules; do
+  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -72,6 +72,7 @@ export egress_nodes=${egress_nodes}
 export egress_bind=${egress_bind}
 export egress_rules=${egress_rules}
 export egress_add=${egress_add}
+export vlpt_kernel=${vlpt_kernel}
 v46url="https://icanhazip.com"
 showmode(){
 echo "Argosbx脚本项目地址：https://github.com/qytang2014/argosbx"
@@ -370,7 +371,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
     },
 EOF
 fi
-if [ -n "$vlpt" ]; then
+if [ -n "$vlpt" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$vlpt" ] && [ ! -e "$HOME/agsbx/vlpt" ]; then
 vlpt=$(shuf -i 10000-65535 -n 1)
 echo "$vlpt" > "$HOME/agsbx/vlpt"
@@ -640,6 +641,66 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
              "short_id": ["$short_id_s"]
             }
           }
+        },
+EOF
+fi
+# vlpt on Sing-box, container build only (private module).
+# Container protocol variables are ports (vlpt is the port), not flags,
+# and reym is the Reality SNI. Same vlpt_on rules as the main script,
+# computed at the top of ins() from vlpt_kernel and the other ports.
+# Only runs when vlpt is set AND vlpt_on=sb; otherwise it does nothing
+# (the xray vlpt block, guarded by vlpt_on=xray, installs it instead).
+# sbk keypair is generated exactly like the container arpt block.
+if [ -n "$vlpt" ] && [ "$vlpt_on" = "sb" ]; then
+if [ -z "$reym" ]; then reym=apple.com; fi
+echo "$reym" > "$HOME/agsbx/reym"
+echo "Reality域名：$reym"
+mkdir -p "$HOME/agsbx/sbk"
+if [ ! -e "$HOME/agsbx/sbk/private_key" ]; then
+key_pair=$("$HOME/agsbx/sing-box" generate reality-keypair)
+private_key=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}' | tr -d '"')
+public_key=$(echo "$key_pair" | awk '/PublicKey/ {print $2}' | tr -d '"')
+short_id=$("$HOME/agsbx/sing-box" generate rand --hex 4)
+echo "$private_key" > "$HOME/agsbx/sbk/private_key"
+echo "$public_key" > "$HOME/agsbx/sbk/public_key"
+echo "$short_id" > "$HOME/agsbx/sbk/short_id"
+fi
+private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
+public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
+short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
+if [ -z "$vlpt" ] && [ ! -e "$HOME/agsbx/vlpt" ]; then
+vlpt=$(shuf -i 10000-65535 -n 1)
+echo "$vlpt" > "$HOME/agsbx/vlpt"
+elif [ -n "$vlpt" ]; then
+echo "$vlpt" > "$HOME/agsbx/vlpt"
+fi
+vlpt=$(cat "$HOME/agsbx/vlpt")
+echo "Vless-tcp-reality-v端口（Sing-box）：$vlpt"
+cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+            "type": "vless",
+            "tag": "vl-reality-sb",
+            "listen": "::",
+            "listen_port": ${vlpt},
+            "users": [
+                {
+                    "uuid": "${uuid}",
+                    "flow": "xtls-rprx-vision"
+                }
+            ],
+            "tls": {
+                "enabled": true,
+                "server_name": "${reym}",
+                "reality": {
+                    "enabled": true,
+                    "handshake": {
+                        "server": "${reym}",
+                        "server_port": 443
+                    },
+                    "private_key": "$private_key_s",
+                    "short_id": ["$short_id_s"]
+                }
+            }
         },
 EOF
 fi
@@ -1198,13 +1259,25 @@ nohup "$HOME/agsbx/sing-box" run -c "$HOME/agsbx/sb.json" >/dev/null 2>&1 &
 fi
 }
 ins(){
-if [ -z "$hypt" ] && [ -z "$tupt" ] && [ -z "$anpt" ] && [ -z "$arpt" ] && [ -z "$sspt" ]; then
+# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+vlpt_on=""
+if [ -n "$vlpt" ]; then
+  case "${vlpt_kernel:-auto}" in
+    xray) vlpt_on="xray" ;;
+    sb|singbox|sing-box) vlpt_on="sb" ;;
+    *)
+      if [ -n "$xhpt" ] || [ -n "$vxpt" ] || [ -n "$vwpt" ]; then vlpt_on="xray";
+      elif [ -n "$hypt" ] || [ -n "$tupt" ] || [ -n "$anpt" ] || [ -n "$arpt" ] || [ -n "$sspt" ]; then vlpt_on="sb";
+      else vlpt_on="xray"; fi ;;
+  esac
+fi
+if [ -z "$hypt" ] && [ -z "$tupt" ] && [ -z "$anpt" ] && [ -z "$arpt" ] && [ -z "$sspt" ] && [ "$vlpt_on" != "sb" ]; then
 installxray
 xrsbvm
 xrsbso
 warpsx
 xrsbout
-elif [ -z "$xhpt" ] && [ -z "$vlpt" ] && [ -z "$vxpt" ] && [ -z "$vwpt" ]; then
+elif [ -z "$xhpt" ] && [ -z "$vxpt" ] && [ -z "$vwpt" ] && [ "$vlpt_on" != "xray" ]; then
 installsb
 xrsbvm
 xrsbso
@@ -1378,6 +1451,7 @@ public_key_s=$(cat "$HOME/agsbx/sbk/public_key" 2>/dev/null)
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)
 sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)
 fi
+if grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi
 if grep xhttp-reality "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-reality-enc 】支持ENC加密，节点信息如下："
 xhpt=$(cat "$HOME/agsbx/xhpt")
@@ -1418,10 +1492,10 @@ echo "$vl_vw_cdn_link"
 echo
 fi
 fi
-if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
+if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
 vlpt=$(cat "$HOME/agsbx/vlpt")
-vl_link="vless://$uuid@$domain_addr:$vlpt?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reym&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
+vl_link="vless://$uuid@$domain_addr:$vlpt?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reym&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
 echo "$vl_link" >> "$HOME/agsbx/jh.txt"
 echo "$vl_link"
 echo

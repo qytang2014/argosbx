@@ -439,6 +439,13 @@
           </div>
         </div>
         <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后各协议地址优先用该域名（TLS 仍按证书就绪切换，Reality SNI 仍用 reym），留空则用 IP"/></div>
+        <div class="row"><label>Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
+          <select id="vlpt_kernel">
+            <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
+            <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
+            <option value="sb">强制 Sing-box</option>
+          </select>
+        </div>
         <div class="row"><label>证书验证方式 <span class="pill">certmode</span></label>
           <select id="certmode">
             <option value="">默认 自动（未代理用 HTTP，已代理/Argo 用 DNS）</option>
@@ -587,7 +594,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
-  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'];
+  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agn = document.getElementById('agn');
@@ -677,6 +684,7 @@
     document.getElementById('ym').value = '';
     document.getElementById('certmode').value = '';
     document.getElementById('certsrc').value = '';
+    document.getElementById('vlpt_kernel').value = '';
     document.getElementById('reym').value = '';
     document.getElementById('cfip').value = '';
     document.getElementById('alns').value = '';
@@ -701,6 +709,11 @@
       const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
+      const vlptKernelSelect = document.getElementById('vlpt_kernel');
+      if (vlptKernelSelect) {
+        vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
+      }
 
       const isAlnsEnabled = alnsSelect.value === 'y';
       nvptCheckbox.disabled = !isAlnsEnabled;
@@ -833,7 +846,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agn')) ordered.push('agn');
     if (keys.includes('agk')) ordered.push('agk');

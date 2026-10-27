@@ -37,7 +37,7 @@ container_vars_save(){
   local f="$HOME/agsbx/container_vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym egress_nodes egress_bind egress_rules; do
+  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
