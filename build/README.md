@@ -50,3 +50,10 @@ bash tests/run_all.sh
 - Caddy：没有续期钩子，改用每天 03:00 的 cron（`bash $HOME/bin/agsbx certwatch`），检查固定目录证书的 sha256 变化，变化且证书合法才重启。
 - 域名证书就绪时安装 watcher 和初始 hash，回落自签或卸载（`del`）时清理 cron。
 - 测试见 `tests/test_cert_watch.sh`。
+
+## 统一路径（$HOME/agsbx 下面）
+- 域名证书：`$HOME/agsbx/cert/cert.crt` + `private.key`（Caddy / acme 写这里；旧的 `$HOME/argosbx/cert/` 只在迁移时复制一次，不删除，acme 的安装路径会用新路径重跑一次 `--install-cert`，以后续期写新目录）。
+- 自签证书：主脚本 `$HOME/agsbx/selfsigned/cert.crt` + `private.key`；容器里的生效 TLS 对是 `$HOME/agsbx/selfsigned/cert.pem` + `private.key`（域名时是到 `$HOME/agsbx/cert/` 的软链接，自签时是现生成的文件；容器宿主证书先查 `$HOME/agsbx/cert/`，再兜底旧的 `$HOME/argosbx/cert/`）。
+- Caddyfile 回落路径：`$HOME/agsbx/Caddyfile`（单个文件，不另建目录；系统路径 `/etc/caddy/argosbx.caddyfile` 不变，那是系统 Caddy 服务的配置位置）。
+- geo 数据库：`$HOME/agsbx/geo/sing-box/` 和 `$HOME/agsbx/geo/xray/`（见上）。
+- 其它状态文件（`sb.json`、`xr.json`、`uuid`、`ym`、`SHA256.txt` 等）本来就在 `$HOME/agsbx/` 根目录，不动。

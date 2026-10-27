@@ -18,12 +18,12 @@ PY
 cat > "$TMP/run.sh" << 'RUN'
 #!/bin/bash
 export HOME="$1"
-export CERT_DIR="$HOME/argosbx/cert"
+export CERT_DIR="$HOME/agsbx/cert"
 export CERT_CRT="$CERT_DIR/cert.crt"
 export CERT_KEY="$CERT_DIR/private.key"
 mkdir -p "$HOME/agsbx" "$CERT_DIR"
 printf 'x\n' > "$HOME/agsbx/sb.json"
-printf 'argosbx/cert\n' >> "$HOME/agsbx/sb.json"
+printf 'agsbx/cert\n' >> "$HOME/agsbx/sb.json"
 printf 'x\n' > "$HOME/agsbx/xr.json"
 # mock restarts: record a call, do not touch real services
 sbrestart(){ echo "sb" >> "$HOME/restart.log"; }
@@ -37,7 +37,7 @@ cert_watch; [ ! -f "$HOME/restart.log" ] || { echo "FAIL: first run should not r
 [ -f "$HOME/agsbx/cert.hash" ] || { echo "FAIL: hash not recorded"; exit 1; }
 # 2. unchanged: no restart
 cert_watch; [ ! -f "$HOME/restart.log" ] || { echo "FAIL: unchanged should not restart"; exit 1; }
-# 3. changed valid same-domain cert: restart both kernels in test (sb only? xr.json has no argosbx/cert in this test, only sb does)
+# 3. changed valid same-domain cert: restart both kernels in test (sb only? xr.json has no agsbx/cert in this test, only sb does)
 mkcert test.example.com
 cert_watch; grep -q "^sb$" "$HOME/restart.log" || { echo "FAIL: changed valid cert should restart sb"; exit 1; }
 rm -f "$HOME/restart.log"

@@ -15,15 +15,15 @@
 # will start it again; that is intentional on renewal.
 cert_cert_hash(){ sha256sum "$CERT_CRT" 2>/dev/null | awk '{print $1}'; }
 cert_uses_domain_cert(){
-  { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; } || \
-  { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; }
+  { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; } || \
+  { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; }
 }
 cert_restart(){
   cert_uses_domain_cert || { echo "域名证书未被 sing-box/xray 配置使用，跳过重启"; return 0; }
-  if [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; then
+  if [ -f "$HOME/agsbx/sb.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; then
     echo "证书已更新，重启 sing-box"; sbrestart
   fi
-  if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
+  if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
     echo "证书已更新，重启 xray"; xrestart
   fi
 }

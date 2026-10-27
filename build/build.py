@@ -76,7 +76,7 @@ def build_index():
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
     h = replace(h, 'Acme-yg域名IP证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)</a></p>',
-                '        <p>域名证书：由 Caddy 申请（自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode），固定目录 $HOME/argosbx/cert（软链接指向 Caddy 证书存储），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
+                '        <p>域名证书：由 Caddy 申请（自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode），固定目录 $HOME/agsbx/cert（软链接指向 Caddy 证书存储），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
     h = replace(h, "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-curl", 1)
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
@@ -131,7 +131,7 @@ def main():
     t = replace(t, "echo \"主脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh) 或 bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)\"",
                 "echo \"主脚本：bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh) 或 bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)\"", "showmode-main-url", 1)
     t = replace(t, "echo \"申请本地IP域名证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)\"",
-                "echo \"域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/argosbx/cert\"", "showmode-acme-line", 1)
+                "echo \"域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/agsbx/cert\"", "showmode-acme-line", 1)
 
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
@@ -163,9 +163,23 @@ def main():
     #   "$(cat /root/ygkkkca/ca.log ...)" -> "$(cat "$HOME/agsbx/ym" ...)"
     # Do NOT strip outer quotes: the naive sb.json server/server_name fields
     # need them to stay valid JSON at runtime.
-    # grep ygkkkca -> argosbx/cert
+    # grep ygkkkca -> agsbx/cert
+    # --- unified cert paths: self-signed -> agsbx/selfsigned ---
+    t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
+                'cert_migrate_paths\nif [ ! -f "$HOME/agsbx/SHA256.txt" ]; then', "selfsigned-migrate-call", 1)
+    t = replace(t, 'command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key"',
+                'mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true\ncommand -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/selfsigned/private.key"', "selfsigned-gen-key", 1)
+    t = replace(t, 'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/private.key" -out "$HOME/agsbx/cert.crt"',
+                'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt"', "selfsigned-gen-cert", 1)
+    t = replace(t, 'openssl x509 -in $HOME/agsbx/cert.crt -outform DER',
+                'openssl x509 -in $HOME/agsbx/selfsigned/cert.crt -outform DER', "selfsigned-sha256", 1)
+    t = replace(t, 'certificateHTA="$HOME/agsbx/cert.crt"', 'certificateHTA="$HOME/agsbx/selfsigned/cert.crt"', "selfsigned-hta-cert", 1)
+    t = replace(t, 'keyHTA="$HOME/agsbx/private.key"', 'keyHTA="$HOME/agsbx/selfsigned/private.key"', "selfsigned-hta-key", 1)
+    t = replace(t, "if grep -q 'agsbx/private.key' \"$HOME/agsbx/sb.json\" >/dev/null 2>&1 || grep -q 'agsbx/private.key' \"$HOME/agsbx/xr.json\" >/dev/null 2>&1; then",
+                "if grep -q 'agsbx/selfsigned/private.key' \"$HOME/agsbx/sb.json\" >/dev/null 2>&1 || grep -q 'agsbx/selfsigned/private.key' \"$HOME/agsbx/xr.json\" >/dev/null 2>&1; then", "selfsigned-display-grep", 1)
+
     n2 = t.count("'ygkkkca'")
-    t = t.replace("'ygkkkca'", "'argosbx/cert'")
+    t = t.replace("'ygkkkca'", "'agsbx/cert'")
     if n2 == 0:
         print("BUILD FAIL: anchor missing: grep-ygkkkca", file=sys.stderr); sys.exit(1)
     print(f"grep ygkkkca replacements: {n2}")
@@ -297,6 +311,8 @@ fi"""
     # --- egress parity (final egress module, same as main script) ---
     egress_mod = read("modules/egress.sh")
     c = replace(c, "export ym=${ym}", "export ym=${ym}\nexport egress_nodes=${egress_nodes}\nexport egress_bind=${egress_bind}\nexport egress_rules=${egress_rules}", "container-egress-exports", 1)
+    c = replace(c, '"certificate_path": "$HOME/agsbx/cert.pem",', '"certificate_path": "$HOME/agsbx/selfsigned/cert.pem",', "container-tls-cert-path", 3)
+    c = replace(c, '"key_path": "$HOME/agsbx/private.key"', '"key_path": "$HOME/agsbx/selfsigned/private.key"', "container-tls-key-path", 3)
     c = replace(c, "xrsbout(){", egress_mod + "xrsbout(){", "container-egress-module", 1)
     c = replace(c, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "container-egress-init", 1)

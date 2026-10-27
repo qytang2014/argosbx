@@ -38,11 +38,11 @@ run_cert() { # $1=label $2=ym $3=cert_domain_or_EMPTY $4=expect_flag
   local flag="absent"; [ -f "$td/agsbx/domain_cert_ready" ] && flag=$(cat "$td/agsbx/domain_cert_ready")
   [ "$flag" = "$4" ] || { echo "FAIL: $1 flag [$flag] want [$4]"; FAIL=1; }
   if [ "$4" = "1" ]; then
-    [ -L "$td/agsbx/cert.pem" ] || { echo "FAIL: $1 cert.pem not symlink"; FAIL=1; }
-    [ -L "$td/agsbx/private.key" ] || { echo "FAIL: $1 private.key not symlink"; FAIL=1; }
+    [ -L "$td/agsbx/selfsigned/cert.pem" ] || { echo "FAIL: $1 cert.pem not symlink"; FAIL=1; }
+    [ -L "$td/agsbx/selfsigned/private.key" ] || { echo "FAIL: $1 private.key not symlink"; FAIL=1; }
   else
-    [ -L "$td/agsbx/cert.pem" ] && { echo "FAIL: $1 cert.pem should not be symlink on fallback"; FAIL=1; }
-    [ -f "$td/agsbx/private.key" ] || { echo "FAIL: $1 self-signed key missing"; FAIL=1; }
+    [ -L "$td/agsbx/selfsigned/cert.pem" ] && { echo "FAIL: $1 cert.pem should not be symlink on fallback"; FAIL=1; }
+    [ -f "$td/agsbx/selfsigned/private.key" ] || { echo "FAIL: $1 self-signed key missing"; FAIL=1; }
   fi
   rm -rf "$td"
 }
@@ -50,5 +50,12 @@ run_cert "domain cert matches ym" "node.example.com" "node.example.com" "1"
 run_cert "domain cert, ym from cert" "" "cert.example.com" "1"
 run_cert "domain cert mismatches ym" "node.example.com" "other.example.com" "absent"
 run_cert "no domain cert" "node.example.com" "EMPTY" "absent"
+# Old host cert location (argosbx/cert) is still honoured as a fallback
+td_old=$(mktemp -d); mkdir -p "$td_old/agsbx" "$td_old/argosbx/cert"
+openssl req -x509 -newkey rsa:2048 -keyout "$td_old/argosbx/cert/private.key" -out "$td_old/argosbx/cert/cert.crt" -days 2 -nodes -subj "/CN=node.example.com" -addext "subjectAltName=DNS:node.example.com" >/dev/null 2>&1
+HOME="$td_old" ym="node.example.com" bash -c "source modules/container-cert.sh; container_cert_setup" >/dev/null 2>&1
+[ -f "$td_old/agsbx/domain_cert_ready" ] && [ "$(cat "$td_old/agsbx/domain_cert_ready")" = "1" ] || { echo "FAIL: old host cert fallback flag"; FAIL=1; }
+[ -L "$td_old/agsbx/selfsigned/cert.pem" ] || { echo "FAIL: old host cert fallback symlink"; FAIL=1; }
+rm -rf "$td_old"
 [ $FAIL -eq 0 ] && echo "PASS: container (layered build, domain cert, domain address, no public key download)"
 exit $FAIL

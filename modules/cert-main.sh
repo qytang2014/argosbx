@@ -1,5 +1,6 @@
 domain_cert_ready=0
 if [ -n "$ym" ]; then
+  cert_migrate_paths
   mkdir -p "$CERT_DIR"
   echo "$ym" > "$HOME/agsbx/ym"
   certsrc_selected=$(detect_certsrc)

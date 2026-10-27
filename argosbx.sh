@@ -53,9 +53,32 @@ export ym_vl_re=${reym:-''}
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
 export alns=${alns:-''}
-export CERT_DIR="$HOME/argosbx/cert"
+export CERT_DIR="$HOME/agsbx/cert"
 export CERT_CRT="$CERT_DIR/cert.crt"
 export CERT_KEY="$CERT_DIR/private.key"
+# cert_migrate_paths: one-time move from the old $HOME/argosbx locations
+# to the unified $HOME/agsbx tree. Copies only, never deletes the old
+# files (old configs / acme renewals may still reference them until the
+# next install regenerates json). Idempotent: a second call is a no-op
+# except for the acme install-path update, which is itself idempotent.
+cert_migrate_paths(){
+  if [ -s "$HOME/argosbx/cert/cert.crt" ]; then
+    mkdir -p "$HOME/agsbx/cert" 2>/dev/null || true
+    [ -s "$HOME/agsbx/cert/cert.crt" ] || cp -P "$HOME/argosbx/cert/cert.crt" "$HOME/agsbx/cert/cert.crt" 2>/dev/null || true
+    [ -s "$HOME/agsbx/cert/private.key" ] || { [ -s "$HOME/argosbx/cert/private.key" ] && cp -P "$HOME/argosbx/cert/private.key" "$HOME/agsbx/cert/private.key" 2>/dev/null || true; }
+    if [ -x "$HOME/.acme.sh/acme.sh" ] && [ -n "$ym" ]; then
+      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ -s "$HOME/agsbx/cert.crt" ] && [ ! -s "$HOME/agsbx/selfsigned/cert.crt" ]; then
+    mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true
+    cp -P "$HOME/agsbx/cert.crt" "$HOME/agsbx/selfsigned/cert.crt" 2>/dev/null || true
+    [ -s "$HOME/agsbx/private.key" ] && cp -P "$HOME/agsbx/private.key" "$HOME/agsbx/selfsigned/private.key" 2>/dev/null || true
+  fi
+  if [ -s "$HOME/argosbx/Caddyfile" ] && [ ! -s "$HOME/agsbx/Caddyfile" ]; then
+    cp "$HOME/argosbx/Caddyfile" "$HOME/agsbx/Caddyfile" 2>/dev/null || true
+  fi
+}
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
@@ -86,7 +109,7 @@ detect_certmode(){
   fi
   echo "http"
 }
-# write_caddyfile：按验证方式写 Caddyfile。优先写系统位置 /etc/caddy/argosbx.caddyfile，并让主配置 import 它（先备份主配置，已有 import 行则不重复加）；无 root / /etc/caddy 不可写时回落到 $HOME/argosbx/Caddyfile。
+# write_caddyfile：按验证方式写 Caddyfile。优先写系统位置 /etc/caddy/argosbx.caddyfile，并让主配置 import 它（先备份主配置，已有 import 行则不重复加）；无 root / /etc/caddy 不可写时回落到 $HOME/agsbx/Caddyfile（单个文件，不另建目录）。
 # 本函数只写配置，不安装 Caddy；是否启动/重载由调用方尽力尝试，失败不中断后续等待与回落。生成路径保存在全局变量 caddyfile_path 和 $HOME/agsbx/caddyfile_path。
 write_caddyfile(){
   local conf_file=""
@@ -106,8 +129,8 @@ write_caddyfile(){
     fi
   fi
   if [ -z "$conf_file" ]; then
-    mkdir -p "$HOME/argosbx"
-    conf_file="$HOME/argosbx/Caddyfile"
+    mkdir -p "$HOME/agsbx"
+    conf_file="$HOME/agsbx/Caddyfile"
   fi
   if [ "$certmode_selected" = "dns" ]; then
     printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
@@ -170,7 +193,7 @@ ensure_caddy_download(){
   echo "预编译 Caddy 下载并替换成功"
   return 0
 }
-# Caddy 域名证书：固定目录 $HOME/argosbx/cert，内为指向 Caddy 证书存储的软链接。
+# Caddy 域名证书：固定目录 $HOME/agsbx/cert，内为指向 Caddy 证书存储的软链接。
 # wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
 wait_domain_cert(){
   [ -n "$ym" ] || return 1
@@ -206,15 +229,15 @@ wait_domain_cert(){
 # will start it again; that is intentional on renewal.
 cert_cert_hash(){ sha256sum "$CERT_CRT" 2>/dev/null | awk '{print $1}'; }
 cert_uses_domain_cert(){
-  { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; } || \
-  { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; }
+  { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; } || \
+  { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; }
 }
 cert_restart(){
   cert_uses_domain_cert || { echo "域名证书未被 sing-box/xray 配置使用，跳过重启"; return 0; }
-  if [ -f "$HOME/agsbx/sb.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; then
+  if [ -f "$HOME/agsbx/sb.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/sb.json" 2>/dev/null; then
     echo "证书已更新，重启 sing-box"; sbrestart
   fi
-  if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'argosbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
+  if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
     echo "证书已更新，重启 xray"; xrestart
   fi
 }
@@ -276,7 +299,7 @@ echo "更新Xray或Singbox内核命令：agsbx upx或ups 【或者】 主脚本 
 echo "重启脚本命令：agsbx res 【或者】 主脚本 res"
 echo "卸载脚本命令：agsbx del 【或者】 主脚本 del"
 echo "双栈VPS显示IPv4/IPv6节点配置命令：ippz=4或6 agsbx list 【或者】 ippz=4或6 主脚本 list"
-echo "域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/argosbx/cert"
+echo "域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/agsbx/cert"
 echo "---------------------------------------------------------"
 echo
 }
@@ -1871,7 +1894,7 @@ sxname=$(cat "$HOME/agsbx/name" 2>/dev/null)
 xvvmcdnym=$(cat "$HOME/agsbx/cdnym" 2>/dev/null)
 cdnip1=$(cat "$HOME/agsbx/cdnip1" 2>/dev/null)
 cdnip2=$(cat "$HOME/agsbx/cdnip2" 2>/dev/null)
-if grep -q 'agsbx/private.key' "$HOME/agsbx/sb.json" >/dev/null 2>&1 || grep -q 'agsbx/private.key' "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
+if grep -q 'agsbx/selfsigned/private.key' "$HOME/agsbx/sb.json" >/dev/null 2>&1 || grep -q 'agsbx/selfsigned/private.key' "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 sni=www.bing.com
 add=$server_ip
 jhins=1
@@ -1982,7 +2005,7 @@ clxcpt1(){
 echo "- ${sxname}Xhttp-TCP-$hostname"
 }
 }
-if ! grep -A 26 'xhttp-h23' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert' >/dev/null 2>&1; then
+if ! grep -A 26 'xhttp-h23' "$HOME/agsbx/xr.json" | grep -q 'agsbx/cert' >/dev/null 2>&1; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 echo "💣【 Vless-xhttp-tls-TCP 】节点信息如下："
 vl_xc2_link="vless://$uuid@$add:$port_xc?encryption=none&security=tls&sni=$sni&insecure=0&allowInsecure=0&hpkp=$sha&pcs=$sha&type=xhttp&path=$uuid-xc&mode=auto#${sxname}Vless-xhttp-tls-TCP-$hostname"
@@ -2067,7 +2090,7 @@ fi
 if grep xhttp-h3 "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-tls-UDP 】节点信息如下："
 port_xu=$(cat "$HOME/agsbx/port_xu")
-if ! grep -A 26 'xhttp-h3' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert' >/dev/null 2>&1; then
+if ! grep -A 26 'xhttp-h3' "$HOME/agsbx/xr.json" | grep -q 'agsbx/cert' >/dev/null 2>&1; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
 vl_xu_link="vless://$uuid@$add:$port_xu?encryption=none&security=tls&sni=$sni&alpn=h3&insecure=0&allowInsecure=0&hpkp=$sha&pcs=$sha&type=xhttp&path=$uuid-xu&mode=auto#${sxname}Vless-xhttp-tls-UDP-$hostname"
@@ -2416,7 +2439,7 @@ echo "\"${sxname}any-reality-$hostname\","
 fi
 if grep -q 'hy2-sb' "$HOME/agsbx/sb.json" >/dev/null 2>&1 || grep -q 'hy2-xr' "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Hysteria2 】节点信息如下："
-if { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'hy2-sb' "$HOME/agsbx/sb.json" && ! grep -A 14 'hy2-sb' "$HOME/agsbx/sb.json" | grep -q 'argosbx/cert'; } || { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'hy2-xr' "$HOME/agsbx/xr.json" && ! grep -A 20 'hy2-xr' "$HOME/agsbx/xr.json" | grep -q 'argosbx/cert'; }; then
+if { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'hy2-sb' "$HOME/agsbx/sb.json" && ! grep -A 14 'hy2-sb' "$HOME/agsbx/sb.json" | grep -q 'agsbx/cert'; } || { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'hy2-xr' "$HOME/agsbx/xr.json" && ! grep -A 20 'hy2-xr' "$HOME/agsbx/xr.json" | grep -q 'agsbx/cert'; }; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
 port_hy2=$(cat "$HOME/agsbx/port_hy2")
@@ -3153,20 +3176,23 @@ netfilter-persistent save >/dev/null 2>&1
 echo
 echo "iptables执行开放所有端口"
 fi
+cert_migrate_paths
 if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then
-command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key" >/dev/null 2>&1
-command -v openssl >/dev/null 2>&1 && openssl req -new -x509 -days 36500 -key "$HOME/agsbx/private.key" -out "$HOME/agsbx/cert.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
+mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true
+command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/selfsigned/private.key" >/dev/null 2>&1
+command -v openssl >/dev/null 2>&1 && openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
 #if [ ! -f "$HOME/agsbx/private.key" ]; then
 #url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/private.key"; out="$HOME/agsbx/private.key"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")
 #url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/cert.crt"; out="$HOME/agsbx/cert.crt"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")
 #echo "fc6dca8cfc4081102aa9655d0d4805c27d7266f605541d242ad66ad00a284a35" > "$HOME/agsbx/SHA256.txt"
 #else
-SHA256=$(openssl x509 -in $HOME/agsbx/cert.crt -outform DER | sha256sum | awk '{print $1}')
+SHA256=$(openssl x509 -in $HOME/agsbx/selfsigned/cert.crt -outform DER | sha256sum | awk '{print $1}')
 echo "$SHA256" > "$HOME/agsbx/SHA256.txt"
 fi
 #fi
 domain_cert_ready=0
 if [ -n "$ym" ]; then
+  cert_migrate_paths
   mkdir -p "$CERT_DIR"
   echo "$ym" > "$HOME/agsbx/ym"
   certsrc_selected=$(detect_certsrc)
@@ -3229,8 +3255,8 @@ certificateHTA="$CERT_CRT"
 keyHTA="$CERT_KEY"
 echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用 Caddy 域名证书的TLS"
 else
-certificateHTA="$HOME/agsbx/cert.crt"
-keyHTA="$HOME/agsbx/private.key"
+certificateHTA="$HOME/agsbx/selfsigned/cert.crt"
+keyHTA="$HOME/agsbx/selfsigned/private.key"
 echo "HY2/TUIC/Anytls/Xhttp-tls将使用自签证书的TLS"
 fi
 ins

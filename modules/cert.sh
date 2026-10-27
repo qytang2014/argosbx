@@ -1,8 +1,31 @@
 export ym=${ym:-''}
 export alns=${alns:-''}
-export CERT_DIR="$HOME/argosbx/cert"
+export CERT_DIR="$HOME/agsbx/cert"
 export CERT_CRT="$CERT_DIR/cert.crt"
 export CERT_KEY="$CERT_DIR/private.key"
+# cert_migrate_paths: one-time move from the old $HOME/argosbx locations
+# to the unified $HOME/agsbx tree. Copies only, never deletes the old
+# files (old configs / acme renewals may still reference them until the
+# next install regenerates json). Idempotent: a second call is a no-op
+# except for the acme install-path update, which is itself idempotent.
+cert_migrate_paths(){
+  if [ -s "$HOME/argosbx/cert/cert.crt" ]; then
+    mkdir -p "$HOME/agsbx/cert" 2>/dev/null || true
+    [ -s "$HOME/agsbx/cert/cert.crt" ] || cp -P "$HOME/argosbx/cert/cert.crt" "$HOME/agsbx/cert/cert.crt" 2>/dev/null || true
+    [ -s "$HOME/agsbx/cert/private.key" ] || { [ -s "$HOME/argosbx/cert/private.key" ] && cp -P "$HOME/argosbx/cert/private.key" "$HOME/agsbx/cert/private.key" 2>/dev/null || true; }
+    if [ -x "$HOME/.acme.sh/acme.sh" ] && [ -n "$ym" ]; then
+      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ -s "$HOME/agsbx/cert.crt" ] && [ ! -s "$HOME/agsbx/selfsigned/cert.crt" ]; then
+    mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true
+    cp -P "$HOME/agsbx/cert.crt" "$HOME/agsbx/selfsigned/cert.crt" 2>/dev/null || true
+    [ -s "$HOME/agsbx/private.key" ] && cp -P "$HOME/agsbx/private.key" "$HOME/agsbx/selfsigned/private.key" 2>/dev/null || true
+  fi
+  if [ -s "$HOME/argosbx/Caddyfile" ] && [ ! -s "$HOME/agsbx/Caddyfile" ]; then
+    cp "$HOME/argosbx/Caddyfile" "$HOME/agsbx/Caddyfile" 2>/dev/null || true
+  fi
+}
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
@@ -33,7 +56,7 @@ detect_certmode(){
   fi
   echo "http"
 }
-# write_caddyfile：按验证方式写 Caddyfile。优先写系统位置 /etc/caddy/argosbx.caddyfile，并让主配置 import 它（先备份主配置，已有 import 行则不重复加）；无 root / /etc/caddy 不可写时回落到 $HOME/argosbx/Caddyfile。
+# write_caddyfile：按验证方式写 Caddyfile。优先写系统位置 /etc/caddy/argosbx.caddyfile，并让主配置 import 它（先备份主配置，已有 import 行则不重复加）；无 root / /etc/caddy 不可写时回落到 $HOME/agsbx/Caddyfile（单个文件，不另建目录）。
 # 本函数只写配置，不安装 Caddy；是否启动/重载由调用方尽力尝试，失败不中断后续等待与回落。生成路径保存在全局变量 caddyfile_path 和 $HOME/agsbx/caddyfile_path。
 write_caddyfile(){
   local conf_file=""
@@ -53,8 +76,8 @@ write_caddyfile(){
     fi
   fi
   if [ -z "$conf_file" ]; then
-    mkdir -p "$HOME/argosbx"
-    conf_file="$HOME/argosbx/Caddyfile"
+    mkdir -p "$HOME/agsbx"
+    conf_file="$HOME/agsbx/Caddyfile"
   fi
   if [ "$certmode_selected" = "dns" ]; then
     printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
@@ -117,7 +140,7 @@ ensure_caddy_download(){
   echo "预编译 Caddy 下载并替换成功"
   return 0
 }
-# Caddy 域名证书：固定目录 $HOME/argosbx/cert，内为指向 Caddy 证书存储的软链接。
+# Caddy 域名证书：固定目录 $HOME/agsbx/cert，内为指向 Caddy 证书存储的软链接。
 # wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
 wait_domain_cert(){
   [ -n "$ym" ] || return 1
