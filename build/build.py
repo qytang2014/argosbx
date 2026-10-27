@@ -172,6 +172,7 @@ def main():
     cert_watch = read("modules/cert-watch.sh")
     vars_mod = read("modules/vars.sh")
     ufw_mod = read("modules/ufw.sh")
+    subhttps_mod = read("modules/sub-https.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
     t = replace(t, "url='https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh'",
@@ -205,6 +206,11 @@ def main():
     # --- ufw module (top level, functions only; called after ins) ---
     t = insert_after(t, 'vars_merge "$1"\n',
                      ufw_mod, "ufw-module-anchor")
+    # --- https subscription module (top level, functions only; called
+    # from the display block, after the sub block has created the token,
+    # so first installs get the right mode, not the previous one) ---
+    t = insert_after(t, 'vars_merge "$1"\n',
+                     subhttps_mod, "subhttps-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
                 "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
@@ -286,7 +292,7 @@ fi
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
     # --- cert-watch module (right after cert module) ---
     t = t.replace(cert, cert + cert_watch, 1)
-    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启 ufw 后运行 agsbx ufwsync 重新同步节点端口"', "showmode-add-line", 1)
+    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启 ufw 后运行 agsbx ufwsync 重新同步节点端口"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪、内存大于等于 256M 或订阅 Caddy 已在运行时走 https，否则回退 http）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")
@@ -362,7 +368,7 @@ fi
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
     # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
     t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
-                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync) ;; *)', "top-case-exclusion", 1)
+                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|subhttpsync) ;; *)', "top-case-exclusion", 1)
     # --- certwatch/certrestart subcommands + del cleanup ---
     t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
                 'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
@@ -370,8 +376,11 @@ fi
     # the state file and port files still exist when cleanup runs) ---
     t = replace(t, 'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
                 'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "ufwsync-dispatch", 1)
+    # --- subhttpsync subcommand (reboot cron) + del cleanup ---
+    t = replace(t, 'if [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
+                'if [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "subhttpsync-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
-                'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nufw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
+                'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nsub_https_stop\nufw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
@@ -576,6 +585,18 @@ certificateHTA="/root/ygkkkca/cert.crt"
 keyHTA="/root/ygkkkca/private.key"
 echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     t = replace(t, upstream_block, cert_main.rstrip("\n"), "cert-main-block", 1)
+
+    # --- https subscription display (private) ---
+    # The original block printed only http IP URLs, and only when the
+    # websbx process was running. It is replaced by a sync + display:
+    # sync runs first, so the mode file is current for this run
+    # (first install: the sub block just created the token; list:
+    # a dead subscription Caddy is restarted, a stale https mode
+    # falls back, so the printed URL is not dead by construction).
+    # sub_https_display then prints https / http-domain / http-ip
+    # URLs by mode, with the same asterisk framing as before.
+    t = replace(t, 'if [ -s $HOME/agsbx/subport.log ]; then\nshowsubport=$(cat $HOME/agsbx/subport.log)\nif ps -ef 2>/dev/null | grep "$showsubport" | grep -v grep >/dev/null; then\nshowsubtoken=$(cat $HOME/agsbx/subtoken.log 2>/dev/null)\nsubip=$(cat $HOME/agsbx/server_ip.log 2>/dev/null)\nsuburl="$subip:$showsubport/$showsubtoken"\necho "**********************************************************"\necho "Clash/Mihomo本地IP订阅地址：http://$suburl/clmi.yaml"\necho "Sing-box本地IP订阅地址：http://$suburl/sbox.json"\necho "聚合协议本地IP订阅地址：http://$suburl/jhsub.txt"\necho "**********************************************************"\nfi\nfi',
+                'sub_https_sync\nsub_https_display', "subhttps-display", 1)
 
     # --- generated header (after shebang) ---
     lines = t.split("\n", 1)

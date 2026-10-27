@@ -26,6 +26,11 @@ cert_restart(){
   if [ -f "$HOME/agsbx/xr.json" ] && grep -q 'agsbx/cert' "$HOME/agsbx/xr.json" 2>/dev/null; then
     echo "证书已更新，重启 xray"; xrestart
   fi
+  # Subscription Caddy also serves this cert: restart it when the
+  # cert hash changed (sub_https_sync is a no-op when the hash is
+  # unchanged, and guarded here so cert-watch tests sourcing only
+  # this module do not fail when sub-https is not loaded).
+  if type sub_https_sync >/dev/null 2>&1; then sub_https_sync; fi
 }
 cert_watch(){
   [ -s "$CERT_CRT" ] || return 0
