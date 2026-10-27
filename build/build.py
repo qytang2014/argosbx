@@ -122,6 +122,7 @@ def main():
     egress = read("modules/egress.sh")
     cert_main = read("modules/cert-main.sh")
     cert_watch = read("modules/cert-watch.sh")
+    vars_mod = read("modules/vars.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
     t = replace(t, "url='https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh'",
@@ -133,9 +134,12 @@ def main():
     t = replace(t, "echo \"申请本地IP域名证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)\"",
                 "echo \"域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/agsbx/cert\"", "showmode-acme-line", 1)
 
+    # --- incremental update module (top, before sh.txt save + protocol selection) ---
+    t = insert_after(t, 'mkdir -p "$HOME/agsbx"\n',
+                     vars_mod + 'vars_merge "$1"\n', "vars-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules; do", "export-list", 1)
+                "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
     t = replace(t, 'export alns=\\"${alns}\\" ',
                 'export alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
 
@@ -143,6 +147,7 @@ def main():
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
     # --- cert-watch module (right after cert module) ---
     t = t.replace(cert, cert + cert_watch, 1)
+    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\n", "egress-exports-anchor")
@@ -165,6 +170,8 @@ def main():
     # need them to stay valid JSON at runtime.
     # grep ygkkkca -> agsbx/cert
     # --- unified cert paths: self-signed -> agsbx/selfsigned ---
+    t = replace(t, 'ins\nif [ -n "$sub" ]; then',
+                'ins\nvars_save\nif [ -n "$sub" ]; then', "vars-save-call", 1)
     t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
                 'cert_migrate_paths\nif [ ! -f "$HOME/agsbx/SHA256.txt" ]; then', "selfsigned-migrate-call", 1)
     t = replace(t, 'command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key"',

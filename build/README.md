@@ -57,3 +57,9 @@ bash tests/run_all.sh
 - Caddyfile 回落路径：`$HOME/agsbx/Caddyfile`（单个文件，不另建目录；系统路径 `/etc/caddy/argosbx.caddyfile` 不变，那是系统 Caddy 服务的配置位置）。
 - geo 数据库：`$HOME/agsbx/geo/sing-box/` 和 `$HOME/agsbx/geo/xray/`（见上）。
 - 其它状态文件（`sb.json`、`xr.json`、`uuid`、`ym`、`SHA256.txt` 等）本来就在 `$HOME/agsbx/` 根目录，不动。
+
+## 增量更新（`add`，主脚本）
+- 每次成功安装 / `rep` 后，全部变量以 shell 转义形式存到 `$HOME/agsbx/vars.env`（600），失败的安装不覆盖上次的好状态，`list` / `upx` / `ups` / `res` / `del` 不动它。
+- `只传新增/修改的变量 + 主脚本 add`：先读 `vars.env`，没传的变量继承旧值，传了的覆盖旧值，再重建配置并重启内核。端口、uuid 不变就复用，传了新端口才换；`ym` 不变不重新发证，`ym` 变了才对新域名重新发证；IP 每次重跑都会重新探测。
+- `add` 不删协议（没传 = 继承），删协议仍用 `rep` 全量重置。`vars.env` 缺失、或合并后没有任何协议时，`add` 直接失败退出，不会把旧安装悄悄丢掉。
+- 第一版是变量级合并：出口分流还是整串替换，单节点追加（`egress_add`）以后再做；容器暂不做增量（没有生成器页面）。
