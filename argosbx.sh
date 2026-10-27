@@ -31,7 +31,7 @@ vars_merge(){
     case "$name" in *[!A-Za-z0-9_]*|'') continue;; esac
     if [ -z "${!name+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
-  for v in vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
+  for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
   done
   echo "增量更新失败：合并后没有任何协议变量，请在 add 命令前至少设置一个新增或修改的协议变量"
@@ -41,7 +41,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -51,7 +51,7 @@ vars_merge "$1"
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -60,6 +60,7 @@ cmd+="$main${*:+ $*}"
 ;; esac
 [ -z "${vlpt+x}" ] || vlp=yes
 [ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }
+[ -z "${vmtls+x}" ] || vmt=yes
 [ -z "${vwpt+x}" ] || { vwp=yes; vmag=yes; }
 [ -z "${hypt+x}" ] || hyp=yes
 [ -z "${tupt+x}" ] || tup=yes
@@ -75,14 +76,15 @@ cmd+="$main${*:+ $*}"
 [ -z "${xcpt+x}" ] || xcp=yes
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then
 if [ "$1" = "rep" ]; then
-[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 else
-[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 export uuid=${uuid:-''}
 export port_vl_re=${vlpt:-''}
 export port_vm_ws=${vmpt:-''}
+export port_vm_tls=${vmtls:-''}
 export port_vw=${vwpt:-''}
 export port_hy2=${hypt:-''}
 export port_tu=${tupt:-''}
@@ -1245,6 +1247,98 @@ vmp=vmptargo
 fi
 }
 
+# Vmess-ws-tls (private module, main script only).
+# A DIRECT vmess + ws + TLS inbound, distinct from the plain vmess-ws
+# (vmpt, tls off) and from the Argo vmess-ws-tls links (which terminate
+# TLS at Cloudflare, not at this server). New protocol flag `vmtls`
+# (value = port, like vmpt); internal flag `vmt`.
+# Auto-group, like vmpt: it does NOT change ins() kernel branches.
+# xrsbvmtls writes to xr.json when Xray is installed, otherwise to
+# sb.json, exactly like xrsbvm. The TLS certificate is $certificateHTA /
+# $keyHTA (domain cert when ready, otherwise the self-signed pair), so
+# no new cert logic is needed. Path is ${uuid}-vmtls, distinct from
+# vmpt's ${uuid}-vm, so plain and TLS vmess can coexist.
+# Server inbounds carry no server_name: the single certificate is
+# presented regardless of the client's SNI, and the client side
+# (display: native link, Clash, sing-box) is what pins / verifies it.
+xrsbvmtls(){
+if [ -n "$vmt" ]; then
+vmt=vmtls
+if [ -z "$port_vm_tls" ] && [ ! -e "$HOME/agsbx/port_vm_tls" ]; then
+port_vm_tls=$(shuf -i 10000-65535 -n 1)
+echo "$port_vm_tls" > "$HOME/agsbx/port_vm_tls"
+elif [ -n "$port_vm_tls" ]; then
+echo "$port_vm_tls" > "$HOME/agsbx/port_vm_tls"
+fi
+port_vm_tls=$(cat "$HOME/agsbx/port_vm_tls")
+echo "Vmess-ws-tls端口：$port_vm_tls"
+if [ -e "$HOME/agsbx/xr.json" ]; then
+cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+            "tag": "vmess-tls-xr",
+            "listen": "::",
+            "port": ${port_vm_tls},
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}"
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                    "certificates": [
+                        {
+                            "certificateFile": "$certificateHTA",
+                            "keyFile": "$keyHTA"
+                        }
+                    ]
+                },
+                "wsSettings": {
+                  "path": "${uuid}-vmtls"
+            }
+        },
+            "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": false
+            }
+         },
+EOF
+else
+cat >> "$HOME/agsbx/sb.json" <<EOF
+{
+        "type": "vmess",
+        "tag": "vmess-tls-sb",
+        "listen": "::",
+        "listen_port": ${port_vm_tls},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "alterId": 0
+            }
+        ],
+        "transport": {
+            "type": "ws",
+            "path": "${uuid}-vmtls",
+            "max_early_data":2048,
+            "early_data_header_name": "Sec-WebSocket-Protocol"
+        },
+        "tls": {
+            "enabled": true,
+            "certificate_path": "$certificateHTA",
+            "key_path": "$keyHTA"
+        }
+    },
+EOF
+fi
+else
+vmt=vmtlsargo
+fi
+}
 xrsbso(){
 if [ -n "$sop" ]; then
 sop=sopt
@@ -1795,6 +1889,7 @@ if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != ye
 installxray
 xrsbhy2
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
@@ -1803,6 +1898,7 @@ elif [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != 
 installsb
 xrsbhy2
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
@@ -1812,6 +1908,7 @@ installsb
 installxray
 xrsbhy2
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
@@ -1893,7 +1990,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -2048,6 +2145,29 @@ add=$(cat "$HOME/agsbx/ym" 2>/dev/null)
 jhins=0
 msins=false
 fi
+# self-signed pinning: only when the self-signed cert is in use
+# (msins=true). pin_sha is the DER SHA-256 hex from SHA256.txt, which
+# is exactly Mihomo's fingerprint format (hex string, see
+# mihomo/component/ca CalculateFingerprint). pin_spki is the base64
+# SPKI hash for sing-box certificate_public_key_sha256 (since 1.13).
+# When both are available, Clash uses skip-cert-verify:false +
+# fingerprint, sing-box uses insecure:false +
+# certificate_public_key_sha256, so a self-signed cert is verified
+# (pinned) instead of skipped. When the domain cert is ready
+# (msins=false) no pin is added: CA verification already works, and
+# a pin would break on every 90-day renewal. When a pin cannot be
+# computed, fall back to the old skip behaviour rather than breaking
+# the node with an empty pin.
+pin_sha=""; pin_spki=""; pin_on=0
+if [ "$msins" = "true" ] && [ -f "$HOME/agsbx/selfsigned/cert.crt" ]; then
+pin_sha=$(cat "$HOME/agsbx/SHA256.txt" 2>/dev/null)
+pin_spki=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.crt" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | openssl dgst -sha256 -binary 2>/dev/null | openssl enc -base64 2>/dev/null | tr -d '\n')
+[ -n "$pin_sha" ] && [ -n "$pin_spki" ] && pin_on=1
+fi
+if [ "$pin_on" = "1" ]; then cl_skip=false; sb_insecure=false; else cl_skip="$msins"; sb_insecure="$msins"; fi
+if [ "$pin_on" = "1" ]; then cl_pin_line="  fingerprint: $pin_sha"; else cl_pin_line=""; fi
+if [ "$pin_on" = "1" ]; then sb_pin_field=$(printf ',\n            "certificate_public_key_sha256": ["%s"]' "$pin_spki"); else sb_pin_field=""; fi
+
 echo "*********************************************************"
 echo "*********************************************************"
 echo "Argosbx脚本输出节点配置如下："
@@ -2139,7 +2259,8 @@ cat <<EOF
   network: xhttp
   servername: $sni
   client-fingerprint: chrome
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
   xhttp-opts:
     path: "$uuid-xc"
     mode: auto
@@ -2184,7 +2305,8 @@ cat <<EOF
   network: xhttp
   servername: $sni
   client-fingerprint: chrome
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
   xhttp-opts:
     path: "$uuid-xc"
     mode: auto
@@ -2201,7 +2323,8 @@ cat <<EOF
     - h3
   servername: $sni
   client-fingerprint: chrome
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
   xhttp-opts:
     path: "$uuid-xc"
     mode: auto
@@ -2255,7 +2378,8 @@ cat <<EOF
     - h3
   servername: $sni
   client-fingerprint: chrome
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
   xhttp-opts:
     path: "$uuid-xu"
     mode: auto
@@ -2436,6 +2560,73 @@ echo "$vm_cdn_link"
 echo
 fi
 fi
+if grep vmess-tls-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-tls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+echo "💣【 Vmess-ws-tls 】节点信息如下："
+port_vm_tls=$(cat "$HOME/agsbx/port_vm_tls")
+if [ "$pin_on" = "1" ]; then vmtls_hpkp=", \"hpkp\": \"$pin_sha\""; else vmtls_hpkp=""; fi
+vmtls_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-tls-$hostname\", \"add\": \"$add\", \"port\": \"$port_vm_tls\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$sni\", \"path\": \"/$uuid-vmtls\", \"tls\": \"tls\", \"sni\": \"$sni\", \"alpn\": \"\", \"fp\": \"chrome\"$vmtls_hpkp}" | base64 -w0)"
+echo "$vmtls_link" >> "$HOME/agsbx/jhsub.txt"
+echo "$vmtls_link"
+echo
+sbvmtlspt(){
+cat <<EOF
+{
+            "server": "$add",
+            "server_port": $port_vm_tls,
+            "tag": "${sxname}vmess-ws-tls-$hostname",
+            "tls": {
+                "enabled": true,
+                "server_name": "$sni",
+                "insecure": $sb_insecure$sb_pin_field,
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            },
+            "transport": {
+                "headers": {
+                    "Host": [
+                        "$sni"
+                    ]
+                },
+                "path": "$uuid-vmtls",
+                "type": "ws"
+            },
+            "type": "vmess",
+            "security": "auto",
+            "uuid": "$uuid"
+        },
+EOF
+}
+sbvmtlspt1(){
+echo "\"${sxname}vmess-ws-tls-$hostname\","
+}
+clvmtlspt(){
+cat <<EOF
+- name: ${sxname}vmess-ws-tls-$hostname
+  type: vmess
+  server: $add
+  port: $port_vm_tls
+  uuid: $uuid
+  alterId: 0
+  cipher: auto
+  udp: true
+  tls: true
+  network: ws
+  servername: $sni
+  client-fingerprint: chrome
+  skip-cert-verify: $cl_skip
+$cl_pin_line
+  ws-opts:
+    path: "$uuid-vmtls"
+    headers:
+      Host: $sni
+EOF
+}
+clvmtlspt1(){
+echo "- ${sxname}vmess-ws-tls-$hostname"
+}
+fi
 if grep naive-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Naiveproxy 】节点信息如下："
 port_nv=$(cat "$HOME/agsbx/port_nv")
@@ -2515,7 +2706,7 @@ cat <<EOF
             "min_idle_session": 5,
             "tls": {
                 "enabled": true,
-                "insecure": $msins,
+                "insecure": $sb_insecure$sb_pin_field,
                 "server_name": "$sni"
             }
          },
@@ -2536,7 +2727,8 @@ cat <<EOF
   idle-session-check-interval: 30
   idle-session-timeout: 30
   sni: $sni
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
 EOF
 }
 clanpt1(){
@@ -2618,7 +2810,7 @@ $(sbhy2ports 2>/dev/null)
         "tls": {
             "enabled": true,
             "server_name": "$sni",
-            "insecure": $msins,
+            "insecure": $sb_insecure$sb_pin_field,
             "alpn": [
                 "h3"
             ]
@@ -2640,7 +2832,8 @@ cat <<EOF
   alpn:
     - h3
   sni: $sni                               
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
   fast-open: true
 EOF
 }
@@ -2672,7 +2865,7 @@ cat <<EOF
             "tls":{
                 "enabled": true,
                 "server_name": "$sni",
-                "insecure": $msins,
+                "insecure": $sb_insecure$sb_pin_field,
                 "alpn": [
                     "h3"
                 ]
@@ -2697,7 +2890,8 @@ cat <<EOF
   udp-relay-mode: native
   congestion-controller: bbr
   sni: $sni                                
-  skip-cert-verify: $msins
+  skip-cert-verify: $cl_skip
+$cl_pin_line
 EOF
 }
 cltupt1(){
@@ -2875,10 +3069,10 @@ out=$($f)
 [ -n "$out" ] && printf "%s\n" "$out"
 fi
 }
-sbxy="$(get_func sbvlpt; get_func sbsspt; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
-clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt; get_func clanpt; get_func clvmpt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
-sbgz="$(get_func sbvlpt1; get_func sbsspt1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
-clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1; get_func clanpt1; get_func clvmpt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
+sbxy="$(get_func sbvlpt; get_func sbsspt; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
+clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
+sbgz="$(get_func sbvlpt1; get_func sbsspt1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
+clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
 sbgz=$(printf "%s\n" "$sbgz" | sed '$ s/,$//')
 cat > $HOME/agsbx/sbox.json <<EOF
 {

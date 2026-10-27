@@ -40,7 +40,7 @@ container_vars_save(){
   local f="$HOME/agsbx/container_vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
+  for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt reym cdnym argo agn agk ippz warp name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -50,6 +50,7 @@ container_vars_merge
 export uuid=${uuid}
 export vlpt=${vlpt}
 export vmpt=${vmpt}
+export vmtls=${vmtls}
 export vwpt=${vwpt}
 export hypt=${hypt}
 export tupt=${tupt}
@@ -803,6 +804,89 @@ fi
 fi
 }
 
+# Vmess-ws-tls (private module, container only).
+# Same direct vmess + ws + TLS inbound as modules/vmtls.sh, but in
+# container form: variables are ports, not flags (container ins() checks
+# [ -n "$var" ]), port file is $HOME/agsbx/vmtls, and the certificate
+# is always $HOME/agsbx/selfsigned/cert.pem + private.key, which
+# container_cert_setup already points at the domain cert (symlink) when
+# one is ready, or at the self-signed pair otherwise. Path is
+# ${uuid}-vmtls, distinct from vmpt's ${uuid}-vm.
+xrsbvmtls(){
+if [ -n "$vmtls" ]; then
+if [ -z "$vmtls" ] && [ ! -e "$HOME/agsbx/vmtls" ]; then
+vmtls=$(shuf -i 10000-65535 -n 1)
+echo "$vmtls" > "$HOME/agsbx/vmtls"
+elif [ -n "$vmtls" ]; then
+echo "$vmtls" > "$HOME/agsbx/vmtls"
+fi
+vmtls=$(cat "$HOME/agsbx/vmtls")
+echo "Vmess-ws-tls端口：$vmtls"
+if [ -e "$HOME/agsbx/xr.json" ]; then
+cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+            "tag": "vmess-tls-xr",
+            "listen": "::",
+            "port": ${vmtls},
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}"
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                    "certificates": [
+                        {
+                            "certificateFile": "$HOME/agsbx/selfsigned/cert.pem",
+                            "keyFile": "$HOME/agsbx/selfsigned/private.key"
+                        }
+                    ]
+                },
+                "wsSettings": {
+                  "path": "${uuid}-vmtls"
+            }
+        },
+            "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": false
+            }
+         },
+EOF
+else
+cat >> "$HOME/agsbx/sb.json" <<EOF
+{
+        "type": "vmess",
+        "tag": "vmess-tls-sb",
+        "listen": "::",
+        "listen_port": ${vmtls},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "alterId": 0
+            }
+        ],
+        "transport": {
+            "type": "ws",
+            "path": "${uuid}-vmtls",
+            "max_early_data":2048,
+            "early_data_header_name": "Sec-WebSocket-Protocol"
+        },
+        "tls": {
+            "enabled": true,
+            "certificate_path": "$HOME/agsbx/selfsigned/cert.pem",
+            "key_path": "$HOME/agsbx/selfsigned/private.key"
+        }
+    },
+EOF
+fi
+fi
+}
 xrsbso(){
 if [ -n "$sopt" ]; then
 if [ -z "$sopt" ] && [ ! -e "$HOME/agsbx/sopt" ]; then
@@ -1279,12 +1363,14 @@ fi
 if [ -z "$hypt" ] && [ -z "$tupt" ] && [ -z "$anpt" ] && [ -z "$arpt" ] && [ -z "$sspt" ] && [ "$vlpt_on" != "sb" ]; then
 installxray
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
 elif [ -z "$xhpt" ] && [ -z "$vxpt" ] && [ -z "$vwpt" ] && [ "$vlpt_on" != "xray" ]; then
 installsb
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
@@ -1292,6 +1378,7 @@ else
 installsb
 installxray
 xrsbvm
+xrsbvmtls
 xrsbso
 warpsx
 xrsbout
@@ -1432,6 +1519,8 @@ domain_addr="$server_ip"
 if [ -s "$HOME/agsbx/ym" ]; then domain_addr=$(cat "$HOME/agsbx/ym" 2>/dev/null); elif [ -n "$ym" ]; then domain_addr="$ym"; fi
 reality_addr="$domain_addr"
 if [ "$(cat "$HOME/agsbx/domain_cert_ready" 2>/dev/null)" = "1" ] && [ -s "$HOME/agsbx/ym" ]; then add=$(cat "$HOME/agsbx/ym" 2>/dev/null); sni="$add"; tls_ins=0; else add="$server_ip"; sni="www.bing.com"; tls_ins=1; fi
+if [ "$tls_ins" = "1" ]; then hy2_c_sha=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.pem" -outform DER 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1); else hy2_c_sha=""; fi
+if [ -n "$hy2_c_sha" ]; then hy2_c_ins=0; hy2_c_pin="&pinSHA256=$hy2_c_sha"; else hy2_c_ins="$tls_ins"; hy2_c_pin=""; fi
 sxname=$(cat "$HOME/agsbx/name" 2>/dev/null)
 xvvmcdnym=$(cat "$HOME/agsbx/cdnym" 2>/dev/null)
 echo "*********************************************************"
@@ -1548,7 +1637,7 @@ fi
 if grep hy2-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Hysteria2 】节点信息如下："
 hypt=$(cat "$HOME/agsbx/hypt")
-hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$tls_ins&sni=$sni#${sxname}hy2-$hostname"
+hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$hy2_c_ins&sni=$sni$hy2_c_pin#${sxname}hy2-$hostname"
 echo "$hy2_link" >> "$HOME/agsbx/jh.txt"
 echo "$hy2_link"
 echo
@@ -1576,6 +1665,14 @@ argodomain=$(cat "$HOME/agsbx/sbargoym.log" 2>/dev/null)
 if [ -n "$argodomain" ]; then
 vlvm=$(cat $HOME/agsbx/vlvm 2>/dev/null)
 if [ "$vlvm" = "Vmess" ]; then
+if grep vmess-tls-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-tls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+vmtls_c=$(cat "$HOME/agsbx/vmtls")
+if [ "$tls_ins" = "1" ]; then vmtls_c_sha=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.pem" -outform DER 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1); else vmtls_c_sha=""; fi
+if [ -n "$vmtls_c_sha" ]; then vmtls_c_hpkp=", \"hpkp\": \"$vmtls_c_sha\""; else vmtls_c_hpkp=""; fi
+vmtls_c_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-tls-$hostname\", \"add\": \"$add\", \"port\": \"$vmtls_c\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$sni\", \"path\": \"/$uuid-vmtls\", \"tls\": \"tls\", \"sni\": \"$sni\", \"alpn\": \"\", \"fp\": \"chrome\"$vmtls_c_hpkp}" | base64 -w0)"
+echo "$vmtls_c_link"
+echo
+fi
 vmatls_link1="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vmess-ws-tls-argo-$hostname-443\", \"add\": \"yg1.ygkkk.dpdns.org\", \"port\": \"443\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$argodomain\", \"path\": \"/$uuid-vm\", \"tls\": \"tls\", \"sni\": \"$argodomain\", \"alpn\": \"\", \"fp\": \"chrome\"}" | base64 -w0)"
 echo "$vmatls_link1" >> "$HOME/agsbx/jh.txt"
 vmatls_link2="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vmess-ws-tls-argo-$hostname-8443\", \"add\": \"yg2.ygkkk.dpdns.org\", \"port\": \"8443\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$argodomain\", \"path\": \"/$uuid-vm\", \"tls\": \"tls\", \"sni\": \"$argodomain\", \"alpn\": \"\", \"fp\": \"chrome\"}" | base64 -w0)"

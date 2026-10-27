@@ -149,6 +149,11 @@ def build_index():
                 "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
+    # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---
+    h = replace(h, '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n',
+                '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n            <label><input type="checkbox" data-proto="vmtls"> Vmess-ws-tls <span class="pill">vmtls</span></label><input type="text" placeholder="留空则随机端口" data-port="vmtls">\n', "index-vmtls-checkbox", 1)
+    h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];",
+                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
     h = replace(h, "      if (command === 'rep') {",
                 "      if (command === 'rep' || command === 'add') {", "index-add-handler", 1)
     h = replace(h, "output.value = (vars ? vars + ' ' : '') + selectedCommand + ' rep';",
@@ -180,12 +185,36 @@ def main():
     t = replace(t, "echo \"申请本地IP域名证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)\"",
                 "echo \"域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/agsbx/cert\"", "showmode-acme-line", 1)
 
+    # --- vmess-ws-tls (private): new protocol flag vmtls, internal flag vmt ---
+    # Top variable list, flag handling, rep/install guards, port export,
+    # recovery line, and vars_save list all gain vmtls, following vmpt.
+    t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
+                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do", "vmtls-top-list", 1)
+    t = replace(t, '[ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }',
+                '[ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }\n[ -z "${vmtls+x}" ] || vmt=yes', "vmtls-flag", 1)
+    t = replace(t, '[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]',
+                '[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]', "vmtls-rep-guard", 2)
+    t = replace(t, "export port_vm_ws=${vmpt:-''}",
+                "export port_vm_ws=${vmpt:-''}\nexport port_vm_tls=${vmtls:-''}", "vmtls-port-export", 1)
+    t = replace(t, '$vmp=\\"${port_vm_ws}\\"',
+                '$vmp=\\"${port_vm_ws}\\" $vmt=\\"${port_vm_tls}\\"', "vmtls-recovery", 1)
     # --- incremental update module (top, before sh.txt save + protocol selection) ---
     t = insert_after(t, 'mkdir -p "$HOME/agsbx"\n',
                      vars_mod + 'vars_merge "$1"\n', "vars-module-anchor")
     # --- variable lists ---
-    t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
+    t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
+                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
+    # --- vmess-ws-tls inbound (main): insert xrsbvmtls after xrsbvm ---
+    vmtls_mod = read("modules/vmtls.sh")
+    t = replace(t, "xrsbso(){\nif [ -n \"$sop\" ]; then",
+                vmtls_mod + "xrsbso(){\nif [ -n \"$sop\" ]; then", "vmtls-inbound", 1)
+    # Call it after xrsbvm in all three ins() branches (xrsbvm line
+    # appears exactly 3 times there; xrsbvm is also defined once, but
+    # the definition line is "xrsbvm(){" not "xrsbvm\n", so this is safe).
+    n = t.count("xrsbvm\nxrsbso")
+    if n != 3:
+        print(f"BUILD FAIL: vmtls-call: expected 3 occurrence(s), found {n}", file=sys.stderr); sys.exit(1)
+    t = t.replace("xrsbvm\nxrsbso", "xrsbvm\nxrsbvmtls\nxrsbso")
     t = replace(t, 'export alns=\\"${alns}\\" ',
                 'export alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" vlpt_kernel=\\"${vlpt_kernel}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
 
@@ -388,6 +417,140 @@ fi
     t = replace(t, '- name: ${sxname}vmess-ws-$hostname                         \n  type: vmess\n  server: $server_ip',
                 '- name: ${sxname}vmess-ws-$hostname                         \n  type: vmess\n  server: $domain_addr', "plain-vm-clash-config", 1)
 
+    # --- self-signed pinning (private, display only) ---
+    # Inserted right after the msins/sni determination in the display
+    # section, so every Clash / sing-box function defined later can use
+    # cl_skip / cl_pin_line / sb_insecure / sb_pin_field. See the module
+    # comment in the inserted code for the field semantics and the
+    # domain-cert / missing-pin fallbacks.
+    pin_code = '''# self-signed pinning: only when the self-signed cert is in use
+# (msins=true). pin_sha is the DER SHA-256 hex from SHA256.txt, which
+# is exactly Mihomo's fingerprint format (hex string, see
+# mihomo/component/ca CalculateFingerprint). pin_spki is the base64
+# SPKI hash for sing-box certificate_public_key_sha256 (since 1.13).
+# When both are available, Clash uses skip-cert-verify:false +
+# fingerprint, sing-box uses insecure:false +
+# certificate_public_key_sha256, so a self-signed cert is verified
+# (pinned) instead of skipped. When the domain cert is ready
+# (msins=false) no pin is added: CA verification already works, and
+# a pin would break on every 90-day renewal. When a pin cannot be
+# computed, fall back to the old skip behaviour rather than breaking
+# the node with an empty pin.
+pin_sha=""; pin_spki=""; pin_on=0
+if [ "$msins" = "true" ] && [ -f "$HOME/agsbx/selfsigned/cert.crt" ]; then
+pin_sha=$(cat "$HOME/agsbx/SHA256.txt" 2>/dev/null)
+pin_spki=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.crt" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | openssl dgst -sha256 -binary 2>/dev/null | openssl enc -base64 2>/dev/null | tr -d '\\n')
+[ -n "$pin_sha" ] && [ -n "$pin_spki" ] && pin_on=1
+fi
+if [ "$pin_on" = "1" ]; then cl_skip=false; sb_insecure=false; else cl_skip="$msins"; sb_insecure="$msins"; fi
+if [ "$pin_on" = "1" ]; then cl_pin_line="  fingerprint: $pin_sha"; else cl_pin_line=""; fi
+if [ "$pin_on" = "1" ]; then sb_pin_field=$(printf ',\\n            "certificate_public_key_sha256": ["%s"]' "$pin_spki"); else sb_pin_field=""; fi
+'''
+    t = replace(t, 'else\nsni=$(cat "$HOME/agsbx/ym" 2>/dev/null)\nadd=$(cat "$HOME/agsbx/ym" 2>/dev/null)\njhins=0\nmsins=false\nfi',
+                'else\nsni=$(cat "$HOME/agsbx/ym" 2>/dev/null)\nadd=$(cat "$HOME/agsbx/ym" 2>/dev/null)\njhins=0\nmsins=false\nfi\n' + pin_code, "pin-compute", 1)
+    # Clash: all 7 subscription skip lines (xhttp-tls x4, anytls, hy2,
+    # tuic) become skip:$cl_skip plus a fingerprint line when pinned.
+    # An empty cl_pin_line leaves a blank YAML line, which is harmless.
+    n = t.count("  skip-cert-verify: $msins")
+    if n != 7:
+        print(f"BUILD FAIL: pin-clash: expected 7 occurrence(s), found {n}", file=sys.stderr); sys.exit(1)
+    t = t.replace("  skip-cert-verify: $msins", "  skip-cert-verify: $cl_skip\n$cl_pin_line")
+    # sing-box: all 3 subscription insecure lines (anytls, hy2, tuic)
+    # become insecure:$sb_insecure plus a SPKI pin field when pinned.
+    # The template comma after $msins now follows the pin field, so
+    # pinned JSON is "insecure": false, "certificate_public_key_sha256":
+    # [...], <next field>, and unpinned JSON is unchanged.
+    n = t.count('"insecure": $msins,')
+    if n != 3:
+        print(f"BUILD FAIL: pin-singbox: expected 3 occurrence(s), found {n}", file=sys.stderr); sys.exit(1)
+    t = t.replace('"insecure": $msins,', '"insecure": $sb_insecure$sb_pin_field,')
+    # --- vmess-ws-tls display (native link + sing-box + Clash) ---
+    # Inserted between the vmess-ws block and the naive block. Native
+    # link: tls:"tls", sni/host = $sni, add = $add (domain when the
+    # domain cert is ready, otherwise IP + www.bing.com), hpkp pin only
+    # when self-signed and pinned (same $pin_sha as Clash fingerprint).
+    vmtls_display = '''if grep vmess-tls-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-tls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+echo "💣【 Vmess-ws-tls 】节点信息如下："
+port_vm_tls=$(cat "$HOME/agsbx/port_vm_tls")
+if [ "$pin_on" = "1" ]; then vmtls_hpkp=", \\"hpkp\\": \\"$pin_sha\\""; else vmtls_hpkp=""; fi
+vmtls_link="vmess://$(echo "{ \\"v\\": \\"2\\", \\"ps\\": \\"${sxname}vm-ws-tls-$hostname\\", \\"add\\": \\"$add\\", \\"port\\": \\"$port_vm_tls\\", \\"id\\": \\"$uuid\\", \\"aid\\": \\"0\\", \\"scy\\": \\"auto\\", \\"net\\": \\"ws\\", \\"type\\": \\"none\\", \\"host\\": \\"$sni\\", \\"path\\": \\"/$uuid-vmtls\\", \\"tls\\": \\"tls\\", \\"sni\\": \\"$sni\\", \\"alpn\\": \\"\\", \\"fp\\": \\"chrome\\"$vmtls_hpkp}" | base64 -w0)"
+echo "$vmtls_link" >> "$HOME/agsbx/jhsub.txt"
+echo "$vmtls_link"
+echo
+sbvmtlspt(){
+cat <<EOF
+{
+            "server": "$add",
+            "server_port": $port_vm_tls,
+            "tag": "${sxname}vmess-ws-tls-$hostname",
+            "tls": {
+                "enabled": true,
+                "server_name": "$sni",
+                "insecure": $sb_insecure$sb_pin_field,
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            },
+            "transport": {
+                "headers": {
+                    "Host": [
+                        "$sni"
+                    ]
+                },
+                "path": "$uuid-vmtls",
+                "type": "ws"
+            },
+            "type": "vmess",
+            "security": "auto",
+            "uuid": "$uuid"
+        },
+EOF
+}
+sbvmtlspt1(){
+echo "\\"${sxname}vmess-ws-tls-$hostname\\","
+}
+clvmtlspt(){
+cat <<EOF
+- name: ${sxname}vmess-ws-tls-$hostname
+  type: vmess
+  server: $add
+  port: $port_vm_tls
+  uuid: $uuid
+  alterId: 0
+  cipher: auto
+  udp: true
+  tls: true
+  network: ws
+  servername: $sni
+  client-fingerprint: chrome
+  skip-cert-verify: $cl_skip
+$cl_pin_line
+  ws-opts:
+    path: "$uuid-vmtls"
+    headers:
+      Host: $sni
+EOF
+}
+clvmtlspt1(){
+echo "- ${sxname}vmess-ws-tls-$hostname"
+}
+fi
+'''
+    t = replace(t, 'if grep naive-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then',
+                vmtls_display + 'if grep naive-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then', "vmtls-display", 1)
+    # Group lists: vmess-ws-tls joins both subscription groups, after
+    # plain vmess-ws, so it is selected by load-balance / url-test /
+    # selector exactly like the other nodes.
+    t = replace(t, "get_func sbvmpt; get_func sbhypt",
+                "get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt", "vmtls-sb-group", 1)
+    t = replace(t, "get_func clvmpt; get_func clhypt",
+                "get_func clvmpt; get_func clvmtlspt; get_func clhypt", "vmtls-cl-group", 1)
+    t = replace(t, "get_func sbvmpt1; get_func sbhypt1",
+                "get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1", "vmtls-sb-group1", 1)
+    t = replace(t, "get_func clvmpt1; get_func clhypt1",
+                "get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1", "vmtls-cl-group1", 1)
+
     # --- cert main block replacement (upstream acme-yg block -> private cert block) ---
     upstream_block = '''if [ -n "$alns" ] && [ ! -s "/root/ygkkkca/private.key" ]; then
 bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
@@ -418,6 +581,37 @@ def build_container():
     c = replace(c, 'echo "Argosbx脚本项目地址：https://github.com/yonggekkk/argosbx"',
                 'echo "Argosbx脚本项目地址：https://github.com/qytang2014/argosbx"', "container-project-link", 1)
     c = replace(c, "export name=${name}", "export name=${name}\nexport ym=${ym}\nexport vlpt_kernel=${vlpt_kernel}", "container-ym-export", 1)
+    # --- vmess-ws-tls (container): export, inbound, call, display link ---
+    c = replace(c, "export vmpt=${vmpt}", "export vmpt=${vmpt}\nexport vmtls=${vmtls}", "container-vmtls-export", 1)
+    vmtls_c = read("modules/vmtls-container.sh")
+    c = replace(c, "xrsbso(){\nif [ -n \"$sopt\" ]; then",
+                vmtls_c + "xrsbso(){\nif [ -n \"$sopt\" ]; then", "container-vmtls-inbound", 1)
+    n = c.count("xrsbvm\nxrsbso")
+    if n == 0:
+        print("BUILD FAIL: container-vmtls-call: expected at least 1 occurrence, found 0", file=sys.stderr); sys.exit(1)
+    c = c.replace("xrsbvm\nxrsbso", "xrsbvm\nxrsbvmtls\nxrsbso")
+    # Container display link: after the plain vmess block, before the
+    # Argo vmess links. add/sni/tls_ins are already set by
+    # container-display-addr; hpkp pin only when self-signed
+    # (tls_ins=1) and the self-signed cert parses.
+    vmtls_c_display = '''if grep vmess-tls-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-tls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+vmtls_c=$(cat "$HOME/agsbx/vmtls")
+if [ "$tls_ins" = "1" ]; then vmtls_c_sha=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.pem" -outform DER 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1); else vmtls_c_sha=""; fi
+if [ -n "$vmtls_c_sha" ]; then vmtls_c_hpkp=", \\"hpkp\\": \\"$vmtls_c_sha\\""; else vmtls_c_hpkp=""; fi
+vmtls_c_link="vmess://$(echo "{ \\"v\\": \\"2\\", \\"ps\\": \\"${sxname}vm-ws-tls-$hostname\\", \\"add\\": \\"$add\\", \\"port\\": \\"$vmtls_c\\", \\"id\\": \\"$uuid\\", \\"aid\\": \\"0\\", \\"scy\\": \\"auto\\", \\"net\\": \\"ws\\", \\"type\\": \\"none\\", \\"host\\": \\"$sni\\", \\"path\\": \\"/$uuid-vmtls\\", \\"tls\\": \\"tls\\", \\"sni\\": \\"$sni\\", \\"alpn\\": \\"\\", \\"fp\\": \\"chrome\\"$vmtls_c_hpkp}" | base64 -w0)"
+echo "$vmtls_c_link"
+echo
+fi
+'''
+    # Anchor: the container Argo vmess section starts with the first
+    # vmatls_link assignment; insert the direct link just before it.
+    if 'vmatls_link1=' not in c:
+        print("BUILD FAIL: container-vmtls-display-anchor", file=sys.stderr); sys.exit(1)
+    c = c.replace('vmatls_link1=', vmtls_c_display + 'vmatls_link1=', 1)
+    # Container hy2 native link: pin when self-signed, matching main.
+    # The pin variables are appended to display_tls below (that
+    # assignment runs after this block, so a replacement here would
+    # find nothing yet).
     # --- vlpt dual-support, container (same rules as main, ports not flags) ---
     vlpt_sb_c = read("modules/vlpt-sb-container.sh")
     vlpt_on_c = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
@@ -457,7 +651,9 @@ url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/private.key"
 url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/cert.pem"; out="$HOME/agsbx/cert.pem"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")
 fi"""
     c = replace(c, old_cert, "container_cert_setup", "container-cert-block", 1)
-    display_tls = """if [ "$(cat "$HOME/agsbx/domain_cert_ready" 2>/dev/null)" = "1" ] && [ -s "$HOME/agsbx/ym" ]; then add=$(cat "$HOME/agsbx/ym" 2>/dev/null); sni="$add"; tls_ins=0; else add="$server_ip"; sni="www.bing.com"; tls_ins=1; fi"""
+    display_tls = """if [ "$(cat "$HOME/agsbx/domain_cert_ready" 2>/dev/null)" = "1" ] && [ -s "$HOME/agsbx/ym" ]; then add=$(cat "$HOME/agsbx/ym" 2>/dev/null); sni="$add"; tls_ins=0; else add="$server_ip"; sni="www.bing.com"; tls_ins=1; fi
+if [ "$tls_ins" = "1" ]; then hy2_c_sha=$(openssl x509 -in "$HOME/agsbx/selfsigned/cert.pem" -outform DER 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1); else hy2_c_sha=""; fi
+if [ -n "$hy2_c_sha" ]; then hy2_c_ins=0; hy2_c_pin="&pinSHA256=$hy2_c_sha"; else hy2_c_ins="$tls_ins"; hy2_c_pin=""; fi"""
     c = replace(c, 'server_ip=$(cat "$HOME/agsbx/server_ip.log")',
                 'server_ip=$(cat "$HOME/agsbx/server_ip.log")\n' + domain_addr + display_tls,
                 "container-display-addr", 1)
@@ -469,7 +665,7 @@ fi"""
     c = replace(c, '2022-blake3-aes-128-gcm:$sskey@$server_ip:$sspt', '2022-blake3-aes-128-gcm:$sskey@$domain_addr:$sspt', "container-plain-ss", 1)
     c = replace(c, '\\"add\\": \\"$server_ip\\", \\"port\\": \\"$vmpt\\"', '\\"add\\": \\"$domain_addr\\", \\"port\\": \\"$vmpt\\"', "container-plain-vm", 1)
     c = replace(c, 'hy2_link="hysteria2://$uuid@$server_ip:$hypt?security=tls&alpn=h3&insecure=1&sni=www.bing.com',
-                'hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$tls_ins&sni=$sni', "container-tls-hy2", 1)
+                'hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$hy2_c_ins&sni=$sni$hy2_c_pin', "container-tls-hy2", 1)
     c = replace(c, 'tuic5_link="tuic://$uuid:$uuid@$server_ip:$tupt?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=www.bing.com&allow_insecure=1&allowInsecure=1',
                 'tuic5_link="tuic://$uuid:$uuid@$add:$tupt?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$sni&allow_insecure=$tls_ins&allowInsecure=$tls_ins', "container-tls-tuic", 1)
     c = replace(c, 'an_link="anytls://$uuid@$server_ip:$anpt?insecure=1&allowInsecure=1',

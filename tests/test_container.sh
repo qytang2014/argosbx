@@ -20,7 +20,7 @@ grep -Fq "releases/download/argosbx/sing-box" "$F" || { echo "FAIL: sing-box dow
 # Links: Reality + non-TLS use domain_addr, TLS uses add/sni/tls_ins, CDN/Argo untouched
 for link in 'vl_xh_link="vless://$uuid@$domain_addr:$xhpt' 'vl_link="vless://$uuid@$domain_addr:$vlpt' \
             'ar_link="anytls://$uuid@$domain_addr:$arpt' 'vl_vx_link="vless://$uuid@$domain_addr:$vxpt' \
-            'vl_vw_link="vless://$uuid@$domain_addr:$vwpt' 'hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$tls_ins&sni=$sni' \
+            'vl_vw_link="vless://$uuid@$domain_addr:$vwpt' 'hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$hy2_c_ins&sni=$sni$hy2_c_pin' \
             'an_link="anytls://$uuid@$add:$anpt?insecure=$tls_ins'; do
   grep -Fq "$link" "$F" || { echo "FAIL: missing $link"; FAIL=1; }
 done
