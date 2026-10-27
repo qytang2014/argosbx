@@ -105,6 +105,42 @@ sed -i "71s/^.*$/AGKS=\"${quoted% }\"/" $HOME/sapsbx.sh
 fi
 fi
 echo
+echo "每个账号对应节点域名 ym 空一格，个别账号不启用填 no；SAP 容器不发证，ym 只用于 Reality / 非 TLS 链接的域名地址"
+read -p "选填！请输入节点域名 ym: " input
+if [ -z "$input" ]; then
+sed -i 's/^YMS=.*$/YMS=""/' $HOME/sapsbx.sh
+else
+quoted=$(printf '%s ' $input)
+sed -i "s/^YMS=.*$/YMS=\"${quoted% }\"/" $HOME/sapsbx.sh
+fi
+echo
+echo "每个账号对应出口节点 egress_nodes 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no；仅私有容器镜像生效"
+read -p "选填！请输入出口节点 egress_nodes: " input
+if [ -z "$input" ]; then
+sed -i 's/^EGRESS_NODES=.*$/EGRESS_NODES=""/' $HOME/sapsbx.sh
+else
+quoted=$(printf '%s ' $input)
+sed -i "s/^EGRESS_NODES=.*$/EGRESS_NODES=\"${quoted% }\"/" $HOME/sapsbx.sh
+fi
+echo
+echo "每个账号对应出口绑定 egress_bind 空一格，单账号内用 ',' 分隔本地 IP，个别账号不启用填 no"
+read -p "选填！请输入出口绑定 egress_bind: " input
+if [ -z "$input" ]; then
+sed -i 's/^EGRESS_BINDS=.*$/EGRESS_BINDS=""/' $HOME/sapsbx.sh
+else
+quoted=$(printf '%s ' $input)
+sed -i "s/^EGRESS_BINDS=.*$/EGRESS_BINDS=\"${quoted% }\"/" $HOME/sapsbx.sh
+fi
+echo
+echo "每个账号对应分流规则 egress_rules 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no"
+read -p "选填！请输入分流规则 egress_rules: " input
+if [ -z "$input" ]; then
+sed -i 's/^EGRESS_RULES=.*$/EGRESS_RULES=""/' $HOME/sapsbx.sh
+else
+quoted=$(printf '%s ' $input)
+sed -i "s/^EGRESS_RULES=.*$/EGRESS_RULES=\"${quoted% }\"/" $HOME/sapsbx.sh
+fi
+echo
 read -p "选填！请输入8:10-9:00点的保活时间间隔（单位:分钟，回车默认5分钟间隔）: " input
 if [ -z "$input" ]; then
 sed -i "74s/^.*$/crontime=5/" $HOME/sapsbx.sh
@@ -172,7 +208,7 @@ echo "*****************************************************"
 echo "*****************************************************"
 cf_line=$(sed -n '50p' "$HOME/sapsbx.sh" 2>/dev/null)
 cf_value=$(echo "$cf_line" | sed -E 's/CF_USERNAMES="(.*)"/\1/' | xargs 2>/dev/null)
-[ -z "$cf_value" ] && echo "当前未设置SAP变量，选择1添加变量" || { echo "当前已设置过SAP变量，详情如下显示，可选择2执行一次"; sed -n '47,76p' "$HOME/sapsbx.sh" 2>/dev/null; }
+[ -z "$cf_value" ] && echo "当前未设置SAP变量，选择1添加变量" || { echo "当前已设置过SAP变量，详情如下显示，可选择2执行一次"; sed -n '47,76p' "$HOME/sapsbx.sh" 2>/dev/null; grep -E '^(YMS|EGRESS_NODES|EGRESS_BINDS|EGRESS_RULES)=' "$HOME/sapsbx.sh" 2>/dev/null; }
 echo "*****************************************************"
 echo " 1. 安装脚本并添加/重置变量" 
 echo " 2. 手动测试执行一次"

@@ -10,6 +10,7 @@ bash tests/test_egress_v2.sh
 bash tests/test_cert.sh
 bash tests/test_cert_migrate.sh
 bash tests/test_vars.sh
+bash tests/test_sap.sh
 bash tests/test_cert_watch.sh
 bash tests/test_reality_addr.sh
 bash tests/test_plain_addr.sh

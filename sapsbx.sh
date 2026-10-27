@@ -78,6 +78,18 @@ crontime=5
 # 优先独立执行！删除账户内的APP名称，多个APP空一格，执行后务必还原留空状态：DELAPP="" 
 DELAPP=""
 
+# 选填！每个账号对应的节点域名 ym 空一格，个别账号不启用填 no。SAP 容器不发证（容器内无宿主证书可挂载），ym 在 SAP 里只用于 Reality / 非 TLS 链接的域名地址，不会产生域名证书。
+YMS=""
+
+# 选填！每个账号对应的出口节点 egress_nodes 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no。仅当容器镜像是私有构建（含容器分流模块）时生效。
+EGRESS_NODES=""
+
+# 选填！每个账号对应的出口绑定 egress_bind 空一格，单账号内用 ',' 分隔本地 IP，个别账号不启用填 no。
+EGRESS_BINDS=""
+
+# 选填！每个账号对应的分流规则 egress_rules 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no。
+EGRESS_RULES=""
+
 echo "*****************************************************"
 echo "*****************************************************"
 echo "甬哥Github项目  ：github.com/yonggekkk"
@@ -95,6 +107,10 @@ read -ra APP_NAMES <<< "$APP_NAMES"
 read -ra VMPTS <<< "$VMPTS"
 read -ra AGNS <<< "$AGNS"
 read -ra AGKS <<< "$AGKS"
+read -ra YMS <<< "$YMS"
+read -ra EGRESS_NODES <<< "$EGRESS_NODES"
+read -ra EGRESS_BINDS <<< "$EGRESS_BINDS"
+read -ra EGRESS_RULES <<< "$EGRESS_RULES"
 jbpath=$(readlink -f "$0")
 crontab -l 2>/dev/null > /tmp/crontab.tmp
 sed -i "\|$jbpath|d" /tmp/crontab.tmp
@@ -124,6 +140,10 @@ sapcfevn() {
     cf set-env "$APP_NAME" vmpt "$VMPT"
     cf set-env "$APP_NAME" argo "y"
   fi
+  [ -n "$YM" ] && cf set-env "$APP_NAME" ym "$YM"
+  [ -n "$EGRESS_NODE" ] && cf set-env "$APP_NAME" egress_nodes "$EGRESS_NODE"
+  [ -n "$EGRESS_BIND" ] && cf set-env "$APP_NAME" egress_bind "$EGRESS_BIND"
+  [ -n "$EGRESS_RULE" ] && cf set-env "$APP_NAME" egress_rules "$EGRESS_RULE"
   ROUTE=$(cf app "$APP_NAME" | grep "routes:" | awk '{print $2}')
   cf set-env "$APP_NAME" DOMAIN "$ROUTE"
 }
@@ -156,6 +176,14 @@ for i in "${!CF_USERNAMES[@]}"; do
   [ "$VMPT" = "no" ] && VMPT=""
   [ "$AGN" = "no" ] && AGN=""
   [ "$AGK" = "no" ] && AGK=""
+  YM="${YMS[$i]}"
+  EGRESS_NODE="${EGRESS_NODES[$i]}"
+  EGRESS_BIND="${EGRESS_BINDS[$i]}"
+  EGRESS_RULE="${EGRESS_RULES[$i]}"
+  [ "$YM" = "no" ] && YM=""
+  [ "$EGRESS_NODE" = "no" ] && EGRESS_NODE=""
+  [ "$EGRESS_BIND" = "no" ] && EGRESS_BIND=""
+  [ "$EGRESS_RULE" = "no" ] && EGRESS_RULE=""
   case "$REGION" in
     SG) CF_API="https://api.cf.ap21.hana.ondemand.com"; serv="sg" ;;
     US) CF_API="https://api.cf.us10-001.hana.ondemand.com"; serv="us" ;;
@@ -228,7 +256,7 @@ for i in "${!CF_USERNAMES[@]}"; do
     fi
   else
     echo "🟡${APP_NAME} 未部署，开始部署……"
-    push_out="$(cf push "$APP_NAME" --docker-image ygkkk/argosbx -m 512M --health-check-type port 2>&1)"
+    push_out="$(cf push "$APP_NAME" --docker-image qytang2014/argosbx -m 512M --health-check-type port 2>&1)"
     echo "$push_out"
     pushout
     if [ $? -ne 0 ]; then
