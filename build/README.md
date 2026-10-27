@@ -33,6 +33,7 @@ bash -n container/nodejs/start.sh
 ## 容器（第 2 步证书 + 域名地址，第 3 步后补 egress 对齐）
 - 容器 egress 与主脚本共用 `modules/egress.sh`（最终版，含 trojan / vmess / shadowsocks、xhttp、geoip / geosite / 端口 / 协议规则），在 `xrsbout()` 前插入模块、`xrsbout()` 开头调 `egress_init`，4 个钩子（sing-box / xray 出站 + 路由）与主脚本同构，只是 sing-box 路由锚点按容器格式（6 空格 `{`）匹配。
 - 容器没有生成页，egress 变量通过容器环境变量传入：`egress_nodes` / `egress_bind` / `egress_rules`（与主脚本相同的 `;` 格式，已在 `ins()` 导出列表里），空配置时生成的 JSON 与之前一致。
+- geo 数据库（主脚本 + 容器共用同一逻辑）：只有规则里出现 `geoip:` / `geosite:` 才触发 `egress_geo_setup`，文件已存在就跳过；sing-box 的 `geoip.db` / `geosite.db`（SagerNet）和 xray 的 `geoip.dat` / `geosite.dat`（Loyalsoldier）都下到 `$HOME/agsbx/`，sing-box route 通过 `egress_sb_geo_cfg` 钩子加 path 配置，xray 通过 `XRAY_LOCATION_ASSET=$HOME/agsbx`；下载失败只告警、不删规则。
 - `modules/container-cert.sh`：容器证书选择函数。容器不发证：只有宿主已在 `$HOME/argosbx/cert/` 放好 cert.crt + private.key（且域名匹配 ym）时才用它（软链接到 cert.pem / private.key，容器重启后跟随宿主续期），否则回落本地自签；原版公开密钥下载兜底已删除。
 - 容器 TLS 链接（HY2/TUIC/AnyTLS）用 `$add` / `$sni` / `$tls_ins`：域名证书就绪时 `add=ym, sni=ym, insecure=0`，否则 `add=IP, sni=www.bing.com, insecure=1`。
 - 容器 Reality 与非 TLS 链接用复用的 `modules/reality-addr.sh`（`domain_addr`），SNI 仍是 `$reym`，CDN / Argo 链接不动，内核（sing-box / xray）仍从原版 release 下载。

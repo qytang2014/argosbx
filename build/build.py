@@ -182,7 +182,9 @@ def main():
     t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
                 'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
-                'xrsbout(){\negress_init\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
+                'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
+    t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
+                '  "route": {\n${egress_sb_geo_cfg}    "rules": [\n       {\n          "action": "sniff"', "sb-geo-cfg-hook", 1)
     t = replace(t, '  "outbounds": [\n    {\n      "protocol": "freedom",\n      "tag": "direct",',
                 '  "outbounds": [\n${egress_xr_outbounds}    {\n      "protocol": "freedom",\n      "tag": "direct",', "xr-outbounds-hook", 1)
     t = replace(t, '  "outbounds": [\n    {\n      "type": "direct",\n      "tag": "direct"\n    }\n  ],',
@@ -288,7 +290,9 @@ fi"""
     c = replace(c, "export ym=${ym}", "export ym=${ym}\nexport egress_nodes=${egress_nodes}\nexport egress_bind=${egress_bind}\nexport egress_rules=${egress_rules}", "container-egress-exports", 1)
     c = replace(c, "xrsbout(){", egress_mod + "xrsbout(){", "container-egress-module", 1)
     c = replace(c, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
-                'xrsbout(){\negress_init\nif [ -e "$HOME/agsbx/xr.json" ]; then', "container-egress-init", 1)
+                'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "container-egress-init", 1)
+    c = replace(c, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
+                '  "route": {\n${egress_sb_geo_cfg}    "rules": [\n       {\n          "action": "sniff"', "container-sb-geo-cfg-hook", 1)
     c = replace(c, '  "outbounds": [\n    {\n      "protocol": "freedom",\n      "tag": "direct",',
                 '  "outbounds": [\n${egress_xr_outbounds}    {\n      "protocol": "freedom",\n      "tag": "direct",', "container-xr-outbounds-hook", 1)
     c = replace(c, '  "outbounds": [\n    {\n      "type": "direct",\n      "tag": "direct"\n    }\n  ],',

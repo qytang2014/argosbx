@@ -1194,6 +1194,19 @@ fi
 #   Limits to know: geoip/geosite rules need the kernel's geoip/geosite
 #   database files, otherwise they may not match; protocol rules need
 #   sniffing enabled on the inbound, otherwise they may not match.
+#   Geo databases (egress_geo_setup, called from xrsbout after egress_init):
+#   only when egress_rules contains a geoip:/geosite: rule, and only for
+#   files that do not already exist in $HOME/agsbx/: sing-box geoip.db
+#   (SagerNet sing-geoip) + geosite.db (SagerNet sing-geosite), xray
+#   geoip.dat + geosite.dat (Loyalsoldier v2ray-rules-dat); sing-box
+#   route gets geoip/geosite path blocks via egress_sb_geo_cfg, xray
+#   gets XRAY_LOCATION_ASSET=$HOME/agsbx. A download failure only
+#   warns and keeps the rules (never silently drops a rule).
+#   Filling geo rules: geoip codes are lowercase country codes as in
+#   the database (cn, us, jp, ...; private = private/LAN IPs), geosite
+#   codes are category names as in the database (google, youtube,
+#   netflix, cn, ...); if a code is not in the database it simply
+#   never matches, so check the database's code list first.
 egress_json_escape(){ printf '%s' "$1" | tr -d '\n\r' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 egress_url_decode(){ local s="$1"; s=$(printf '%s' "$s" | sed 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g'); printf '%b' "$s"; }
 egress_query_param(){ local q="&$1&" k="$2" v=""; case "$q" in *"&${k}="*) v="${q#*&${k}=}"; v="${v%%&*}"; egress_url_decode "$v";; *) printf '';; esac; }
@@ -1362,8 +1375,41 @@ egress_parse_rules(){
     esac
   done; IFS="$oldifs"
 }
+egress_geo_needed(){
+  egress_geo_needed=0; egress_sb_geo_cfg=""
+  local r="" typ="" oldifs="$IFS"
+  IFS=';'; for r in $egress_rules; do typ="${r%%:*}"; case "$typ" in geoip|geosite) egress_geo_needed=1;; esac; done; IFS="$oldifs"
+  if [ "$egress_geo_needed" = 1 ]; then
+    egress_sb_geo_cfg="    \"geoip\": {\"path\": \"$HOME/agsbx/geoip.db\"},
+    \"geosite\": {\"path\": \"$HOME/agsbx/geosite.db\"},
+"
+  fi
+}
+egress_geo_download(){ # $1=url $2=file ; skip existing non-empty files
+  local url="$1" file="$2"
+  [ -s "$file" ] && return 0
+  if command -v curl >/dev/null 2>&1; then
+    curl -L --connect-timeout 15 -o "$file" "$url" >/dev/null 2>&1 || { rm -f "$file"; echo "geo 数据库下载失败：$url，请手动下载到 $file"; return 1; }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$file" "$url" >/dev/null 2>&1 || { rm -f "$file"; echo "geo 数据库下载失败：$url，请手动下载到 $file"; return 1; }
+  else
+    echo "geo 数据库需要下载但本机没有 curl/wget，请手动下载到 $file"; return 1
+  fi
+  [ -s "$file" ] || { rm -f "$file"; echo "geo 数据库下载后文件为空：$file"; return 1; }
+  return 0
+}
+egress_geo_setup(){
+  [ "$egress_geo_needed" = 1 ] || return 0
+  mkdir -p "$HOME/agsbx" 2>/dev/null || true
+  egress_geo_download "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db" "$HOME/agsbx/geoip.db"
+  egress_geo_download "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db" "$HOME/agsbx/geosite.db"
+  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" "$HOME/agsbx/geoip.dat"
+  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" "$HOME/agsbx/geosite.dat"
+  export XRAY_LOCATION_ASSET="$HOME/agsbx"
+}
 egress_init(){
   egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0
+  egress_geo_needed
   [ -n "$egress_nodes" ] || [ -n "$egress_bind" ] || [ -n "$egress_rules" ] || return 0
   local oldifs="$IFS" item="" n=0
   IFS=';'; for item in $egress_nodes; do [ -n "$item" ] && egress_parse_link "$item"; done; IFS="$oldifs"
@@ -1379,6 +1425,7 @@ egress_init(){
 
 xrsbout(){
 egress_init
+egress_geo_setup
 if [ -e "$HOME/agsbx/xr.json" ]; then
 sed -i '${s/,\s*$//}' "$HOME/agsbx/xr.json"
 cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -1516,7 +1563,7 @@ ${egress_sb_outbounds}    {
     }
   ],
   "route": {
-    "rules": [
+${egress_sb_geo_cfg}    "rules": [
        {
           "action": "sniff"
         },
