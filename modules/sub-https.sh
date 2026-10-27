@@ -40,6 +40,19 @@
 #   by this module. Node ufw_sync never touches 443, and this module
 #   never touches node rules, so a standalone subhttpsync on reboot
 #   cannot delete node rules (it has no protocol variables in scope).
+# - The subscription port (subpt, else the random port in subport.log)
+#   is managed the same way, but only for HTTP subscriptions: when
+#   websbx actually serves externally (http IP or http domain), its
+#   port must be open or the subscription is unreachable behind ufw.
+#   It is tracked by subhttps.subport (content "port/tcp"), NOT by
+#   ufw.rules, because the port is only known after the sub block
+#   runs (ufw_sync runs before it, so a first install would record
+#   a stale port, and a port change on rep would be missed). When
+#   the mode switches to https, websbx is stopped, so the old
+#   subscription port is deleted; when the port changes, the old
+#   rule is deleted and the new one opened. ufw_apply_saved calls
+#   this manager too, so enabling ufw later and running ufwsync
+#   opens the subscription port as well as the node ports.
 # - All failures fall back, never abort: sync returns 0 even when
 #   HTTPS is unavailable, so install/display/list never break.
 subhttps_trim(){
@@ -201,6 +214,42 @@ subhttps_manage_443(){
   fi
   return 0
 }
+subhttps_manage_subport(){
+  local mode="$1" subport="" old="" desired=""
+  if [ -f "$HOME/agsbx/subhttps.subport" ]; then old=$(subhttps_read "$HOME/agsbx/subhttps.subport"); fi
+  # HTTPS or no subscription: websbx is stopped (or never started),
+  # so any previously opened subscription port must go, not stay
+  # open for a server that no longer listens. This branch runs
+  # before the token check on purpose, so del also cleans it up.
+  if [ "$mode" = "https" ] || [ -z "$(subhttps_read "$HOME/agsbx/subtoken.log")" ]; then
+    if [ -z "$old" ]; then return 0; fi
+    # Delete even when ufw is currently inactive: the rule is still
+    # stored and would become active again when ufw is enabled,
+    # even though websbx is stopped. This matches the 443 delete
+    # path, which also deletes regardless of active status.
+    if command -v ufw >/dev/null 2>&1; then
+      if ufw --force delete allow "$old" >/dev/null 2>&1; then rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true; else echo "ufw 删除订阅端口失败（已忽略，下次同步重试）"; fi
+    else
+      rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  subport=$(subhttps_read "$HOME/agsbx/subport.log")
+  case "$subport" in ''|*[!0-9]*) return 0;; esac
+  if [ "$subport" -lt 1 ] 2>/dev/null || [ "$subport" -gt 65535 ] 2>/dev/null; then return 0; fi
+  desired="$subport/tcp"
+  if [ "$old" = "$desired" ]; then return 0; fi
+  if [ -n "$old" ] && command -v ufw >/dev/null 2>&1; then
+    ufw --force delete allow "$old" >/dev/null 2>&1 || echo "ufw 删除旧订阅端口失败（已忽略）：$old"
+    rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
+  fi
+  if ! subhttps_ufw_active; then
+    echo "ufw 未开启，订阅端口 $desired 未自动放行，开启 ufw 后运行 agsbx ufwsync 或 subhttpsync 重新同步"
+    return 0
+  fi
+  if ufw allow "$desired" >/dev/null 2>&1; then echo "$desired" > "$HOME/agsbx/subhttps.subport" 2>/dev/null || true; else echo "ufw 放行订阅端口失败（已忽略）"; fi
+  return 0
+}
 sub_https_sync(){
   local token="" ym_c="" mode=""
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
@@ -212,6 +261,7 @@ sub_https_sync(){
       subhttps_stop_websbx
       subhttps_cron_install
       subhttps_manage_443 "https"
+      subhttps_manage_subport "https"
       echo "https" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
       echo "订阅已切换为 https 域名订阅：https://$ym_c/$token/"
       return 0
@@ -222,6 +272,7 @@ sub_https_sync(){
   subhttps_stop_caddy
   subhttps_cron_remove
   subhttps_manage_443 "$mode"
+  subhttps_manage_subport "$mode"
   echo "$mode" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
   if [ "$mode" = "http-domain" ]; then echo "订阅为 http 域名订阅（未满足 https 条件，见上文原因）"; else echo "订阅为 http IP 订阅"; fi
   return 0
@@ -230,7 +281,8 @@ sub_https_stop(){
   subhttps_stop_caddy
   subhttps_cron_remove
   subhttps_manage_443 "http-ip"
-  rm -f "$HOME/agsbx/subhttps.mode" "$HOME/agsbx/Caddyfile.sub" "$HOME/agsbx/subhttps.pid" "$HOME/agsbx/subhttps.cert.hash" "$HOME/agsbx/subhttps.log" "$HOME/agsbx/subhttps.443" 2>/dev/null || true
+  subhttps_manage_subport "https"
+  rm -f "$HOME/agsbx/subhttps.mode" "$HOME/agsbx/Caddyfile.sub" "$HOME/agsbx/subhttps.pid" "$HOME/agsbx/subhttps.cert.hash" "$HOME/agsbx/subhttps.log" "$HOME/agsbx/subhttps.443" "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
   return 0
 }
 sub_https_display(){

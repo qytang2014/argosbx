@@ -12,6 +12,26 @@ for needle in ["ArgoSBX一键SSH命令生成器-Vincent", "github.com/qytang2014
 # CURL/WGET must point to the private repo, not upstream
 assert "raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh" in html
 assert "raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh" not in html, "FAIL: index.html still points to upstream script URL"
+# Layout: egress is its own card (not inside global), subscription is
+# on the left, cards do not stretch, mobile truly stacks.
+assert 'class="card egress-card"' in html, "FAIL: egress-card missing"
+egress_start = html.index('class="card egress-card"')
+sub_start = html.index('class="card subscription-links"')
+assert egress_start < sub_start, "FAIL: egress card should come before subscription card in DOM"
+out_start = html.index('class="card outbound-warp"')
+out_end = html.index('</section>', out_start)
+assert out_end < egress_start, "FAIL: egress should be outside outbound-warp"
+assert html.index('id="ippz"') < egress_start, "FAIL: ippz should stay in the global card"
+assert "align-items: start" in html, "FAIL: grid should align start, not stretch cards"
+for cls, col, row in [(".protocol-port", "1", "1"), (".egress-card", "1", "2"),
+                      (".subscription-links", "1", "3"), (".outbound-warp", "2", "1"),
+                      (".argo-tunnel", "2", "2")]:
+    m = re.search(rf"{re.escape(cls)} \{{[^}}]+\}}", html)
+    assert m, f"FAIL: CSS for {cls} missing"
+    assert f"grid-column: {col};" in m.group(0), f"FAIL: {cls} column should be {col}"
+    assert f"grid-row: {row};" in m.group(0), f"FAIL: {cls} row should be {row}"
+assert "grid-row: 1 / 4" not in html, "FAIL: protocol card should no longer span 3 rows"
+assert ".protocol-port, .outbound-warp, .egress-card, .subscription-links" in html, "FAIL: mobile reset missing"
 # Every optId must have a matching element id in the page
 m = re.search(r"const optIds = \[([^\]]+)\]", html)
 assert m, "FAIL: optIds not found"

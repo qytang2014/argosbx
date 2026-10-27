@@ -125,6 +125,25 @@ grep -q "argosbx-subhttps" "$CRONFILE" && fail "subhttps cron should be removed 
 OUT="$(sub_https_display)"
 echo "$OUT" | grep -q "http://example.test:18080/token-123/clmi.yaml" || fail "display http-domain clmi missing"
 
+# --- subscription port: http opens it, port change diffs, https closes it ---
+[ "$(cat "$HOME/agsbx/subhttps.subport" 2>/dev/null)" = "18080/tcp" ] || fail "http-domain should open subport 18080/tcp"
+grep -q "allow 18080/tcp" "$UFLOG" || fail "ufw subport allow missing"
+echo "18081" > "$HOME/agsbx/subport.log"
+sub_https_sync >/dev/null 2>&1 || fail "subport change sync failed"
+[ "$(cat "$HOME/agsbx/subhttps.subport" 2>/dev/null)" = "18081/tcp" ] || fail "subport change should update marker to 18081/tcp"
+grep -q "delete allow 18080/tcp" "$UFLOG" || fail "ufw old subport delete missing on port change"
+grep -q "allow 18081/tcp" "$UFLOG" || fail "ufw new subport allow missing on port change"
+export SUBHTTPS_MEM_KB=524288
+sub_https_sync >/dev/null 2>&1 || fail "https switch sync failed"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https" ] || fail "https switch should be https"
+[ ! -f "$HOME/agsbx/subhttps.subport" ] || fail "https should close subport"
+grep -q "delete allow 18081/tcp" "$UFLOG" || fail "ufw subport delete missing on https switch"
+# restore http-domain state for the following phases
+export SUBHTTPS_MEM_KB=131072
+echo "18080" > "$HOME/agsbx/subport.log"
+subhttps_stop_caddy
+sub_https_sync >/dev/null 2>&1 || fail "restore http-domain sync failed"
+
 # --- caddy missing: http-domain, no start ---
 mkdir -p "$TESTHOME/no-caddy-bin"
 for b in ufw crontab ps; do cp "$MOCKBIN/$b" "$TESTHOME/no-caddy-bin/$b"; done
@@ -174,6 +193,29 @@ subhttps_caddy_running && fail "Caddy should be dead after del stop"
 [ ! -f "$HOME/agsbx/subhttps.mode" ] || fail "mode file should be removed on del stop"
 [ ! -f "$HOME/agsbx/Caddyfile.sub" ] || fail "Caddyfile should be removed on del stop"
 [ ! -f "$HOME/agsbx/subhttps.pid" ] || fail "pid file should be removed on del stop"
+
+# --- ufwsync re-applies node + subscription ports ---
+source "$ROOT/modules/ufw.sh"
+echo "9999/tcp" > "$HOME/agsbx/ufw.rules"
+echo "http-ip" > "$HOME/agsbx/subhttps.mode"
+echo "18080" > "$HOME/agsbx/subport.log"
+echo "token-123" > "$HOME/agsbx/subtoken.log"
+rm -f "$HOME/agsbx/subhttps.subport" "$HOME/agsbx/subhttps.443"
+: > "$UFLOG"
+ufw_apply_saved >/dev/null 2>&1 || fail "ufw_apply_saved failed"
+grep -q "allow 9999/tcp" "$UFLOG" || fail "ufwsync should re-apply node port"
+grep -q "allow 18080/tcp" "$UFLOG" || fail "ufwsync should re-apply subscription port"
+[ "$(cat "$HOME/agsbx/subhttps.subport" 2>/dev/null)" = "18080/tcp" ] || fail "ufwsync should write subport marker"
+
+# --- del stop deletes the subscription port too ---
+export SUBHTTPS_MEM_KB=131072
+echo "example.test" > "$HOME/agsbx/ym"
+sub_https_sync >/dev/null 2>&1 || fail "http-domain sync before del-subport failed"
+[ -f "$HOME/agsbx/subhttps.subport" ] || fail "subport marker should exist before del stop"
+: > "$UFLOG"
+sub_https_stop
+[ ! -f "$HOME/agsbx/subhttps.subport" ] || fail "subport marker should be removed on del stop"
+grep -q "delete allow 18080/tcp" "$UFLOG" || fail "ufw subport delete missing on del stop"
 
 # cleanup: kill any leftover mock caddy (exec sleep) from earlier phases
 pkill -f "sleep 1000" 2>/dev/null || true

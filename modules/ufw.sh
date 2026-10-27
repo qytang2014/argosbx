@@ -1,9 +1,17 @@
 # ufw firewall sync (private module, main script only).
 # Rule: only when ufw is already active. This module NEVER turns
-# ufw on by itself, never opens SSH (22), cert ports (80/443), the Argo
-# local port, or the local subscription port. Only node inbound ports
-# are opened, and only with the transport the inbound actually uses,
-# so nothing is over-opened:
+# ufw on by itself, never opens SSH (22), cert ports (80/443) for
+# nodes, or the Argo local port. Only node inbound ports are opened
+# here, and only with the transport the inbound actually uses,
+# so nothing is over-opened. The subscription port and the HTTPS
+# 443 port are NOT node ports: they are managed separately by the
+# sub-https module (subhttps.subport / subhttps.443 markers), because
+# the subscription port is only known after the sub block runs and
+# it changes with the subscription mode (HTTP: open the websbx port;
+# HTTPS: close it, open 443 instead). ufw_apply_saved calls those
+# managers (guarded, so this module alone still works) so that
+# enabling ufw later and running ufwsync opens everything, not just
+# the node ports:
 #   tcp only: vlpt, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
 #   tcp+udp:  sspt, sopt
@@ -112,6 +120,13 @@ ufw_apply_saved(){
     case "$r" in '') continue;; esac
     if ufw allow "$r" >/dev/null 2>&1; then n=$((n + 1)); else echo "ufw 放行失败（已忽略）：$r"; fi
   done < "$state"
+  # Subscription ports, by current mode (guarded: this module is
+  # also tested alone, without the sub-https module loaded).
+  if type subhttps_manage_subport >/dev/null 2>&1 || type subhttps_manage_443 >/dev/null 2>&1; then
+    local submode=""; submode=$(tr -d ' \t\r\n' < "$HOME/agsbx/subhttps.mode" 2>/dev/null); [ -n "$submode" ] || submode="http-ip"
+    if type subhttps_manage_subport >/dev/null 2>&1; then subhttps_manage_subport "$submode"; fi
+    if type subhttps_manage_443 >/dev/null 2>&1; then subhttps_manage_443 "$submode"; fi
+  fi
   echo "ufw 已按记录放行 $n 条规则"
   return 0
 }

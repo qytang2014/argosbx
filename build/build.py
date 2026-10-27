@@ -70,9 +70,113 @@ def build_index():
     h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
     h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
                 '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为 Caddy 域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
-    if '        <div class="row"><label>IPv4/IPv6 配置导出' not in h:
-        print("BUILD FAIL: anchor missing: index-egress-ui", file=sys.stderr); sys.exit(1)
-    h = h.replace('        <div class="row"><label>IPv4/IPv6 配置导出', egress_ui + '        <div class="row"><label>IPv4/IPv6 配置导出', 1)
+    # --- layout: egress out of the global card, into its own card ---
+    # Previously egress was inserted inside outbound-warp, before the
+    # ippz row, which made that card the tallest on the page and
+    # forced the left protocol card (spanning 3 rows) to stretch,
+    # leaving a large blank inside it. Now egress gets its own card,
+    # inserted after outbound-warp and before subscription-links, so
+    # the DOM order (and the mobile stack order) is: protocols,
+    # global, egress, subscription, Argo, commands, output. The
+    # desktop placement below puts egress on the left, subscription
+    # also on the left, global and Argo on the right, regardless of
+    # DOM order. Field ids are unchanged, so collect/reset/dynamic
+    # disabling (all by id) keep working.
+    if '      <section class="card subscription-links">' not in h:
+        print("BUILD FAIL: anchor missing: index-egress-card", file=sys.stderr); sys.exit(1)
+    h = h.replace('      <section class="card subscription-links">',
+                  '      <section class="card egress-card">\n        <h2>外部出口与分流：</h2>\n' + egress_ui.rstrip("\n") + '\n      </section>\n\n      <section class="card subscription-links">', 1)
+    # --- layout CSS: no spanning, align start, mobile truly stacks ---
+    # Root cause of the left blank: .protocol-port spanned rows 1-3,
+    # so its height was the sum of the three right cards, not its own
+    # content. With align-items:start and no spanning, each card is
+    # only as tall as its content; the remaining column difference
+    # is page background below the shorter column, not blank inside
+    # a card. The mobile query previously only changed the grid
+    # columns, not the card placements, so narrow screens did not
+    # truly stack to one column; now every card is reset to column
+    # 1 / row auto under 1100px.
+    h = replace(h, """    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto auto auto;
+      gap: 20px;
+    }""",
+                """    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto auto auto auto;
+      gap: 20px;
+      align-items: start;
+    }""", "index-grid", 1)
+    h = replace(h, """    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto auto auto;
+      }
+    }""",
+                """    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+      }
+      .protocol-port, .outbound-warp, .egress-card, .subscription-links, .argo-tunnel, .shortcut-commands-card, .out {
+        grid-column: 1;
+        grid-row: auto;
+      }
+    }""", "index-grid-mobile", 1)
+    h = replace(h, """    .protocol-port {
+      grid-column: 1;
+      grid-row: 1 / 4;
+    }
+    .outbound-warp {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .subscription-links {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .argo-tunnel {
+      grid-column: 2;
+      grid-row: 3;
+    }
+    .shortcut-commands-card {
+      grid-column: 1 / 3;
+      grid-row: 4;
+    }
+    .out {
+      grid-column: 1 / 3;
+      grid-row: 5;
+    }""",
+                """    .protocol-port {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .outbound-warp {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .egress-card {
+      grid-column: 1;
+      grid-row: 2;
+    }
+    .subscription-links {
+      grid-column: 1;
+      grid-row: 3;
+    }
+    .argo-tunnel {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .shortcut-commands-card {
+      grid-column: 1 / 3;
+      grid-row: 4;
+    }
+    .out {
+      grid-column: 1 / 3;
+      grid-row: 5;
+    }""", "index-card-placement", 1)
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
     h = replace(h, 'Acme-yg域名IP证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)</a></p>',
