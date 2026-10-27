@@ -5,7 +5,8 @@ root = pathlib.Path(__file__).resolve().parent.parent
 html = (root / "index.html").read_text()
 for needle in ["ArgoSBX一键SSH命令生成器-Vincent", "github.com/qytang2014/argosbx",
                'id="ym"', 'id="certmode"', 'id="certsrc"',
-               'id="egress_nodes"', 'id="egress_bind"', 'id="egress_rules"',
+               'id="egress_nodes"', 'id="egress_bind"', 'id="egress_rules"', 'id="egress_add"',
+               'data-command="add"', "egress_add",
                "egress_nodes", "egress_bind", "egress_rules"]:
     assert needle in html, f"FAIL: index.html missing {needle}"
 # CURL/WGET must point to the private repo, not upstream

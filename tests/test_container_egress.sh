@@ -17,6 +17,8 @@ done
 grep -q 'export egress_nodes=${egress_nodes}' "$F" || { echo "FAIL: egress_nodes not exported in container ins()"; exit 1; }
 grep -q 'export egress_bind=${egress_bind}' "$F" || { echo "FAIL: egress_bind not exported"; exit 1; }
 grep -q 'export egress_rules=${egress_rules}' "$F" || { echo "FAIL: egress_rules not exported"; exit 1; }
+grep -q 'export egress_add=${egress_add}' "$F" || { echo "FAIL: egress_add not exported"; exit 1; }
+grep -q 'container_vars_merge' "$F" || { echo "FAIL: container_vars not in container start.sh"; exit 1; }
 python3 - "$F" "$TMP/egress.sh" << 'PY'
 import re, sys
 t = open(sys.argv[1]).read()

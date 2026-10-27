@@ -242,6 +242,25 @@ egress_geo_setup(){
 }
 egress_init(){
   egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0
+  # egress_add: one-time append to egress_nodes, idempotent. If a node
+  # (exact ';' delimited string) is already in egress_nodes it is skipped,
+  # so calling xrsbout twice (or restarting a container that still has
+  # egress_add in its env) never duplicates a node. egress_add itself is
+  # NEVER saved to vars.env / container_vars.env: vars_save runs after
+  # ins()/xrsbout, so it saves the merged egress_nodes, and the next
+  # update without egress_add inherits the appended nodes exactly once.
+  # Fixed-string grep (-F) is used on purpose: node URLs contain ?, &, =
+  # and # which would be glob characters in a case pattern.
+  if [ -n "$egress_add" ]; then
+    _eg_oldifs="$IFS"; IFS=';'
+    for _eg_item in $egress_add; do
+      [ -n "$_eg_item" ] || continue
+      if ! printf ';%s;' "$egress_nodes" | grep -Fq ";$_eg_item;"; then
+        if [ -n "$egress_nodes" ]; then egress_nodes="$egress_nodes;$_eg_item"; else egress_nodes="$_eg_item"; fi
+      fi
+    done
+    IFS="$_eg_oldifs"
+  fi
   egress_geo_needed
   [ -n "$egress_nodes" ] || [ -n "$egress_bind" ] || [ -n "$egress_rules" ] || return 0
   local oldifs="$IFS" item="" n=0

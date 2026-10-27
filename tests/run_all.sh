@@ -17,5 +17,7 @@ bash tests/test_plain_addr.sh
 bash tests/test_container.sh
 bash tests/test_container_egress.sh
 bash tests/test_egress_geo.sh
+bash tests/test_egress_add.sh
+bash tests/test_container_vars.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"
