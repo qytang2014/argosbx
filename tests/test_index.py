@@ -38,7 +38,12 @@ assert proto_start < right_col < global_start, "FAIL: right column wrapper shoul
 right_close = html.index('</div>', sub_start)
 assert sub_start < right_close < egress_start, "FAIL: right column wrapper should close after subscription, before egress"
 assert "display: flex" in html and "flex-direction: column" in html, "FAIL: grid-col should be a flex column"
-assert "align-items: start" in html, "FAIL: grid should align start, not stretch cards"
+# Bottom alignment (user-chosen): grid stretches both columns to
+# the taller column's height, and the protocol card flex-grows to
+# fill the left column, so its bottom aligns with subscription's.
+assert "align-items: stretch" in html, "FAIL: grid should stretch columns for bottom alignment"
+m_proto = re.search(r"(?m)^    \.grid-col > \.protocol-port \{[^}]+\}", html)
+assert m_proto and "flex: 1;" in m_proto.group(0), "FAIL: protocol card should flex-grow to align bottom"
 # No per-card grid rows any more: only the full-width cards span.
 for cls in [".egress-card", ".shortcut-commands-card", ".out"]:
     m = re.search(rf"(?m)^    {re.escape(cls)} \{{[^}}]+\}}", html)

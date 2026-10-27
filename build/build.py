@@ -160,13 +160,26 @@ def build_index():
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
-      align-items: start;
+      align-items: stretch;
     }
     .grid-col {
       display: flex;
       flex-direction: column;
       gap: 20px;
       min-width: 0;
+    }
+    /* Bottom alignment, user-chosen 2026-10-27: the left column
+       has only the protocol card, the right column has three
+       cards, so the grid row height is the right column's height.
+       flex:1 makes the protocol card grow to that height, so its
+       bottom aligns with the subscription card's bottom. This
+       deliberately brings back blank inside the protocol card
+       (its content is shorter than the right column); the user
+       chose outer bottom alignment over no internal blank.
+       On mobile the grid is one column, each column's height is
+       content-driven, so flex:1 adds no extra height there. */
+    .grid-col > .protocol-port {
+      flex: 1;
     }""", "index-grid", 1)
     h = replace(h, """    @media (max-width: 1100px) {
       .grid {
