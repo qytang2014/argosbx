@@ -6,6 +6,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Container carries the same geo code + hooks
+# Main script: xray geo files must survive systemd/OpenRC/xrestart restarts
+grep -q 'Environment=XRAY_LOCATION_ASSET=/root/agsbx' "$ROOT/argosbx.sh" || { echo "FAIL: xr systemd asset env missing"; exit 1; }
+grep -q 'command_env="XRAY_LOCATION_ASSET=/root/agsbx"' "$ROOT/argosbx.sh" || { echo "FAIL: xr openrc asset env missing"; exit 1; }
+grep -q 'nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run' "$ROOT/argosbx.sh" || { echo "FAIL: xr xrestart asset env missing"; exit 1; }
 grep -q 'egress_geo_setup' "$ROOT/container/nodejs/start.sh" || { echo "FAIL: container missing egress_geo_setup"; exit 1; }
 grep -q 'egress_sb_geo_cfg' "$ROOT/container/nodejs/start.sh" || { echo "FAIL: container missing sb geo cfg hook"; exit 1; }
 python3 - "$ROOT/argosbx.sh" "$TMP/egress.sh" << 'PY'

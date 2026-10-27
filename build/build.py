@@ -185,6 +185,15 @@ def main():
                 'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
                 '  "route": {\n${egress_sb_geo_cfg}    "rules": [\n       {\n          "action": "sniff"', "sb-geo-cfg-hook", 1)
+    # xray geo files must survive restarts, not just the first xrsbout
+    # start: systemd unit, OpenRC script and xrestart nohup all launch
+    # xray without the asset env otherwise.
+    t = replace(t, 'ExecStart=/root/agsbx/xray run -c /root/agsbx/xr.json',
+                'Environment=XRAY_LOCATION_ASSET=/root/agsbx\nExecStart=/root/agsbx/xray run -c /root/agsbx/xr.json', "xr-systemd-asset", 1)
+    t = replace(t, 'command_args="run -c /root/agsbx/xr.json"',
+                'command_args="run -c /root/agsbx/xr.json"\ncommand_env="XRAY_LOCATION_ASSET=/root/agsbx"', "xr-openrc-asset", 1)
+    t = replace(t, 'nohup $HOME/agsbx/xray run -c $HOME/agsbx/xr.json',
+                'nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run -c $HOME/agsbx/xr.json', "xr-restart-asset", 2)
     t = replace(t, '  "outbounds": [\n    {\n      "protocol": "freedom",\n      "tag": "direct",',
                 '  "outbounds": [\n${egress_xr_outbounds}    {\n      "protocol": "freedom",\n      "tag": "direct",', "xr-outbounds-hook", 1)
     t = replace(t, '  "outbounds": [\n    {\n      "type": "direct",\n      "tag": "direct"\n    }\n  ],',

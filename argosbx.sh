@@ -1498,6 +1498,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
+Environment=XRAY_LOCATION_ASSET=/root/agsbx
 ExecStart=/root/agsbx/xray run -c /root/agsbx/xr.json
 Restart=on-failure
 RestartSec=5s
@@ -1515,6 +1516,7 @@ cat > /etc/init.d/xray <<EOF
 description="xr service"
 command="/root/agsbx/xray"
 command_args="run -c /root/agsbx/xr.json"
+command_env="XRAY_LOCATION_ASSET=/root/agsbx"
 command_background=yes
 pidfile="/run/xray.pid"
 command_background="yes"
@@ -1738,7 +1740,7 @@ if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r 
 echo '@reboot sleep 10 && /bin/sh -c "nohup $HOME/agsbx/sing-box run -c $HOME/agsbx/sb.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
 fi
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -q 'agsbx/x' || pgrep -f 'agsbx/x' >/dev/null 2>&1 ; then
-echo '@reboot sleep 10 && /bin/sh -c "nohup $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
+echo '@reboot sleep 10 && /bin/sh -c "nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
 fi
 fi
 sed -i '/agsbx\/cloudflared/d' /tmp/crontab.tmp
@@ -3023,7 +3025,7 @@ systemctl restart xr >/dev/null 2>&1
 elif command -v rc-service >/dev/null 2>&1; then
 rc-service xray restart >/dev/null 2>&1
 else
-nohup $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &
+nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &
 fi
 }
 sbrestart(){
