@@ -7,9 +7,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Container carries the same geo code + hooks
 # Main script: xray geo files must survive systemd/OpenRC/xrestart restarts
-grep -q 'Environment=XRAY_LOCATION_ASSET=/root/agsbx' "$ROOT/argosbx.sh" || { echo "FAIL: xr systemd asset env missing"; exit 1; }
-grep -q 'command_env="XRAY_LOCATION_ASSET=/root/agsbx"' "$ROOT/argosbx.sh" || { echo "FAIL: xr openrc asset env missing"; exit 1; }
-grep -q 'nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run' "$ROOT/argosbx.sh" || { echo "FAIL: xr xrestart asset env missing"; exit 1; }
+grep -q 'Environment=XRAY_LOCATION_ASSET=/root/agsbx/geo/xray' "$ROOT/argosbx.sh" || { echo "FAIL: xr systemd asset env missing"; exit 1; }
+grep -q 'command_env="XRAY_LOCATION_ASSET=/root/agsbx/geo/xray"' "$ROOT/argosbx.sh" || { echo "FAIL: xr openrc asset env missing"; exit 1; }
+grep -q 'nohup env XRAY_LOCATION_ASSET=$HOME/agsbx/geo/xray $HOME/agsbx/xray run' "$ROOT/argosbx.sh" || { echo "FAIL: xr xrestart asset env missing"; exit 1; }
 grep -q 'egress_geo_setup' "$ROOT/container/nodejs/start.sh" || { echo "FAIL: container missing egress_geo_setup"; exit 1; }
 grep -q 'egress_sb_geo_cfg' "$ROOT/container/nodejs/start.sh" || { echo "FAIL: container missing sb geo cfg hook"; exit 1; }
 python3 - "$ROOT/argosbx.sh" "$TMP/egress.sh" << 'PY'
@@ -48,13 +48,13 @@ egress_nodes=""; egress_bind=""; egress_rules=""; egress_init
 export HOME="$2/home"
 egress_nodes="socks5://u:p@203.0.113.10:1080#socks-out"; egress_rules="geoip:cn=>socks-out"; egress_init
 egress_geo_setup
-for f in geoip.db geosite.db geoip.dat geosite.dat; do
+for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do
   [ "$(cat "$HOME/agsbx/$f")" = "FAKE" ] || { echo "FAIL: $f not downloaded by fake curl"; exit 1; }
 done
-[ "$XRAY_LOCATION_ASSET" = "$HOME/agsbx" ] || { echo "FAIL: XRAY_LOCATION_ASSET not set"; exit 1; }
-for f in geoip.db geosite.db geoip.dat geosite.dat; do printf 'EXISTING' > "$HOME/agsbx/$f"; done
+[ "$XRAY_LOCATION_ASSET" = "$HOME/agsbx/geo/xray" ] || { echo "FAIL: XRAY_LOCATION_ASSET not set"; exit 1; }
+for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do printf 'EXISTING' > "$HOME/agsbx/$f"; done
 egress_geo_setup
-for f in geoip.db geosite.db geoip.dat geosite.dat; do
+for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do
   [ "$(cat "$HOME/agsbx/$f")" = "EXISTING" ] || { echo "FAIL: existing $f was re-downloaded"; exit 1; }
 done
 # Case E: download failure warns, removes partial file, setup does not abort
@@ -63,17 +63,17 @@ cat > "$2/fakebin/curl" << 'EOF2'
 exit 1
 EOF2
 chmod +x "$2/fakebin/curl"
-rm -f "$HOME/agsbx/geoip.db"
+rm -f "$HOME/agsbx/geo/sing-box/geoip.db"
 egress_geo_setup || true
-[ ! -e "$HOME/agsbx/geoip.db" ] || { echo "FAIL: failed download left a file"; exit 1; }
+[ ! -e "$HOME/agsbx/geo/sing-box/geoip.db" ] || { echo "FAIL: failed download left a file"; exit 1; }
 RUN
 PATH="$TMP/fakebin:$PATH" bash "$TMP/run.sh" "$TMP/egress.sh" "$TMP"
 python3 - "$TMP" << 'PY'
 import json, sys
 tmp = sys.argv[1]
 d = json.load(open(f"{tmp}/sb_route.json"))
-assert d["route"]["geoip"]["path"].endswith("/agsbx/geoip.db"), d["route"]
-assert d["route"]["geosite"]["path"].endswith("/agsbx/geosite.db"), d["route"]
+assert d["route"]["geoip"]["path"].endswith("/agsbx/geo/sing-box/geoip.db"), d["route"]
+assert d["route"]["geosite"]["path"].endswith("/agsbx/geo/sing-box/geosite.db"), d["route"]
 rules = d["route"]["rules"]
 assert rules[0]["geoip"] == ["cn"], rules[0]
 assert rules[1]["geosite"] == ["google"], rules[1]

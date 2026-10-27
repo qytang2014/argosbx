@@ -1196,12 +1196,13 @@ fi
 #   sniffing enabled on the inbound, otherwise they may not match.
 #   Geo databases (egress_geo_setup, called from xrsbout after egress_init):
 #   only when egress_rules contains a geoip:/geosite: rule, and only for
-#   files that do not already exist in $HOME/agsbx/: sing-box geoip.db
-#   (SagerNet sing-geoip) + geosite.db (SagerNet sing-geosite), xray
-#   geoip.dat + geosite.dat (Loyalsoldier v2ray-rules-dat); sing-box
+#   files that do not already exist, split by kernel: sing-box geoip.db
+#   (SagerNet sing-geoip) + geosite.db (SagerNet sing-geosite) in
+#   $HOME/agsbx/geo/sing-box/, xray geoip.dat + geosite.dat
+#   (Loyalsoldier v2ray-rules-dat) in $HOME/agsbx/geo/xray/; sing-box
 #   route gets geoip/geosite path blocks via egress_sb_geo_cfg, xray
-#   gets XRAY_LOCATION_ASSET=$HOME/agsbx. A download failure only
-#   warns and keeps the rules (never silently drops a rule).
+#   gets XRAY_LOCATION_ASSET=$HOME/agsbx/geo/xray. A download failure
+#   only warns and keeps the rules (never silently drops a rule).
 #   Filling geo rules: geoip codes are lowercase country codes as in
 #   the database (cn, us, jp, ...; private = private/LAN IPs), geosite
 #   codes are category names as in the database (google, youtube,
@@ -1380,8 +1381,8 @@ egress_geo_needed(){
   local r="" typ="" oldifs="$IFS"
   IFS=';'; for r in $egress_rules; do typ="${r%%:*}"; case "$typ" in geoip|geosite) egress_geo_needed=1;; esac; done; IFS="$oldifs"
   if [ "$egress_geo_needed" = 1 ]; then
-    egress_sb_geo_cfg="    \"geoip\": {\"path\": \"$HOME/agsbx/geoip.db\"},
-    \"geosite\": {\"path\": \"$HOME/agsbx/geosite.db\"},
+    egress_sb_geo_cfg="    \"geoip\": {\"path\": \"$HOME/agsbx/geo/sing-box/geoip.db\"},
+    \"geosite\": {\"path\": \"$HOME/agsbx/geo/sing-box/geosite.db\"},
 "
   fi
 }
@@ -1400,12 +1401,12 @@ egress_geo_download(){ # $1=url $2=file ; skip existing non-empty files
 }
 egress_geo_setup(){
   [ "$egress_geo_needed" = 1 ] || return 0
-  mkdir -p "$HOME/agsbx" 2>/dev/null || true
-  egress_geo_download "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db" "$HOME/agsbx/geoip.db"
-  egress_geo_download "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db" "$HOME/agsbx/geosite.db"
-  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" "$HOME/agsbx/geoip.dat"
-  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" "$HOME/agsbx/geosite.dat"
-  export XRAY_LOCATION_ASSET="$HOME/agsbx"
+  mkdir -p "$HOME/agsbx/geo/sing-box" "$HOME/agsbx/geo/xray" 2>/dev/null || true
+  egress_geo_download "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db" "$HOME/agsbx/geo/sing-box/geoip.db"
+  egress_geo_download "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db" "$HOME/agsbx/geo/sing-box/geosite.db"
+  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" "$HOME/agsbx/geo/xray/geoip.dat"
+  egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" "$HOME/agsbx/geo/xray/geosite.dat"
+  export XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray"
 }
 egress_init(){
   egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0
@@ -1498,7 +1499,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-Environment=XRAY_LOCATION_ASSET=/root/agsbx
+Environment=XRAY_LOCATION_ASSET=/root/agsbx/geo/xray
 ExecStart=/root/agsbx/xray run -c /root/agsbx/xr.json
 Restart=on-failure
 RestartSec=5s
@@ -1516,7 +1517,7 @@ cat > /etc/init.d/xray <<EOF
 description="xr service"
 command="/root/agsbx/xray"
 command_args="run -c /root/agsbx/xr.json"
-command_env="XRAY_LOCATION_ASSET=/root/agsbx"
+command_env="XRAY_LOCATION_ASSET=/root/agsbx/geo/xray"
 command_background=yes
 pidfile="/run/xray.pid"
 command_background="yes"
@@ -1740,7 +1741,7 @@ if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r 
 echo '@reboot sleep 10 && /bin/sh -c "nohup $HOME/agsbx/sing-box run -c $HOME/agsbx/sb.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
 fi
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -q 'agsbx/x' || pgrep -f 'agsbx/x' >/dev/null 2>&1 ; then
-echo '@reboot sleep 10 && /bin/sh -c "nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
+echo '@reboot sleep 10 && /bin/sh -c "nohup env XRAY_LOCATION_ASSET=$HOME/agsbx/geo/xray $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &"' >> /tmp/crontab.tmp
 fi
 fi
 sed -i '/agsbx\/cloudflared/d' /tmp/crontab.tmp
@@ -3025,7 +3026,7 @@ systemctl restart xr >/dev/null 2>&1
 elif command -v rc-service >/dev/null 2>&1; then
 rc-service xray restart >/dev/null 2>&1
 else
-nohup env XRAY_LOCATION_ASSET=$HOME/agsbx $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &
+nohup env XRAY_LOCATION_ASSET=$HOME/agsbx/geo/xray $HOME/agsbx/xray run -c $HOME/agsbx/xr.json >/dev/null 2>&1 &
 fi
 }
 sbrestart(){
