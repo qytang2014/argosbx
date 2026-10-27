@@ -3140,7 +3140,7 @@ cert_remove_watch
 cleandel
 rm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"
 echo "卸载完成"
-echo "欢迎继续使用甬哥侃侃侃ygkkk的Argosbx一键无交互小钢炮脚本💣" && sleep 2
+echo "欢迎继续使用Argosbx一键无交互小钢炮脚本💣" && sleep 2
 echo
 showmode
 exit
