@@ -1,0 +1,66 @@
+# Build the private container image and push ONLY to GHCR.
+# No Docker Hub push. The image is ghcr.io/qytang2014/argosbx:latest.
+#
+# IMPORTANT: this file cannot be pushed by the GitHub App (it lacks the
+# Workflows permission). Upload it manually once to
+# .github/workflows/container-image.yml in qytang2014/argosbx, then every
+# push below triggers an automatic rebuild. No extra secrets are needed:
+# GHCR login uses the built-in GITHUB_TOKEN.
+#
+# After the FIRST successful push, make the GHCR package PUBLIC, or SAP
+# Cloud Foundry cannot pull it: the package inherits this private repo's
+# visibility by default. On github.com, open the package
+# (ghcr.io/qytang2014/argosbx) -> Package settings -> Danger Zone ->
+# Change visibility to public. Until then, `cf push --docker-image
+# ghcr.io/qytang2014/argosbx` will fail to pull the image.
+name: Container image (GHCR)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "container/**"
+      - "modules/container-*.sh"
+      - "modules/egress.sh"
+      - "modules/reality-addr.sh"
+      - "build/build.py"
+      - ".github/workflows/container-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regenerate container start.sh from modules
+        # The committed start.sh may lag the modules; rebuild it in-run so
+        # the image always matches the current modules. This does NOT
+        # commit anything back to the repo.
+        run: python3 build/build.py
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push to GHCR only
+        uses: docker/build-push-action@v6
+        with:
+          context: container/nodejs
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/qytang2014/argosbx:latest
