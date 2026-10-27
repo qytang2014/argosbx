@@ -284,6 +284,26 @@ fi
                 'mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true\ncommand -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/selfsigned/private.key"', "selfsigned-gen-key", 1)
     t = replace(t, 'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/private.key" -out "$HOME/agsbx/cert.crt"',
                 'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt"', "selfsigned-gen-cert", 1)
+    # --- self-signed cert must carry a SAN, not CN only ---
+    # Go (and modern TLS stacks) reject CN-only certs with "certificate
+    # relies on legacy Common Name field, use SANs instead". That is
+    # exactly the hy2 error: hy2 is the only TLS protocol that forces
+    # verification (insecure=0) on a self-signed cert, relying on
+    # pinSHA256, and a standard verifier rejects the CN-only cert before
+    # any pin check. tuic/anytls use insecure=1 in the self-signed case,
+    # which is why they did not surface this first. Fix: SAN
+    # DNS:www.bing.com, matching the self-signed sni=www.bing.com in the
+    # links. The || fallback keeps old OpenSSL (pre-1.1.1, no -addext)
+    # working with the old CN-only cert instead of generating nothing.
+    # Migration: an existing CN-only cert is regenerated on the next run,
+    # not just when SHA256.txt is missing, otherwise old installs would
+    # keep the broken cert forever (new key + cert + SHA256 pin, so old
+    # hy2/tuic/anytls/xhttp-tls links change - they were already broken
+    # for hy2, and the pin is recomputed in the same block).
+    t = replace(t, 'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1',
+                'openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" -addext "subjectAltName=DNS:www.bing.com" >/dev/null 2>&1 || openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1', "selfsigned-san", 1)
+    t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
+                'if [ ! -f "$HOME/agsbx/SHA256.txt" ] || ! openssl x509 -in "$HOME/agsbx/selfsigned/cert.crt" -noout -text 2>/dev/null | grep -q "Subject Alternative Name"; then', "selfsigned-san-migrate", 1)
     t = replace(t, 'openssl x509 -in $HOME/agsbx/cert.crt -outform DER',
                 'openssl x509 -in $HOME/agsbx/selfsigned/cert.crt -outform DER', "selfsigned-sha256", 1)
     t = replace(t, 'certificateHTA="$HOME/agsbx/cert.crt"', 'certificateHTA="$HOME/agsbx/selfsigned/cert.crt"', "selfsigned-hta-cert", 1)

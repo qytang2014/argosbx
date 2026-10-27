@@ -431,9 +431,14 @@ fi
 # (symlinks, not copies, so a host renewal is followed on container
 # restart), and writes $HOME/agsbx/domain_cert_ready = 1 plus
 # $HOME/agsbx/ym. On fallback: generates a self-signed pair with
-# openssl (CN www.bing.com), removes the flag file, and the display
-# section keeps sni=www.bing.com with insecure=1.
+# openssl (CN + SAN DNS:www.bing.com), removes the flag file, and the
+# display section keeps sni=www.bing.com with insecure=1.
 # Call from installsb(), after insuuid, replacing the old cert block.
+# Self-signed fallback carries SAN DNS:www.bing.com (not CN only):
+# modern TLS stacks reject CN-only certs ("certificate relies on legacy
+# Common Name field, use SANs instead"), which is the hy2 failure on the
+# main script. Container regenerates the pair on every start, so the fix
+# takes effect on the next container restart with no migration step.
 container_cert_setup() {
   if [ -n "$ym" ]; then echo "$ym" > "$HOME/agsbx/ym"; elif [ -s "$HOME/agsbx/ym" ]; then ym=$(cat "$HOME/agsbx/ym" 2>/dev/null); fi
   domain_cert_ready=0
@@ -467,7 +472,7 @@ container_cert_setup() {
     rm -f "$HOME/agsbx/selfsigned/cert.pem" "$HOME/agsbx/selfsigned/private.key"
     if command -v openssl >/dev/null 2>&1; then
       openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/selfsigned/private.key" >/dev/null 2>&1
-      openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.pem" -subj "/CN=www.bing.com" >/dev/null 2>&1
+      openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.pem" -subj "/CN=www.bing.com" -addext "subjectAltName=DNS:www.bing.com" >/dev/null 2>&1 || openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.pem" -subj "/CN=www.bing.com" >/dev/null 2>&1
     elif [ -s "$HOME/agsbx/cert.pem" ] && [ -s "$HOME/agsbx/private.key" ]; then
       cp "$HOME/agsbx/cert.pem" "$HOME/agsbx/selfsigned/cert.pem" 2>/dev/null || true
       cp "$HOME/agsbx/private.key" "$HOME/agsbx/selfsigned/private.key" 2>/dev/null || true

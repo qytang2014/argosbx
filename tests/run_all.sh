@@ -20,5 +20,6 @@ bash tests/test_egress_geo.sh
 bash tests/test_egress_add.sh
 bash tests/test_container_vars.sh
 bash tests/test_vlpt_dual.sh
+bash tests/test_selfsigned_san.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"
