@@ -114,7 +114,7 @@ quoted=$(printf '%s ' $input)
 sed -i "s/^YMS=.*$/YMS=\"${quoted% }\"/" $HOME/sapsbx.sh
 fi
 echo
-echo "每个账号对应出口节点 egress_nodes 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no；仅私有容器镜像生效"
+echo "每个账号对应出口节点 egress_nodes 空一格，单账号内用 ';' 分隔、不能含空格，个别账号不启用填 no；仅自有容器镜像生效"
 read -p "选填！请输入出口节点 egress_nodes: " input
 if [ -z "$input" ]; then
 sed -i 's/^EGRESS_NODES=.*$/EGRESS_NODES=""/' $HOME/sapsbx.sh

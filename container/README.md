@@ -1,7 +1,7 @@
-# Private container image (GHCR only)
+# Container image (GHCR only)
 
 Upstream has no Dockerfile; `ygkkk/argosbx` was built outside the repo.
-This private image is built from `container/nodejs/` (index.js +
+This image is built from `container/nodejs/` (index.js +
 package.json + the COMMITTED generated start.sh) and pushed ONLY to
 GHCR as `ghcr.io/qytang2014/argosbx:latest`. No Docker Hub push.
 

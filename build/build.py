@@ -60,9 +60,9 @@ def build_index():
         <a href="https://www.youtube.com/@ygkkk" target="_blank">www.youtube.com/@ygkkk</a><br>
         甬哥最新动态推特X：
         <a href="https://x.com/ygkkkg" target="_blank">x.com/ygkkkg</a><br>"""
-    private_header = """        Vincent 的私人版本项目：
+    fork_header = """        Vincent 修改版项目：
         <a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a><br>"""
-    h = replace(h, upstream_header, private_header, "index-header", 1)
+    h = replace(h, upstream_header, fork_header, "index-header", 1)
     h = insert_after(h, '        <div class="row"><label>Reality 域名', cert_ui, "index-cert-ui") if False else h
     # Insert cert UI before reym row (anchor is the reym row start)
     if '        <div class="row"><label>Reality 域名' not in h:
