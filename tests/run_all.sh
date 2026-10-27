@@ -23,6 +23,7 @@ bash tests/test_vlpt_dual.sh
 bash tests/test_selfsigned_san.sh
 bash tests/test_pin_vmtls.sh
 bash tests/test_ufw.sh
+bash tests/test_firewall.sh
 bash tests/test_sub_https.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"

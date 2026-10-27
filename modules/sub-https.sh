@@ -194,60 +194,105 @@ subhttps_ufw_active(){
   command -v ufw >/dev/null 2>&1 || return 1
   ufw status 2>/dev/null | grep -q "Status: active"
 }
+# Multi-backend helpers for 443/subport. Markers are per backend:
+# ufw keeps the old names (subhttps.443, subhttps.subport) for
+# backward compat, firewalld uses subhttps.firewalld.*. When the
+# firewall module is loaded, backends come from fw_active_backends;
+# when this module is tested alone, fall back to the ufw check only,
+# so the old sub-https tests (mock ufw, no firewall-cmd) still pass.
+subhttps_fw_backends(){
+  if type fw_active_backends >/dev/null 2>&1; then fw_active_backends; return; fi
+  if subhttps_ufw_active; then echo "ufw"; fi
+}
+subhttps_fw_marker(){
+  local kind="$1" backend="$2"
+  case "$backend" in firewalld) echo "$HOME/agsbx/subhttps.firewalld.$kind";; *) echo "$HOME/agsbx/subhttps.$kind";; esac
+}
+subhttps_fw_zone(){
+  local z=""; if type fw_firewalld_zone >/dev/null 2>&1; then fw_firewalld_zone; return; fi; z=$(firewall-cmd --get-default-zone 2>/dev/null | tr -d ' \t\r\n'); [ -n "$z" ] || z="public"; echo "$z"
+}
+subhttps_fw_allow(){
+  local backend="$1" rule="$2"
+  case "$backend" in
+    ufw) ufw allow "$rule" >/dev/null 2>&1;;
+    firewalld) firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --add-port="$rule" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1;;
+  esac
+}
+subhttps_fw_delete(){
+  local backend="$1" rule="$2"
+  case "$backend" in
+    ufw) ufw --force delete allow "$rule" >/dev/null 2>&1;;
+    firewalld) firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --remove-port="$rule" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1;;
+  esac
+}
+subhttps_fw_backend_cmd(){
+  case "$1" in ufw) command -v ufw >/dev/null 2>&1;; firewalld) command -v firewall-cmd >/dev/null 2>&1;; esac
+}
 subhttps_manage_443(){
-  local mode="$1"
+  local mode="$1" backend="" marker=""
   if [ "$mode" = "https" ]; then
-    if [ -f "$HOME/agsbx/subhttps.443" ]; then return 0; fi
-    if subhttps_ufw_active; then
-      if ufw allow 443/tcp >/dev/null 2>&1; then echo "443/tcp" > "$HOME/agsbx/subhttps.443" 2>/dev/null || true; else echo "ufw 放行 443/tcp 失败（已忽略）"; fi
-    else
-      echo "ufw 未开启，https 订阅的 443/tcp 未自动放行，开启 ufw 后运行 agsbx subhttpsync 重新同步"
+    if [ -z "$(subhttps_fw_backends)" ]; then
+      echo "ufw/firewalld 未运行，https 订阅的 443/tcp 未自动放行，开启后运行 agsbx fwsync 或 subhttpsync 重新同步"
+      return 0
     fi
+    for backend in $(subhttps_fw_backends); do
+      marker=$(subhttps_fw_marker 443 "$backend")
+      if [ -f "$marker" ]; then continue; fi
+      if subhttps_fw_allow "$backend" "443/tcp"; then echo "443/tcp" > "$marker" 2>/dev/null || true; else echo "$backend 放行 443/tcp 失败（已忽略）"; fi
+    done
   else
-    if [ -f "$HOME/agsbx/subhttps.443" ]; then
-      if command -v ufw >/dev/null 2>&1; then
-        if ufw --force delete allow 443/tcp >/dev/null 2>&1; then rm -f "$HOME/agsbx/subhttps.443" 2>/dev/null || true; else echo "ufw 删除 443/tcp 失败（已忽略，下次同步重试）"; fi
+    for backend in ufw firewalld; do
+      marker=$(subhttps_fw_marker 443 "$backend")
+      if [ ! -f "$marker" ]; then continue; fi
+      if subhttps_fw_backend_cmd "$backend"; then
+        if subhttps_fw_delete "$backend" "443/tcp"; then rm -f "$marker" 2>/dev/null || true; else echo "$backend 删除 443/tcp 失败（已忽略，下次同步重试）"; fi
       else
-        rm -f "$HOME/agsbx/subhttps.443" 2>/dev/null || true
+        rm -f "$marker" 2>/dev/null || true
       fi
-    fi
+    done
   fi
   return 0
 }
 subhttps_manage_subport(){
-  local mode="$1" subport="" old="" desired=""
-  if [ -f "$HOME/agsbx/subhttps.subport" ]; then old=$(subhttps_read "$HOME/agsbx/subhttps.subport"); fi
+  local mode="$1" subport="" desired="" backend="" marker="" old=""
   # HTTPS or no subscription: websbx is stopped (or never started),
   # so any previously opened subscription port must go, not stay
   # open for a server that no longer listens. This branch runs
   # before the token check on purpose, so del also cleans it up.
+  # Delete from both backends regardless of active status: a stored
+  # rule would become active again when that backend is enabled.
   if [ "$mode" = "https" ] || [ -z "$(subhttps_read "$HOME/agsbx/subtoken.log")" ]; then
-    if [ -z "$old" ]; then return 0; fi
-    # Delete even when ufw is currently inactive: the rule is still
-    # stored and would become active again when ufw is enabled,
-    # even though websbx is stopped. This matches the 443 delete
-    # path, which also deletes regardless of active status.
-    if command -v ufw >/dev/null 2>&1; then
-      if ufw --force delete allow "$old" >/dev/null 2>&1; then rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true; else echo "ufw 删除订阅端口失败（已忽略，下次同步重试）"; fi
-    else
-      rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
-    fi
+    for backend in ufw firewalld; do
+      marker=$(subhttps_fw_marker subport "$backend")
+      if [ ! -f "$marker" ]; then continue; fi
+      old=$(subhttps_read "$marker")
+      if [ -z "$old" ]; then rm -f "$marker" 2>/dev/null || true; continue; fi
+      if subhttps_fw_backend_cmd "$backend"; then
+        if subhttps_fw_delete "$backend" "$old"; then rm -f "$marker" 2>/dev/null || true; else echo "$backend 删除订阅端口失败（已忽略，下次同步重试）"; fi
+      else
+        rm -f "$marker" 2>/dev/null || true
+      fi
+    done
     return 0
   fi
   subport=$(subhttps_read "$HOME/agsbx/subport.log")
   case "$subport" in ''|*[!0-9]*) return 0;; esac
   if [ "$subport" -lt 1 ] 2>/dev/null || [ "$subport" -gt 65535 ] 2>/dev/null; then return 0; fi
   desired="$subport/tcp"
-  if [ "$old" = "$desired" ]; then return 0; fi
-  if [ -n "$old" ] && command -v ufw >/dev/null 2>&1; then
-    ufw --force delete allow "$old" >/dev/null 2>&1 || echo "ufw 删除旧订阅端口失败（已忽略）：$old"
-    rm -f "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
-  fi
-  if ! subhttps_ufw_active; then
-    echo "ufw 未开启，订阅端口 $desired 未自动放行，开启 ufw 后运行 agsbx ufwsync 或 subhttpsync 重新同步"
+  if [ -z "$(subhttps_fw_backends)" ]; then
+    echo "ufw/firewalld 未运行，订阅端口 $desired 未自动放行，开启后运行 agsbx fwsync 或 subhttpsync 重新同步"
     return 0
   fi
-  if ufw allow "$desired" >/dev/null 2>&1; then echo "$desired" > "$HOME/agsbx/subhttps.subport" 2>/dev/null || true; else echo "ufw 放行订阅端口失败（已忽略）"; fi
+  for backend in $(subhttps_fw_backends); do
+    marker=$(subhttps_fw_marker subport "$backend")
+    old=""; if [ -f "$marker" ]; then old=$(subhttps_read "$marker"); fi
+    if [ "$old" = "$desired" ]; then continue; fi
+    if [ -n "$old" ] && subhttps_fw_backend_cmd "$backend"; then
+      subhttps_fw_delete "$backend" "$old" >/dev/null 2>&1 || echo "$backend 删除旧订阅端口失败（已忽略）：$old"
+      rm -f "$marker" 2>/dev/null || true
+    fi
+    if subhttps_fw_allow "$backend" "$desired"; then echo "$desired" > "$marker" 2>/dev/null || true; else echo "$backend 放行订阅端口失败（已忽略）"; fi
+  done
   return 0
 }
 sub_https_sync(){
@@ -282,7 +327,7 @@ sub_https_stop(){
   subhttps_cron_remove
   subhttps_manage_443 "http-ip"
   subhttps_manage_subport "https"
-  rm -f "$HOME/agsbx/subhttps.mode" "$HOME/agsbx/Caddyfile.sub" "$HOME/agsbx/subhttps.pid" "$HOME/agsbx/subhttps.cert.hash" "$HOME/agsbx/subhttps.log" "$HOME/agsbx/subhttps.443" "$HOME/agsbx/subhttps.subport" 2>/dev/null || true
+  rm -f "$HOME/agsbx/subhttps.mode" "$HOME/agsbx/Caddyfile.sub" "$HOME/agsbx/subhttps.pid" "$HOME/agsbx/subhttps.cert.hash" "$HOME/agsbx/subhttps.log" "$HOME/agsbx/subhttps.443" "$HOME/agsbx/subhttps.subport" "$HOME/agsbx/subhttps.firewalld.443" "$HOME/agsbx/subhttps.firewalld.subport" 2>/dev/null || true
   return 0
 }
 sub_https_display(){

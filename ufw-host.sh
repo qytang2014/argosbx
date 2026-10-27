@@ -1,15 +1,21 @@
 #!/bin/bash
-# Host-side ufw helper for the argosbx container (NOT run inside a
-# container, NOT part of the container image). Run it on the host:
+# Host-side firewall helper for the argosbx container (NOT run inside
+# a container, NOT part of the container image). Run it on the host:
 #   bash ufw-host.sh apply [--container NAME] [--env FILE] [--state FILE]
 #   bash ufw-host.sh delete [--state FILE]
 #   bash ufw-host.sh print [--container NAME] [--env FILE]
+# Backends (layered, same as the main script): ufw and firewalld are
+# both supported, auto-detected by active state. --state FILE is the
+# ufw state file (default $HOME/.agsbx-container-ufw.rules); the
+# firewalld state file is STATE.firewalld. `delete` cleans both, so
+# switching backends does not leave rules behind.
 # Rules:
-# - Only when ufw is already active. This script NEVER turns ufw
-#   on by itself, never opens SSH (22) or any port outside the node list.
-# - State lives on the HOST (default $HOME/.agsbx-container-ufw.rules),
-#   never inside the container, so `delete` still works after the
-#   container is gone. Only rules in that state file are ever deleted.
+# - Only when the backend is already active. This script NEVER turns
+#   a firewall on by itself, never opens SSH (22) or any port outside
+#   the node list.
+# - State lives on the HOST, never inside the container, so `delete`
+#   still works after the container is gone. Only rules in that
+#   state file are ever deleted.
 # - --container NAME (preferred for bridge -p mapping): reads
 #   `docker port NAME`, so the host port and its published proto win.
 #   The container must be running for this to work.
@@ -39,6 +45,28 @@ done
 _is_active(){
   command -v ufw >/dev/null 2>&1 || return 1
   ufw status 2>/dev/null | grep -q "Status: active"
+}
+_fw_active(){
+  command -v firewall-cmd >/dev/null 2>&1 || return 1
+  [ "$(firewall-cmd --state 2>/dev/null)" = "running" ]
+}
+_fw_zone(){
+  local z=""; z=$(firewall-cmd --get-default-zone 2>/dev/null | tr -d ' \t\r\n'); [ -n "$z" ] || z="public"; echo "$z"
+}
+_host_allow(){
+  case "$1" in
+    ufw) ufw allow "$2" >/dev/null 2>&1;;
+    firewalld) firewall-cmd --permanent --zone="$(_fw_zone)" --add-port="$2" >/dev/null 2>&1;;
+  esac
+}
+_host_delete(){
+  case "$1" in
+    ufw) ufw --force delete allow "$2" >/dev/null 2>&1;;
+    firewalld) firewall-cmd --permanent --zone="$(_fw_zone)" --remove-port="$2" >/dev/null 2>&1;;
+  esac
+}
+_host_state_for(){
+  case "$1" in firewalld) echo "$STATE.firewalld";; *) echo "$STATE";; esac
 }
 _num(){
   case "$1" in ''|*[!0-9]*) echo "";; *) if [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null; then echo "$1"; fi;; esac
@@ -105,39 +133,59 @@ case "$CMD" in
     tmp="$STATE.tmp.$$"
     _desired | sort -u > "$tmp" || true
     if [ ! -s "$tmp" ]; then echo "没有可放行的节点端口，请检查容器名或环境变量" >&2; rm -f "$tmp"; exit 1; fi
-    if ! _is_active; then
+    if ! _is_active && ! _fw_active; then
       mv "$tmp" "$STATE" 2>/dev/null || true
-      echo "ufw 未开启，已记录节点端口规则，开启 ufw 后再次运行 bash ufw-host.sh apply"
+      echo "ufw/firewalld 未开启，已记录节点端口规则，开启后再次运行 bash ufw-host.sh apply"
+      rm -f "$tmp"
       exit 0
     fi
-    added=0; deleted=0
-    if [ -f "$STATE" ]; then
+    for _backend in ufw firewalld; do
+      case "$_backend" in
+        ufw) _is_active || continue;;
+        firewalld) _fw_active || continue;;
+      esac
+      _bstate=$(_host_state_for "$_backend")
+      added=0; deleted=0
+      if [ -f "$_bstate" ]; then
+        while IFS= read -r r || [ -n "$r" ]; do
+          case "$r" in '') continue;; esac
+          if ! grep -qx "$r" "$tmp" 2>/dev/null; then
+            if _host_delete "$_backend" "$r"; then deleted=$((deleted + 1)); else echo "$_backend 删除规则失败（已忽略）：$r"; fi
+          fi
+        done < "$_bstate"
+      fi
       while IFS= read -r r || [ -n "$r" ]; do
         case "$r" in '') continue;; esac
-        if ! grep -qx "$r" "$tmp" 2>/dev/null; then
-          if ufw --force delete allow "$r" >/dev/null 2>&1; then deleted=$((deleted + 1)); else echo "ufw 删除规则失败（已忽略）：$r"; fi
+        if [ ! -f "$_bstate" ] || ! grep -qx "$r" "$_bstate" 2>/dev/null; then
+          if _host_allow "$_backend" "$r"; then added=$((added + 1)); else echo "$_backend 放行失败（已忽略）：$r"; fi
         fi
-      done < "$STATE"
-    fi
-    while IFS= read -r r || [ -n "$r" ]; do
-      case "$r" in '') continue;; esac
-      if [ ! -f "$STATE" ] || ! grep -qx "$r" "$STATE" 2>/dev/null; then
-        if ufw allow "$r" >/dev/null 2>&1; then added=$((added + 1)); else echo "ufw 放行失败（已忽略）：$r"; fi
-      fi
-    done < "$tmp"
-    mv "$tmp" "$STATE" 2>/dev/null || true
-    echo "ufw 已同步容器节点端口规则（新增 $added 条，删除 $deleted 条）"
+      done < "$tmp"
+      if [ "$_backend" = "firewalld" ]; then firewall-cmd --reload >/dev/null 2>&1 || true; fi
+      mv "$tmp" "$_bstate" 2>/dev/null || true
+      cp "$_bstate" "$tmp" 2>/dev/null || true
+      echo "$_backend 已同步容器节点端口规则（新增 $added 条，删除 $deleted 条）"
+    done
+    rm -f "$tmp"
     ;;
   delete)
-    if [ ! -f "$STATE" ]; then echo "没有记录的容器 ufw 规则，无需删除"; exit 0; fi
-    if command -v ufw >/dev/null 2>&1; then
+    _found=0
+    for _backend in ufw firewalld; do
+      _bstate=$(_host_state_for "$_backend")
+      if [ ! -f "$_bstate" ]; then continue; fi
+      _found=1
+      case "$_backend" in
+        ufw) command -v ufw >/dev/null 2>&1 || continue;;
+        firewalld) command -v firewall-cmd >/dev/null 2>&1 || continue;;
+      esac
       while IFS= read -r r || [ -n "$r" ]; do
         case "$r" in '') continue;; esac
-        ufw --force delete allow "$r" >/dev/null 2>&1 || true
-      done < "$STATE"
-    fi
-    rm -f "$STATE"
-    echo "已删除记录的容器 ufw 规则"
+        _host_delete "$_backend" "$r" || true
+      done < "$_bstate"
+      if [ "$_backend" = "firewalld" ]; then firewall-cmd --reload >/dev/null 2>&1 || true; fi
+      rm -f "$_bstate"
+    done
+    if [ "$_found" -eq 0 ]; then echo "没有记录的容器防火墙规则，无需删除"; exit 0; fi
+    echo "已删除记录的容器防火墙规则"
     ;;
   *)
     echo "用法：bash ufw-host.sh apply|delete|print [--container NAME] [--env FILE] [--state FILE]" >&2

@@ -123,8 +123,9 @@ grep -Fq "40001/tcp" "$td/home/agsbx/ufw.rules" || fail "sync without ufw must s
 
 # 9. Container prompt: prints host commands, empty set prints nothing.
 out=$(bash -c 'vlpt=41001; hypt=41002; sspt=41003; xhpt=""; vxpt=""; vwpt=""; xupt=""; xcpt=""; nvpt=""; tupt=""; anpt=""; arpt=""; vmpt=""; vmtls=""; sopt=""; source "modules/container-ufw.sh"; container_ufw_prompt')
-echo "$out" | grep -Fq "宿主 ufw 提示" || fail "container prompt missing header"
+echo "$out" | grep -Fq "宿主防火墙提示" || fail "container prompt missing header"
 echo "$out" | grep -Fq "ufw allow 41001/tcp" || fail "container prompt missing vlpt tcp"
+echo "$out" | grep -Fq "firewall-cmd --permanent --add-port=41001/tcp" || fail "container prompt missing firewalld vlpt tcp"
 echo "$out" | grep -Fq "ufw allow 41002/udp" || fail "container prompt missing hy2 udp"
 echo "$out" | grep -Fq "ufw allow 41003/tcp" || fail "container prompt missing ss tcp"
 echo "$out" | grep -Fq "ufw allow 41003/udp" || fail "container prompt missing ss udp"

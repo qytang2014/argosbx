@@ -447,7 +447,7 @@ fi
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
     # --- cert-watch module (right after cert module) ---
     t = t.replace(cert, cert + cert_watch, 1)
-    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启 ufw 后运行 agsbx ufwsync 重新同步节点端口"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪、内存大于等于 256M 或订阅 Caddy 已在运行时走 https，否则回退 http）"', "showmode-add-line", 1)
+    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪、内存大于等于 256M 或订阅 Caddy 已在运行时走 https，否则回退 http）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")
@@ -476,7 +476,7 @@ fi
     # rep/add, which flow through the same ins call; list/upx/ups/del
     # exit before ins and are unaffected) ---
     t = replace(t, 'ins\nvars_save\nif [ -n "$sub" ]; then',
-                'ins\nvars_save\nufw_sync\nif [ -n "$sub" ]; then', "ufw-sync-call", 1)
+                'ins\nvars_save\nfw_sync\nif [ -n "$sub" ]; then', "ufw-sync-call", 1)
     t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
                 'cert_migrate_paths\nif [ ! -f "$HOME/agsbx/SHA256.txt" ]; then', "selfsigned-migrate-call", 1)
     t = replace(t, 'command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key"',
@@ -523,19 +523,19 @@ fi
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
     # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
     t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
-                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|subhttpsync) ;; *)', "top-case-exclusion", 1)
+                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)', "top-case-exclusion", 1)
     # --- certwatch/certrestart subcommands + del cleanup ---
     t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
                 'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
     # --- ufwsync subcommand + ufw cleanup on del (before rm -rf, so
     # the state file and port files still exist when cleanup runs) ---
     t = replace(t, 'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
-                'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "ufwsync-dispatch", 1)
+                'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "ufwsync-dispatch", 1)
     # --- subhttpsync subcommand (reboot cron) + del cleanup ---
-    t = replace(t, 'if [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
-                'if [ "$1" = "ufwsync" ]; then\nufw_apply_saved\nexit\nfi\nif [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "subhttpsync-dispatch", 1)
+    t = replace(t, 'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
+                'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "subhttpsync-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
-                'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nsub_https_stop\nufw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
+                'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nsub_https_stop\nfw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
