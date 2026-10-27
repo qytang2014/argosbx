@@ -101,16 +101,49 @@ def build_index():
     _argo_text = h[_argo_start:_argo_end]
     _egress_section = '      <section class="card egress-card">\n        <h2>外部出口与分流：</h2>\n' + egress_ui.rstrip("\n") + '\n      </section>'
     h = h[:_sub_start] + _argo_text + '\n\n' + _sub_text + '\n\n' + _egress_section + h[_argo_end:]
-    # --- layout CSS: no spanning, align start, mobile truly stacks ---
-    # Root cause of the left blank: .protocol-port spanned rows 1-3,
-    # so its height was the sum of the three right cards, not its own
-    # content. With align-items:start and no spanning, each card is
-    # only as tall as its content; the remaining column difference
-    # is page background below the shorter column, not blank inside
-    # a card. The mobile query previously only changed the grid
-    # columns, not the card placements, so narrow screens did not
-    # truly stack to one column; now every card is reset to column
-    # 1 / row auto under 1100px.
+    # --- independent columns: right cards must move up, not wait ---
+    # Explicit grid rows share their height across both columns:
+    # row 1 is as tall as the taller of protocols/global, so Argo
+    # in row 2 cannot start until protocols ends, leaving exactly
+    # the blank the user pointed at between global and Argo, even
+    # though Argo's own height is small. The fix is two column
+    # wrappers, each a flex column: left = protocols alone, right =
+    # global + Argo + subscription stacked tightly, so the right
+    # cards start immediately below global, regardless of how tall
+    # protocols is. Egress, commands and output stay direct grid
+    # children, full width below both columns. Mobile stack order
+    # is unchanged (left column, then right column, then the rest),
+    # because the wrappers themselves stack in DOM order.
+    _proto_start = h.index('      <section class="card protocol-port">')
+    _proto_end = h.index('</section>', _proto_start) + len('</section>')
+    _glob_start = h.index('      <section class="card outbound-warp">')
+    _glob_end = h.index('</section>', _glob_start) + len('</section>')
+    _argo2_start = h.index('      <section class="card argo-tunnel">')
+    _argo2_end = h.index('</section>', _argo2_start) + len('</section>')
+    _sub2_start = h.index('      <section class="card subscription-links">')
+    _sub2_end = h.index('</section>', _sub2_start) + len('</section>')
+    if not (_proto_start < _proto_end < _glob_start < _glob_end < _argo2_start < _argo2_end < _sub2_start < _sub2_end):
+        print("BUILD FAIL: anchor order: index-layout-columns", file=sys.stderr); sys.exit(1)
+    _proto_text = h[_proto_start:_proto_end]
+    _glob_text = h[_glob_start:_glob_end]
+    _argo2_text = h[_argo2_start:_argo2_end]
+    _sub2_text = h[_sub2_start:_sub2_end]
+    _rest = h[_sub2_end:]
+    h = (h[:_proto_start]
+         + '      <div class="grid-col">\n' + _proto_text + '\n      </div>\n\n'
+         + '      <div class="grid-col">\n' + _glob_text + '\n\n' + _argo2_text + '\n\n' + _sub2_text + '\n      </div>'
+         + _rest)
+    # --- layout CSS: independent columns, no shared rows ---
+    # With explicit grid rows, a row's height is shared across
+    # columns, so Argo in row 2 waited for protocols in row 1 to
+    # end, leaving a blank between global and Argo. With two flex
+    # columns, each column stacks its own cards tightly, so Argo
+    # starts immediately below global and subscription immediately
+    # below Argo, whatever protocols' height is. Only the full-width
+    # cards below both columns (egress, commands, output) use
+    # grid-column 1 / 3. Mobile: the grid becomes one column, so
+    # the left column wrapper stacks above the right column
+    # wrapper, and each wrapper's cards stack inside it.
     h = replace(h, """    .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -120,9 +153,14 @@ def build_index():
                 """    .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto auto auto auto auto auto;
       gap: 20px;
       align-items: start;
+    }
+    .grid-col {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-width: 0;
     }""", "index-grid", 1)
     h = replace(h, """    @media (max-width: 1100px) {
       .grid {
@@ -133,11 +171,9 @@ def build_index():
                 """    @media (max-width: 1100px) {
       .grid {
         grid-template-columns: 1fr;
-        grid-template-rows: auto;
       }
-      .protocol-port, .outbound-warp, .egress-card, .subscription-links, .argo-tunnel, .shortcut-commands-card, .out {
+      .grid-col, .egress-card, .shortcut-commands-card, .out {
         grid-column: 1;
-        grid-row: auto;
       }
     }""", "index-grid-mobile", 1)
     h = replace(h, """    .protocol-port {
@@ -164,33 +200,14 @@ def build_index():
       grid-column: 1 / 3;
       grid-row: 5;
     }""",
-                """    .protocol-port {
-      grid-column: 1;
-      grid-row: 1;
-    }
-    .outbound-warp {
-      grid-column: 2;
-      grid-row: 1;
-    }
-    .argo-tunnel {
-      grid-column: 2;
-      grid-row: 2;
-    }
-    .subscription-links {
-      grid-column: 2;
-      grid-row: 3;
-    }
-    .egress-card {
+                """    .egress-card {
       grid-column: 1 / 3;
-      grid-row: 4;
     }
     .shortcut-commands-card {
       grid-column: 1 / 3;
-      grid-row: 5;
     }
     .out {
       grid-column: 1 / 3;
-      grid-row: 6;
     }""", "index-card-placement", 1)
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
