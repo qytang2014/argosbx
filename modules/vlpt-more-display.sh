@@ -1,14 +1,13 @@
 # vlpt more instances display (private module, loop).
 # Instance numbers come from the inbound tags actually present in
-# xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 3), never
+# xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 2), never
 # from port files alone, so a stale port file from a removed instance
-# cannot resurrect a link. Instance 2 is always displayed by the
-# vlpt2 block (even when it came from vlpt_more), so this loop only
-# handles N >= 3 and never duplicates it. Native links are printed
+# cannot resurrect a link. Instance 2 is displayed by this loop too
+# (vlpt2 block is gone). Native links are printed
 # here; subscription nodes are produced by sbvlpt_more / clvlpt_more
 # below, which loop over the same tag list at subscription-build time.
 vlpt_more_idx_list(){
-{ grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1|2);; *) echo "$_n";; esac; done
+{ grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1);; *) echo "$_n";; esac; done
 }
 for _vlpt_more_i in $(vlpt_more_idx_list); do
 if grep -q "\"tag\": \"vl-reality-sb-$_vlpt_more_i\"" "$HOME/agsbx/sb.json" 2>/dev/null; then _vlpt_more_pbk="$public_key_s"; _vlpt_more_sid="$short_id_s"; else _vlpt_more_pbk="$public_key_x"; _vlpt_more_sid="$short_id_x"; fi

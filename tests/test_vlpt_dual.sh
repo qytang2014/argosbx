@@ -61,14 +61,12 @@ run_case "vlpt+tuic invalid kernel" bogus sb tup
 vlp=""; vlp2=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=yes; anp=""; arp=""; ssp=""; vlpt_kernel=""
 eval "$BLOCK"
 [ -z "$vlpt_on" ] || { echo "FAIL: no-vlpt vlpt_on=[$vlpt_on] want empty"; FAIL=1; }
-# vlpt2 alone (vlp empty, vlp2 set) -> vlpt_on computed, xray by default
+# vlpt2 removed: vlp2 must never drive vlpt_on any more. A vlp2=yes
+# left over from an old command is ignored by the vlpt_on block
+# (which now only checks vlp).
 vlp=""; vlp2=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; vlpt_kernel=""
 eval "$BLOCK"
-[ "$vlpt_on" = "xray" ] || { echo "FAIL: vlpt2-alone vlpt_on=[$vlpt_on] want xray"; FAIL=1; }
-# vlpt2 alone + tuic -> sb, same auto rule as vlpt
-vlp=""; vlp2=yes; tup=yes
-eval "$BLOCK"
-[ "$vlpt_on" = "sb" ] || { echo "FAIL: vlpt2+tuic vlpt_on=[$vlpt_on] want sb"; FAIL=1; }
+[ -z "$vlpt_on" ] || { echo "FAIL: vlp2-alone must not compute vlpt_on, got [$vlpt_on]"; FAIL=1; }
 # ins() branch decisions under the same cases (conditions as in built file)
 # vlpt+tuic auto: sb only (first branch false via vlpt_on=sb, second true)
 vlp=yes; vlp2=""; tup=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; anp=""; arp=""; ssp=""; vlpt_kernel=""; eval "$BLOCK"

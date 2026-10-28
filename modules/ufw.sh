@@ -12,7 +12,7 @@
 # managers (guarded, so this module alone still works) so that
 # enabling ufw later and running ufwsync opens everything, not just
 # the node ports:
-#   tcp only: vlpt, vlpt2, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
+#   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
 #   tcp+udp:  sspt, sopt
 # Why xcpt is tcp only even though its display name says TCP/UDP:
@@ -54,7 +54,6 @@ _ufw_emit(){
 ufw_desired_rules(){
   local _f _n _p
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
-  _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   if [ -n "$vlpt_more" ]; then
     local _mp="" _moldifs="$IFS"; IFS=','; for _mp in $vlpt_more; do _mp=$(printf '%s' "$_mp" | xargs 2>/dev/null || printf '%s' "$_mp"); case "$_mp" in ''|*[!0-9]*) ;; *) echo "$_mp/tcp";; esac; done; IFS="$_moldifs"
   fi
@@ -121,8 +120,8 @@ _ufw_fallback_rules(){
     if [ -z "$p" ]; then continue; fi
     for pr in $protos; do echo "$p/$pr"; done
   done
-  # vlpt more instances: port files port_vl_re3, port_vl_re4, ... are
-  # not in the spec list above, so scan them here (callers sort -u).
+  # vlpt extra instances: port_vl_re2 is in the spec list above;
+  # port_vl_re3, port_vl_re4, ... are not, so scan them here.
   for f in "$HOME/agsbx"/port_vl_re[0-9]*; do
     [ -f "$f" ] || continue
     case "$f" in *port_vl_re|*port_vl_re2) continue;; esac

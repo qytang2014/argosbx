@@ -3,8 +3,9 @@
 # No new variable per instance: install loops (Xray + Sing-box),
 # display/subscription loops over tags actually present in xr/sb.json,
 # ufw loops over the list, egress alias is generic for any vlptN.
-# vlpt is instance 1; vlpt2 (script-side) is unchanged for backward
-# compatibility, and when it is set vlpt_more starts at 3 instead of 2.
+# vlpt is instance 1; vlpt2/vlpt_more are REMOVED as user inputs
+# (2026-10-28): vlpt_more is internal only, set by the vlpt comma
+# expansion, and the loop always starts at 2.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fail(){ echo "FAIL: $*" >&2; exit 1; }
@@ -20,8 +21,12 @@ grep -Fq 'get_func sbvlpt_more' "$ROOT/argosbx.sh" || fail "sbxy missing sbvlpt_
 grep -Fq 'get_func clvlpt_more' "$ROOT/argosbx.sh" || fail "clxy missing clvlpt_more"
 # no vlpt3 variable: the 3rd instance must come from the list, not a copy
 grep -Fq 'vlpt3=' "$ROOT/argosbx.sh" && fail "vlpt3 variable must not exist (loop, not copies)"
-grep -Fq 'for v in uuid vlpt vlpt2 vlpt_more vmpt' "$ROOT/argosbx.sh" || fail "top list missing vlpt_more"
-grep -Fq 'vlpt_more=' "$ROOT/argosbx.sh" || fail "recovery/sh missing vlpt_more"
+grep -Fq 'for v in uuid vlpt vmpt' "$ROOT/argosbx.sh" || fail "top list must be vlpt without vlpt2/vlpt_more"
+grep -Fq 'for v in uuid vlpt vlpt2' "$ROOT/argosbx.sh" && fail "top list must not contain vlpt2"
+grep -Fq 'export port_vl_re2' "$ROOT/argosbx.sh" && fail "vlpt2 port export must be removed"
+grep -Fq 'vlp2=yes' "$ROOT/argosbx.sh" && fail "vlp2 flag must be removed"
+grep -Fq 'get_func sbvlpt2' "$ROOT/argosbx.sh" && fail "sbvlpt2 subscription must be removed"
+grep -Fq 'sbvlpt2()' "$ROOT/argosbx.sh" && fail "sbvlpt2 function must be removed"
 # 2. egress alias generic: vlpt3, vlpt4, vlpt10 all expand, vlpt unchanged
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 python3 - "$ROOT/argosbx.sh" "$TMP/egress.sh" << 'PY'
@@ -50,11 +55,12 @@ echo "$out" | grep -Fqx "20004/tcp" || fail "ufw loop missing 20004: $out"
 # 4. display loop: tags in xr/sb.json decide, stale port files do not
 mkdir -p "$TMP/agsbx"
 cat > "$TMP/agsbx/xr.json" << 'JSON'
-{"inbounds": [{"tag":"reality-vision-3"}, {"tag":"reality-vision-5"}]}
+{"inbounds": [{"tag":"reality-vision-2"}, {"tag":"reality-vision-3"}, {"tag":"reality-vision-5"}]}
 JSON
 cat > "$TMP/agsbx/sb.json" << 'JSON'
 {"inbounds": []}
 JSON
+echo "30002" > "$TMP/agsbx/port_vl_re2"
 echo "30003" > "$TMP/agsbx/port_vl_re3"
 echo "30005" > "$TMP/agsbx/port_vl_re5"
 echo "99999" > "$TMP/agsbx/port_vl_re4"
@@ -66,6 +72,7 @@ assert m, "vlpt-more display module not found in built script"
 open(sys.argv[2], "w").write(m.group(0))
 PY
 out=$(HOME="$TMP" bash -c 'source "$1"; uuid="11111111-2222-3333-4444-555555555555"; reality_addr="203.0.113.10"; ym_vl_re="apple.com"; sxname=""; hostname="test"; public_key_x="PKX"; short_id_x="SIDX"; public_key_s="PKS"; short_id_s="SIDS"; vlpt_more_idx_list; sbvlpt_more_1' _ "$TMP/display.sh")
+echo "$out" | grep -Fqx '"vless-2-test",' || fail "display loop missing instance 2 (N>=2): $out"
 echo "$out" | grep -Fqx '"vless-3-test",' || fail "display loop missing instance 3: $out"
 echo "$out" | grep -Fqx '"vless-5-test",' || fail "display loop missing instance 5: $out"
 echo "$out" | grep -Fq "vless-4" && fail "stale port file 4 must not appear: $out"
@@ -88,9 +95,10 @@ grep -Fq 'class="field-note"' "$ROOT/index.html" || fail "generator field-note m
 grep -Fq '所有 vlpt 实例共用此内核' "$ROOT/index.html" || fail "generator kernel note missing"
 grep -Fq 'Vless-tcp-reality 内核（' "$ROOT/index.html" && fail "vlpt_kernel label must be short (note goes below)"
 grep -Fq 'grid-column: 1 / -1' "$ROOT/index.html" || fail "field-note must span the grid row"
-# paste-back migration: old vlpt2/vlpt_more fold into vlpt list
-grep -Fq "params['vlpt_more']" "$ROOT/index.html" || fail "generator paste migration missing vlpt_more"
-# 6. install loop start index: 2 without vlpt2, 3 with vlpt2
+# paste-back migration REMOVED: old vlpt2/vlpt_more are not recognised
+grep -Fq "params['vlpt_more']" "$ROOT/index.html" && fail "generator paste migration for vlpt_more must be removed"
+grep -Fq "params['vlpt2']" "$ROOT/index.html" && fail "generator paste migration for vlpt2 must be removed"
+# 6. install loop start index: always 2 (vlpt2 gone)
 python3 - "$ROOT/argosbx.sh" "$TMP/xray_loop.sh" << 'PY'
 import re, sys
 t = open(sys.argv[1]).read()
@@ -102,11 +110,6 @@ mkdir -p "$TMP/agsbx"
 out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlpt_more="20002,20003"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
 grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" || fail "loop without vlpt2 must start at 2: $out"
 grep -Fq '"tag":"reality-vision-3"' "$TMP/agsbx/xr.json" || fail "loop without vlpt2 must include 3: $out"
-: > "$TMP/agsbx/xr.json"
-out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlp2=yes; vlpt_more="20003,20004"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
-grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" && fail "loop with vlpt2 must not overwrite instance 2"
-grep -Fq '"tag":"reality-vision-3"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must start at 3: $out"
-grep -Fq '"tag":"reality-vision-4"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must include 4: $out"
 # 7. comma expansion + while-loop random: "10001," must create
 # instance 2 (trailing empty is NOT dropped), "," must create 2
 # random instances, and a second run must reuse the same random ports.
@@ -124,7 +127,7 @@ echo "$out" | grep -Fq 'vlpt=[] more=[random]' || fail "comma expansion , wrong:
 out=$(bash -c 'vlpt="10001,10002"; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more]"' _ "$TMP/comma.sh")
 echo "$out" | grep -Fq 'vlpt=[10001] more=[10002]' || fail "comma expansion 10001,10002 wrong: $out"
 out=$(bash -c 'vlpt="10001"; vlpt2="20002"; vlpt_more="30003"; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more] vlpt2=[$vlpt2]"' _ "$TMP/comma.sh")
-echo "$out" | grep -Fq 'vlpt=[10001] more=[30003] vlpt2=[20002]' || fail "single vlpt must keep legacy vlpt2/vlpt_more: $out"
+echo "$out" | grep -Fq 'vlpt=[10001] more=[] vlpt2=[]' || fail "old vlpt2/vlpt_more must be cleared, not kept: $out"
 # while-loop: "10001," via xray loop must write port files for
 # instance 1? (instance 1 is the vlpt block, not this loop) - here
 # check the loop alone: vlpt_more="random" must write a random port

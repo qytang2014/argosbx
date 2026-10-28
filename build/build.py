@@ -293,23 +293,13 @@ def build_index():
       }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
                 "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
-    # Paste-back migration for removed vlpt2 / vlpt_more fields: an
-    # old command with vlpt2 and/or vlpt_more folds into the single
-    # vlpt comma list (vlpt, vlpt2, vlpt_more in order), so old
-    # instances are not silently dropped by render(). Script-side
-    # vlpt2/vlpt_more are unchanged for old sh.txt / vars.env.
-    h = replace(h, "    isUpdatingFromOutput = false;",
-                """    if (params['vlpt2'] !== undefined || params['vlpt_more'] !== undefined) {
-      const parts = [];
-      if (params['vlpt'] !== undefined) parts.push(params['vlpt']);
-      if (params['vlpt2'] !== undefined) parts.push(params['vlpt2']);
-      if (params['vlpt_more'] !== undefined) parts.push(params['vlpt_more']);
-      const pt = document.querySelector('[data-port="vlpt"]');
-      if (pt) pt.value = parts.join(',');
-      const ck = document.querySelector('[data-proto="vlpt"]');
-      if (ck) ck.checked = true;
-    }
-    isUpdatingFromOutput = false;""", "index-vlpt-comma-paste-migration", 1)
+    # No paste-back migration for vlpt2 / vlpt_more: those old
+    # commands are no longer recognised (see vlpt-comma module:
+    # vlpt2/vlpt_more are cleared at script start), and QUINN
+    # confirmed they were never used on another machine, so there
+    # is nothing to migrate. A pasted old command simply loses its
+    # vlpt2/vlpt_more parts; the user re-enters them as a vlpt
+    # comma list.
     h = replace(h, """  generateUuidBtn.addEventListener('click', () => {
     uuidInput.value = crypto.randomUUID();
     render();
@@ -339,11 +329,7 @@ def build_index():
     h = replace(h, '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n',
                 '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n            <label><input type="checkbox" data-proto="vmtls"> Vmess-ws-tls <span class="pill">vmtls</span></label><input type="text" placeholder="留空则随机端口" data-port="vmtls">\n', "index-vmtls-checkbox", 1)
     h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];",
-                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','vlpt2','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
-    # (vlpt2 reym-dynamic is gone with the vlpt2 checkbox; the parse
-    # line below keeps vlpt2 only so paste-back can migrate it.)
-    h = replace(h, "    const isRealityEnabled = params['vlpt'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;",
-                "    const isRealityEnabled = params['vlpt'] !== undefined || params['vlpt2'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;", "index-vlpt2-reym-parse", 1)
+                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
     h = replace(h, "      if (command === 'rep') {",
                 "      if (command === 'rep' || command === 'add') {", "index-add-handler", 1)
     h = replace(h, "output.value = (vars ? vars + ' ' : '') + selectedCommand + ' rep';",
@@ -431,11 +417,10 @@ def main():
     #  the current single-xray default. No backward-compat keep: unless
     #  vlpt_kernel=xray is explicitly set, an old install is migrated.
     vlpt_on = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
-# vlpt2 shares vlpt_on (and vlpt_kernel): both instances land on the
-# same kernel, distinguished by port and inbound tag only.
-# vlpt_more (loop, instances 3+) shares vlpt_on too.
+# vlpt instances share vlpt_on (and vlpt_kernel): all instances land
+# on the same kernel, distinguished by port and inbound tag only.
 vlpt_on=""
-if [ -n "$vlp" ] || [ -n "${vlp2:-}" ] || [ -n "${vlpt_more:-}" ]; then
+if [ -n "$vlp" ]; then
   case "${vlpt_kernel:-auto}" in
     xray) vlpt_on="xray" ;;
     sb|singbox|sing-box) vlpt_on="sb" ;;
@@ -481,65 +466,25 @@ fi
     t = replace(t, '    public-key: $public_key_x    \n    short-id: $short_id_x',
                 '    public-key: $vlpt_pbk    \n    short-id: $vlpt_sid', "vlpt-clash-pbk", 1)
 
-    # --- vlpt2 second instance (private): vlpt2 = second vless-tcp-
-    # reality-vision, same uuid and same Reality keypair per kernel as
-    # vlpt, different port (port_vl_re2) and inbound tag
-    # (reality-vision-2 on Xray, vl-reality-sb-2 on Sing-box).
-    # Shared vlpt_kernel / vlpt_on: both instances always land on the
-    # same kernel, so a vlpt rule never matches vlpt2 and vice versa;
-    # routing them apart is inbound:vlpt=>node1 + inbound:vlpt2=>node2.
-    # Main script only in this round (container/SAP not yet).
-    t = replace(t, "for v in uuid vlpt vmpt vmtls",
-                "for v in uuid vlpt vlpt2 vmpt vmtls", "vlpt2-top-lists")
-    t = replace(t, '[ -z "${vlpt+x}" ] || vlp=yes',
-                '[ -z "${vlpt+x}" ] || vlp=yes\n[ -z "${vlpt2+x}" ] || vlp2=yes', "vlpt2-flag", 1)
-    t = replace(t, '[ "$vlp" = yes ]',
-                '[ "$vlp" = yes ] || [ "$vlp2" = yes ]', "vlpt2-guards")
-    t = replace(t, "export port_vl_re=${vlpt:-''}",
-                "export port_vl_re=${vlpt:-''}\nexport port_vl_re2=${vlpt2:-''}", "vlpt2-port-export", 1)
-    _bs = chr(92)
-    t = replace(t, '$vlp=' + _bs + '"${port_vl_re}' + _bs + '"',
-                '$vlp=' + _bs + '"${port_vl_re}' + _bs + '" $vlp2=' + _bs + '"${port_vl_re2}' + _bs + '"', "vlpt2-recovery", 1)
-    t = replace(t, 'if [ -n "$xhp" ] || [ -n "$vlp" ]; then',
-                'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then', "vlpt2-xray-keypair-setup", 1)
-    # installxray vlpt2 block, after the vlpt block, before installxray ends.
-    vlpt2_xray = read("modules/vlpt2-xray.sh")
-    t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n}\n\ninstallsb(){',
-                'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt2_xray + '}\n\ninstallsb(){', "vlpt2-xray-block", 1)
-    # installsb vlpt2 block, after the vlpt-sb block, before sspt.
-    vlpt2_sb = read("modules/vlpt2-sb.sh")
-    t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
-                vlpt2_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt2-sb-block", 1)
-    # display: tighten the vlpt guard to exact tags, otherwise a
-    # vlpt2-only install would match reality-vision-2 / vl-reality-sb-2
-    # by substring and show a broken vlpt link with no port file.
+    # vlpt2 REMOVED (2026-10-28): the old vlpt2= second-instance variable
+    # is no longer recognised. Instance 2 now comes only from the vlpt
+    # comma list (vlpt="10001,10002"). inbound:vlpt2 routing stays:
+    # it is an egress alias for the -2 inbound tags, not a protocol
+    # variable (see modules/egress.sh vlpt[0-9]* branch).
+    # display: tighten the vlpt guard to exact tags, otherwise an
+    # instance-2-only config would match reality-vision-2 /
+    # vl-reality-sb-2 by substring and show a broken vlpt link.
     t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then',
-                'if grep -q \'"tag":"reality-vision"\' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q \'"tag": "vl-reality-sb"\' "$HOME/agsbx/sb.json" 2>/dev/null; then', "vlpt2-display-guard-tighten", 1)
-    vlpt2_display = read("modules/vlpt2-display.sh")
-    t = replace(t, 'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\nif grep ss-2022',
-                'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\n' + vlpt2_display + 'if grep ss-2022', "vlpt2-display-block", 1)
-    # subscriptions: vlpt2 nodes in sing-box JSON, Clash YAML and the
-    # outbounds lists, with distinct tags (vless-2 / vision-2).
-    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbsspt;',
-                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbsspt;', "vlpt2-sbxy", 1)
-    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt;',
-                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clsspt;', "vlpt2-clxy", 1)
-    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbsspt1;',
-                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1;', "vlpt2-sbgz", 1)
-    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
-                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;', "vlpt2-clgz", 1)
+                'if grep -q \'"tag":"reality-vision"\' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q \'"tag": "vl-reality-sb"\' "$HOME/agsbx/sb.json" 2>/dev/null; then', "vlpt-display-guard-tighten", 1)
 
-    # --- vlpt loop (private): vlpt_more="10002,10003" = instances 2, 3,
-    # ... in order, no new variable per instance. vlpt stays as instance
-    # 1; vlpt2 stays in the script for backward compatibility (old
-    # commands, vars.env, sh.txt, port files all keep working), and
-    # when vlpt2 is set vlpt_more starts at 3 to avoid overwriting it.
-    # The generator no longer shows a vlpt2 checkbox: checking vlpt
-    # alone creates exactly one instance, extra instances come from
-    # vlpt_more only.
+    # --- vlpt loop (private): vlpt_more is INTERNAL only, set by the
+    # vlpt comma expansion below ("10002,10003" = instances 2, 3, ...
+    # in order, no new variable per instance). vlpt stays as instance
+    # 1; vlpt2/vlpt_more are NOT user inputs any more (cleared at
+    # script start in vlpt-comma.sh, not in the top lists, vars.env
+    # or recovery line). Checking vlpt alone creates exactly one
+    # instance, extra instances come from the vlpt comma list.
     # Shared uuid/keypair/SNI/flow, own port and tag -N, shared vlpt_on.
-    t = replace(t, "for v in uuid vlpt vlpt2 vmpt vmtls",
-                "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls", "vlpt-more-top-lists")
     # --- vlpt comma list: vlpt itself is now the list (see
     # modules/vlpt-comma.sh). Inserted before the port exports, after
     # the rep/del guard block, so sh.txt (saved earlier) still shows
@@ -548,30 +493,23 @@ fi
     vlpt_comma = read("modules/vlpt-comma.sh")
     t = replace(t, 'fi\nexport uuid=${uuid:-\'\'}\n',
                 'fi\n' + vlpt_comma + 'export uuid=${uuid:-\'\'}\n', "vlpt-comma-expand", 1)
-    t = replace(t, '[ "$vlp2" = yes ]',
-                '[ "$vlp2" = yes ] || [ -n "$vlpt_more" ]', "vlpt-more-guards")
-    t = replace(t, 'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then',
-                'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ] || [ -n "$vlpt_more" ]; then', "vlpt-more-xray-keypair-setup", 1)
-    _bs2 = chr(92)
-    t = replace(t, '$vlp2=' + _bs2 + '"${port_vl_re2}' + _bs2 + '"',
-                '$vlp2=' + _bs2 + '"${port_vl_re2}' + _bs2 + '" vlpt_more=' + _bs2 + '"${vlpt_more}' + _bs2 + '"', "vlpt-more-recovery", 1)
     vlpt_more_xray = read("modules/vlpt-more-xray.sh")
-    t = replace(t, '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n\n}\n\ninstallsb(){',
-                '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){', "vlpt-more-xray-block", 1)
+    t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n}\n\ninstallsb(){',
+                'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){', "vlpt-more-xray-block", 1)
     vlpt_more_sb = read("modules/vlpt-more-sb.sh")
     t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
                 vlpt_more_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt-more-sb-block", 1)
     vlpt_more_display = read("modules/vlpt-more-display.sh")
-    t = replace(t, 'clvlpt2_1(){\necho "- ${sxname}vless-reality-vision-2-$hostname"\n}\nfi\nif grep ss-2022',
-                'clvlpt2_1(){\necho "- ${sxname}vless-reality-vision-2-$hostname"\n}\nfi\n' + vlpt_more_display + 'if grep ss-2022', "vlpt-more-display-block", 1)
-    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbsspt;',
-                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt;', "vlpt-more-sbxy", 1)
-    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clsspt;',
-                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt;', "vlpt-more-clxy", 1)
-    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1;',
-                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
-    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;',
-                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
+    t = replace(t, 'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\nif grep ss-2022',
+                'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\n' + vlpt_more_display + 'if grep ss-2022', "vlpt-more-display-block", 1)
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt;', "vlpt-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt;',
+                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;', "vlpt-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
+                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
 
     # --- other protocols comma multi-instance (private): same comma
     # semantics as vlpt, for every other protocol. Comma expansion
@@ -583,8 +521,8 @@ fi
     # bashrc recovery line and vars.env can carry extra instances;
     # ufw/firewalld already cover extra instances via the tag scan in
     # modules/ufw.sh, and egress aliases gain protoN branches.
-    t = replace(t, "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls",
-                "for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more", "proto-more-top-lists")
+    t = replace(t, "for v in uuid vlpt vmpt vmtls",
+                "for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more", "proto-more-top-lists")
     proto_comma = read("modules/proto-comma.sh")
     t = replace(t, 'fi\n' + vlpt_comma + 'export uuid=${uuid:-\'\'}\n',
                 'fi\n' + vlpt_comma + proto_comma + 'export uuid=${uuid:-\'\'}\n', "proto-comma-expand", 1)
@@ -620,8 +558,8 @@ fi
                 '$nvp=' + _bs3 + '"${port_nv}' + _bs3 + '" nvpt_more=' + _bs3 + '"${nvpt_more}' + _bs3 + '"', "proto-more-recovery-nv", 1)
     # Install loops.
     proto_more_xray = read("modules/proto-more-xray.sh")
-    t = replace(t, '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){',
-                '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + proto_more_xray + '}\n\ninstallsb(){', "proto-more-xray-block", 1)
+    t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){',
+                'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + proto_more_xray + '}\n\ninstallsb(){', "proto-more-xray-block", 1)
     proto_more_sb = read("modules/proto-more-sb.sh")
     # installsb ends with the sspt block; insert after it, before the
     # closing brace of installsb (the sspt else branch + fi + blank
@@ -650,14 +588,14 @@ fi
     proto_more_display = read("modules/proto-more-display.sh")
     t = replace(t, 'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n',
                 'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n' + proto_more_display, "proto-more-display-block", 1)
-    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt;',
-                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more;', "proto-more-sbxy", 1)
-    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt;',
-                'clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more;', "proto-more-clxy", 1)
-    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1;',
-                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1;', "proto-more-sbgz", 1)
-    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1;',
-                'clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1;', "proto-more-clgz", 1)
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more;', "proto-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;',
+                'clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more;', "proto-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1;', "proto-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;',
+                'clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1;', "proto-more-clgz", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")

@@ -626,7 +626,7 @@
 (function(){
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
-  const protoKeys = ['sopt','vmpt','vmtls','vlpt','vlpt2','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
+  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
   const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];
 
   const argoSelect = document.getElementById('argoSelect');
@@ -959,7 +959,7 @@
 
     const isCdnEnabled = params['vmpt'] !== undefined || params['vxpt'] !== undefined || params['vwpt'] !== undefined;
     cdnymInput.disabled = !isCdnEnabled;
-    const isRealityEnabled = params['vlpt'] !== undefined || params['vlpt2'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;
+    const isRealityEnabled = params['vlpt'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;
     reymInput.disabled = !isRealityEnabled;
     hyjptInput.disabled = (params['hypt'] === undefined);
 
@@ -982,16 +982,6 @@
       }
     });
 
-    if (params['vlpt2'] !== undefined || params['vlpt_more'] !== undefined) {
-      const parts = [];
-      if (params['vlpt'] !== undefined) parts.push(params['vlpt']);
-      if (params['vlpt2'] !== undefined) parts.push(params['vlpt2']);
-      if (params['vlpt_more'] !== undefined) parts.push(params['vlpt_more']);
-      const pt = document.querySelector('[data-port="vlpt"]');
-      if (pt) pt.value = parts.join(',');
-      const ck = document.querySelector('[data-proto="vlpt"]');
-      if (ck) ck.checked = true;
-    }
     isUpdatingFromOutput = false;
   }
 

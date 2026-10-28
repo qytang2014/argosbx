@@ -2,8 +2,8 @@
 # vlpt_more="10002,10003" installs instances 2, 3, ... in order, sharing
 # vlpt's uuid, Reality keypair (xrk), SNI and flow, with their own port
 # and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
-# vlpt_on=xray (shared with vlpt). If the old vlpt2 variable is also
-# set, vlpt_more starts at 3, so it never overwrites instance 2.
+# vlpt_on=xray (shared with vlpt). Always starts at 2: vlpt2 is gone,
+# instance 2 comes from this loop, never from a separate variable.
 # Parsing is a while loop, not a for loop over IFS: a for loop drops
 # trailing empty items ("10001," would lose instance 2), while the
 # while loop preserves every item, including trailing empties. An
@@ -13,7 +13,7 @@
 # instance number still advances, so later instances keep their tag.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_idx=2
 _vlpt_more_rest="$vlpt_more"
 while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac

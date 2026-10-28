@@ -1,6 +1,6 @@
 # vlpt more instances on Sing-box (private module, loop).
 # Same vlpt_more list as the Xray block, instances 2, 3, ... in order
-# (3, 4, ... if the old vlpt2 variable is also set), sharing vlpt's
+# (always starting at 2; vlpt2 is gone), sharing vlpt's
 # uuid and Sing-box Reality keypair (sbk), with their own port and
 # inbound tag vl-reality-sb-2, vl-reality-sb-3, ...
 # Only runs when vlpt_on=sb. Generates sbk if missing, like vlpt-sb.
@@ -21,7 +21,7 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_idx=2
 _vlpt_more_rest="$vlpt_more"
 while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac

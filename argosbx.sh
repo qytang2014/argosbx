@@ -29,9 +29,13 @@ vars_merge(){
     case "$line" in ''|'#'*) continue;; esac
     name="${line%%=*}"
     case "$name" in *[!A-Za-z0-9_]*|'') continue;; esac
+    # vlpt2 / vlpt_more removed: an old vars.env that still lists them
+    # must not resurrect them into a merge (they are cleared anyway in
+    # vlpt-comma.sh, but skipping here keeps add from re-saving them).
+    case "$name" in vlpt2|vlpt_more) continue;; esac
     if [ -z "${!name+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
-  for v in vlpt vlpt2 vlpt_more vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
+  for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
   done
   echo "增量更新失败：合并后没有任何协议变量，请在 add 命令前至少设置一个新增或修改的协议变量"
@@ -41,7 +45,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -434,7 +438,7 @@ sub_https_display(){
 # managers (guarded, so this module alone still works) so that
 # enabling ufw later and running ufwsync opens everything, not just
 # the node ports:
-#   tcp only: vlpt, vlpt2, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
+#   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
 #   tcp+udp:  sspt, sopt
 # Why xcpt is tcp only even though its display name says TCP/UDP:
@@ -476,7 +480,6 @@ _ufw_emit(){
 ufw_desired_rules(){
   local _f _n _p
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
-  _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   if [ -n "$vlpt_more" ]; then
     local _mp="" _moldifs="$IFS"; IFS=','; for _mp in $vlpt_more; do _mp=$(printf '%s' "$_mp" | xargs 2>/dev/null || printf '%s' "$_mp"); case "$_mp" in ''|*[!0-9]*) ;; *) echo "$_mp/tcp";; esac; done; IFS="$_moldifs"
   fi
@@ -543,8 +546,8 @@ _ufw_fallback_rules(){
     if [ -z "$p" ]; then continue; fi
     for pr in $protos; do echo "$p/$pr"; done
   done
-  # vlpt more instances: port files port_vl_re3, port_vl_re4, ... are
-  # not in the spec list above, so scan them here (callers sort -u).
+  # vlpt extra instances: port_vl_re2 is in the spec list above;
+  # port_vl_re3, port_vl_re4, ... are not, so scan them here.
   for f in "$HOME/agsbx"/port_vl_re[0-9]*; do
     [ -f "$f" ] || continue
     case "$f" in *port_vl_re|*port_vl_re2) continue;; esac
@@ -850,7 +853,7 @@ fw_status(){
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)
 cmd=""
-for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -858,7 +861,6 @@ cmd+="$main${*:+ $*}"
 [ "$cmd" != "$main" ] && echo "$cmd" > "$HOME/agsbx/sh.txt"
 ;; esac
 [ -z "${vlpt+x}" ] || vlp=yes
-[ -z "${vlpt2+x}" ] || vlp2=yes
 [ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }
 [ -z "${vmtls+x}" ] || vmt=yes
 [ -z "${vwpt+x}" ] || { vwp=yes; vmag=yes; }
@@ -876,10 +878,10 @@ cmd+="$main${*:+ $*}"
 [ -z "${xcpt+x}" ] || xcp=yes
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then
 if [ "$1" = "rep" ]; then
-[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vlp2" = yes ] || [ -n "$vlpt_more" ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 else
-[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vlp2" = yes ] || [ -n "$vlpt_more" ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 # vlpt comma list (private module, runs at top level, before exports).
 # The generator now has only one vlpt field: its value is a comma list.
@@ -897,13 +899,14 @@ fi
 # shows the original comma command. A trailing comma would otherwise
 # vanish in vlpt_more ("" means "no extra instance"), so it becomes
 # the sentinel "random", which the loop treats as a random port.
-# Legacy vlpt2/vlpt_more are kept when vlpt has no comma; if vlpt has
-# a comma AND legacy variables are also set, the comma list wins and
-# legacy is cleared (with a warning), because instance 2 would
-# otherwise be defined twice. The vlp2 flag is cleared too, so the
-# old vlpt2 block cannot create a duplicate instance 2.
+# vlpt2 / vlpt_more are NO LONGER user inputs (removed 2026-10-28:
+# QUINN confirmed they were never used on another machine). They are
+# cleared here unconditionally, before the comma expansion, so a
+# command that still passes vlpt2= / vlpt_more= simply does nothing
+# with them -- no second instance, no warning, no compatibility path.
+# vlpt_more below is INTERNAL only, set by this expansion.
+vlpt2=""; vlpt_more=""; vlp2=""
 case "$vlpt" in *,*)
-  if [ -n "$vlpt2" ] || [ -n "$vlpt_more" ]; then echo "vlpt 已用逗号分隔多实例，忽略旧的 vlpt2/vlpt_more"; vlpt2=""; vlpt_more=""; vlp2=""; fi
   _vlpt_comma_rest="${vlpt#*,}"
   vlpt="${vlpt%%,*}"
   if [ -z "$_vlpt_comma_rest" ]; then vlpt_more="random"; else vlpt_more="$_vlpt_comma_rest"; fi
@@ -932,7 +935,6 @@ done
 unset _pc_var _pc_val _pc_rest _pc_first
 export uuid=${uuid:-''}
 export port_vl_re=${vlpt:-''}
-export port_vl_re2=${vlpt2:-''}
 export port_vm_ws=${vmpt:-''}
 export port_vm_tls=${vmtls:-''}
 export port_vw=${vwpt:-''}
@@ -1351,7 +1353,7 @@ cat > "$HOME/agsbx/xr.json" <<EOF
   "inbounds": [
 EOF
 insuuid
-if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ] || [ -n "$vlpt_more" ]; then
+if [ -n "$xhp" ] || [ -n "$vlp" ]; then
 if [ -z "$ym_vl_re" ]; then
 ym_vl_re=apple.com
 fi
@@ -1685,71 +1687,12 @@ EOF
 else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
-# vlpt2 on Xray (private module, second vlpt instance).
-# Inserted into installxray() after the vlpt block. Only runs when
-# vlpt2 is selected AND vlpt_on=xray (vlpt_on is shared with vlpt:
-# vlpt_kernel applies to both instances, so both instances always
-# land on the same kernel; they are distinguished by port and by
-# inbound tag, which is what egress inbound: routing needs).
-# Shares vlpt's Xray Reality keypair (xrk) and uuid, so pbk/sid are
-# the same as vlpt's; only the port, tag and display name differ.
-# If vlpt2 is not selected, vlp2 becomes the recovery dummy
-# (vlpt2argo), mirroring the vlpt block's vlptargo.
-if [ -n "$vlp2" ] && [ "$vlpt_on" = "xray" ]; then
-vlp2=vlpt2
-if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-if [ -z "$port_vl_re2" ] && [ ! -e "$HOME/agsbx/port_vl_re2" ]; then
-port_vl_re2=$(shuf -i 10000-65535 -n 1)
-echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
-elif [ -n "$port_vl_re2" ]; then
-echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
-fi
-port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
-echo "Vless-tcp-reality-v2端口：$port_vl_re2"
-cat >> "$HOME/agsbx/xr.json" <<EOF
-        {
-            "tag":"reality-vision-2",
-            "listen": "::",
-            "port": $port_vl_re2,
-            "protocol": "vless",
-            "settings": {
-                "clients": [
-                    {
-                        "id": "${uuid}",
-                        "flow": "xtls-rprx-vision"
-                    }
-                ],
-                "decryption": "none"
-            },
-            "streamSettings": {
-                "network": "tcp",
-                "security": "reality",
-                "realitySettings": {
-                    "fingerprint": "chrome",
-                    "dest": "${ym_vl_re}:443",
-                    "serverNames": [
-                      "${ym_vl_re}"
-                    ],
-                    "privateKey": "$private_key_x",
-                    "shortIds": ["$short_id_x"]
-                }
-            },
-          "sniffing": {
-          "enabled": true,
-          "destOverride": ["http", "tls", "quic"],
-          "metadataOnly": false
-      }
-    },
-EOF
-else
-[ -n "$vlp2" ] || vlp2=vlpt2argo
-fi
 # vlpt more instances on Xray (private module, loop, not per-instance copies).
 # vlpt_more="10002,10003" installs instances 2, 3, ... in order, sharing
 # vlpt's uuid, Reality keypair (xrk), SNI and flow, with their own port
 # and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
-# vlpt_on=xray (shared with vlpt). If the old vlpt2 variable is also
-# set, vlpt_more starts at 3, so it never overwrites instance 2.
+# vlpt_on=xray (shared with vlpt). Always starts at 2: vlpt2 is gone,
+# instance 2 comes from this loop, never from a separate variable.
 # Parsing is a while loop, not a for loop over IFS: a for loop drops
 # trailing empty items ("10001," would lose instance 2), while the
 # while loop preserves every item, including trailing empties. An
@@ -1759,7 +1702,7 @@ fi
 # instance number still advances, so later instances keep their tag.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_idx=2
 _vlpt_more_rest="$vlpt_more"
 while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
@@ -2315,72 +2258,9 @@ EOF
 else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
-# vlpt2 on Sing-box (private module, second vlpt instance).
-# Inserted into installsb() after the vlpt-sb block, before sspt.
-# Only runs when vlpt2 is selected AND vlpt_on=sb (shared with vlpt).
-# Shares vlpt's Sing-box Reality keypair (sbk, also shared with arpt),
-# so pbk/sid are the same as vlpt's; only port, tag and display
-# name differ. If vlpt2 is not selected, vlp2 becomes vlpt2argo.
-if [ -n "$vlp2" ] && [ "$vlpt_on" = "sb" ]; then
-vlp2=vlpt2
-if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-echo "$ym_vl_re" > "$HOME/agsbx/ym_vl_re"
-echo "Reality域名：$ym_vl_re"
-mkdir -p "$HOME/agsbx/sbk"
-if [ ! -e "$HOME/agsbx/sbk/private_key" ]; then
-key_pair=$("$HOME/agsbx/sing-box" generate reality-keypair)
-private_key=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}' | tr -d '"')
-public_key=$(echo "$key_pair" | awk '/PublicKey/ {print $2}' | tr -d '"')
-short_id=$("$HOME/agsbx/sing-box" generate rand --hex 4)
-echo "$private_key" > "$HOME/agsbx/sbk/private_key"
-echo "$public_key" > "$HOME/agsbx/sbk/public_key"
-echo "$short_id" > "$HOME/agsbx/sbk/short_id"
-fi
-private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
-public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
-short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-if [ -z "$port_vl_re2" ] && [ ! -e "$HOME/agsbx/port_vl_re2" ]; then
-port_vl_re2=$(shuf -i 10000-65535 -n 1)
-echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
-elif [ -n "$port_vl_re2" ]; then
-echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
-fi
-port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
-echo "Vless-tcp-reality-v2端口（Sing-box）：$port_vl_re2"
-cat >> "$HOME/agsbx/sb.json" <<EOF
-    {
-        "type": "vless",
-        "tag": "vl-reality-sb-2",
-        "listen": "::",
-        "listen_port": ${port_vl_re2},
-        "users": [
-            {
-                "uuid": "${uuid}",
-                "flow": "xtls-rprx-vision"
-            }
-        ],
-        "tls": {
-            "enabled": true,
-            "server_name": "${ym_vl_re}",
-            "reality": {
-                "enabled": true,
-                "handshake": {
-                    "server": "${ym_vl_re}",
-                    "server_port": 443
-                },
-                "private_key": "$private_key_s",
-                "short_id": ["$short_id_s"]
-            }
-        }
-    },
-EOF
-else
-[ -n "$vlp2" ] || vlp2=vlpt2argo
-fi
-
 # vlpt more instances on Sing-box (private module, loop).
 # Same vlpt_more list as the Xray block, instances 2, 3, ... in order
-# (3, 4, ... if the old vlpt2 variable is also set), sharing vlpt's
+# (always starting at 2; vlpt2 is gone), sharing vlpt's
 # uuid and Sing-box Reality keypair (sbk), with their own port and
 # inbound tag vl-reality-sb-2, vl-reality-sb-3, ...
 # Only runs when vlpt_on=sb. Generates sbk if missing, like vlpt-sb.
@@ -2401,7 +2281,7 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_idx=2
 _vlpt_more_rest="$vlpt_more"
 while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
@@ -3856,11 +3736,10 @@ fi
 }
 ins(){
 # vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
-# vlpt2 shares vlpt_on (and vlpt_kernel): both instances land on the
-# same kernel, distinguished by port and inbound tag only.
-# vlpt_more (loop, instances 3+) shares vlpt_on too.
+# vlpt instances share vlpt_on (and vlpt_kernel): all instances land
+# on the same kernel, distinguished by port and inbound tag only.
 vlpt_on=""
-if [ -n "$vlp" ] || [ -n "${vlp2:-}" ] || [ -n "${vlpt_more:-}" ]; then
+if [ -n "$vlp" ]; then
   case "${vlpt_kernel:-auto}" in
     xray) vlpt_on="xray" ;;
     sb|singbox|sing-box) vlpt_on="sb" ;;
@@ -3975,7 +3854,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" xhpt_more=\"${xhpt_more}\" $xup=\"${port_xu}\" xupt_more=\"${xupt_more}\" $vxp=\"${port_vx}\" vxpt_more=\"${vxpt_more}\" $ssp=\"${port_ss}\" sspt_more=\"${sspt_more}\" $sop=\"${port_so}\" sopt_more=\"${sopt_more}\" $anp=\"${port_an}\" anpt_more=\"${anpt_more}\" $arp=\"${port_ar}\" arpt_more=\"${arpt_more}\" $vlp=\"${port_vl_re}\" $vlp2=\"${port_vl_re2}\" vlpt_more=\"${vlpt_more}\" $vwp=\"${port_vw}\" vwpt_more=\"${vwpt_more}\" $vmp=\"${port_vm_ws}\" vmpt_more=\"${vmpt_more}\" $vmt=\"${port_vm_tls}\" vmtls_more=\"${vmtls_more}\" $hyp=\"${port_hy2}\" hypt_more=\"${hypt_more}\" $tup=\"${port_tu}\" tupt_more=\"${tupt_more}\" $xcp=\"${port_xc}\" xcpt_more=\"${xcpt_more}\" $nvp=\"${port_nv}\" nvpt_more=\"${nvpt_more}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" xhpt_more=\"${xhpt_more}\" $xup=\"${port_xu}\" xupt_more=\"${xupt_more}\" $vxp=\"${port_vx}\" vxpt_more=\"${vxpt_more}\" $ssp=\"${port_ss}\" sspt_more=\"${sspt_more}\" $sop=\"${port_so}\" sopt_more=\"${sopt_more}\" $anp=\"${port_an}\" anpt_more=\"${anpt_more}\" $arp=\"${port_ar}\" arpt_more=\"${arpt_more}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" vwpt_more=\"${vwpt_more}\" $vmp=\"${port_vm_ws}\" vmpt_more=\"${vmpt_more}\" $vmt=\"${port_vm_tls}\" vmtls_more=\"${vmtls_more}\" $hyp=\"${port_hy2}\" hypt_more=\"${hypt_more}\" $tup=\"${port_tu}\" tupt_more=\"${tupt_more}\" $xcp=\"${port_xc}\" xcpt_more=\"${xcpt_more}\" $nvp=\"${port_nv}\" nvpt_more=\"${nvpt_more}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -4431,75 +4310,16 @@ clvlpt1(){
 echo "- ${sxname}vless-reality-vision-$hostname"
 }
 fi
-if grep -q '"tag":"reality-vision-2"' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q '"tag": "vl-reality-sb-2"' "$HOME/agsbx/sb.json" 2>/dev/null; then
-if grep -q '"tag": "vl-reality-sb-2"' "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt2_pbk="$public_key_s"; vlpt2_sid="$short_id_s"; else vlpt2_pbk="$public_key_x"; vlpt2_sid="$short_id_x"; fi
-echo "💣节点信息如下："
-port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
-vl_link2="vless://$uuid@$reality_addr:$port_vl_re2?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt2_pbk&sid=$vlpt2_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-2-$hostname"
-echo "$vl_link2" >> "$HOME/agsbx/jhsub.txt"
-echo "$vl_link2"
-echo
-sbvlpt2(){
-cat <<EOF
-{
-"type": "vless",
-"tag": "${sxname}vless-2-$hostname",
-"server": "$reality_addr",
-"server_port": $port_vl_re2,
-"uuid": "$uuid",
-"flow": "xtls-rprx-vision",
-"tls": {
-"enabled": true,
-"server_name": "$ym_vl_re",
-"utls": {
-"enabled": true,
-"fingerprint": "chrome"
-},
-"reality": {
-"enabled": true,
-"public_key": "$vlpt2_pbk",
-"short_id": "$vlpt2_sid"
-}
-}
-},
-EOF
-}
-sbvlpt2_1(){
-echo "\"${sxname}vless-2-$hostname\","
-}
-clvlpt2(){
-cat <<EOF
-- name: ${sxname}vless-reality-vision-2-$hostname
-type: vless
-server: $reality_addr
-port: $port_vl_re2
-uuid: $uuid
-network: tcp
-udp: true
-tls: true
-flow: xtls-rprx-vision
-servername: $ym_vl_re
-reality-opts:
-public-key: $vlpt2_pbk
-short-id: $vlpt2_sid
-client-fingerprint: chrome
-EOF
-}
-clvlpt2_1(){
-echo "- ${sxname}vless-reality-vision-2-$hostname"
-}
-fi
 # vlpt more instances display (private module, loop).
 # Instance numbers come from the inbound tags actually present in
-# xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 3), never
+# xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 2), never
 # from port files alone, so a stale port file from a removed instance
-# cannot resurrect a link. Instance 2 is always displayed by the
-# vlpt2 block (even when it came from vlpt_more), so this loop only
-# handles N >= 3 and never duplicates it. Native links are printed
+# cannot resurrect a link. Instance 2 is displayed by this loop too
+# (vlpt2 block is gone). Native links are printed
 # here; subscription nodes are produced by sbvlpt_more / clvlpt_more
 # below, which loop over the same tag list at subscription-build time.
 vlpt_more_idx_list(){
-{ grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1|2);; *) echo "$_n";; esac; done
+{ grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1);; *) echo "$_n";; esac; done
 }
 for _vlpt_more_i in $(vlpt_more_idx_list); do
 if grep -q "\"tag\": \"vl-reality-sb-$_vlpt_more_i\"" "$HOME/agsbx/sb.json" 2>/dev/null; then _vlpt_more_pbk="$public_key_s"; _vlpt_more_sid="$short_id_s"; else _vlpt_more_pbk="$public_key_x"; _vlpt_more_sid="$short_id_x"; fi
@@ -5765,10 +5585,10 @@ out=$($f)
 [ -n "$out" ] && printf "%s\n" "$out"
 fi
 }
-sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
-clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
-sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
-clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
+sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
+clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
+sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
+clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
 sbgz=$(printf "%s\n" "$sbgz" | sed '$ s/,$//')
 cat > $HOME/agsbx/sbox.json <<EOF
 {
