@@ -21,8 +21,19 @@
 #     ss://method:password@host:port#tag  (also ss://base64(method:password)@host:port
 #       and ss://base64(method:password@host:port)#tag ; 2022-* methods get uot/udp_over_tcp)
 #   egress_bind:  1.2.3.4,2001:db8::2   (each becomes bind1, bind2, ...)
-#   egress_rules: domain:example.com=>tag ; ip:1.2.3.0/24=>tag ; source:10.0.0.0/8=>tag ; inbound:vm-ws=>tag
+#   egress_rules: domain:example.com=>tag ; ip:1.2.3.0/24=>tag ; source:10.0.0.0/8=>tag ; inbound:vlpt=>tag
 #     geoip:CN,US=>tag ; geosite:google,youtube=>tag ; port:80,443=>tag ; port:1000-2000=>tag ; protocol:http,tls=>tag
+#   Rule targets (right of =>): an egress_nodes #tag, a bind tag
+#   (bind1, bind2, ...), or a built-in (direct, warp-out, x-warp-out).
+#   Never an IP literal: =>1.2.3.4 is not a tag and the rule is skipped.
+#   inbound: values may be a protocol variable name (vlpt, xhpt, hypt,
+#   ...) instead of the server inbound tag: egress_inbound_tags expands
+#   it to the real tag(s) for that protocol, so users do not have to
+#   remember that vlpt is reality-vision on Xray but vl-reality-sb on
+#   Sing-box, or that hypt is hy2-xr on Xray but hy2-sb on Sing-box.
+#   Protocols served by either kernel expand to both tags, so the rule
+#   matches whichever kernel actually installed that protocol. Old
+#   rules that already use a real tag pass through unchanged.
 #   Limits to know: geoip/geosite rules need the kernel's geoip/geosite
 #   database files, otherwise they may not match; protocol rules need
 #   sniffing enabled on the inbound, otherwise they may not match.
@@ -41,6 +52,31 @@
 #   netflix, cn, ...); if a code is not in the database it simply
 #   never matches, so check the database's code list first.
 egress_json_escape(){ printf '%s' "$1" | tr -d '\n\r' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# Protocol variable -> server inbound tag(s), comma-separated.
+# Unknown values pass through unchanged, so a real tag (reality-vision,
+# vm-ws, ...) and a future protocol name are never broken by this map.
+egress_inbound_tags(){
+  local item="$1" low=""
+  low=$(printf '%s' "$item" | tr 'A-Z' 'a-z')
+  case "$low" in
+    vlpt) echo "reality-vision,vl-reality-sb";;
+    xhpt) echo "xhttp-reality";;
+    vxpt) echo "vless-xhttp";;
+    vwpt) echo "vless-ws";;
+    xupt) echo "xhttp-h3";;
+    xcpt) echo "xhttp-h23";;
+    nvpt) echo "naive-sb";;
+    tupt) echo "tuic5-sb";;
+    anpt) echo "anytls-sb";;
+    arpt) echo "anyreality-sb";;
+    sspt) echo "ss-2022";;
+    hypt) echo "hy2-xr,hy2-sb";;
+    vmpt) echo "vmess-xr,vmess-sb";;
+    vmtls) echo "vmess-tls-xr,vmess-tls-sb";;
+    sopt) echo "socks5-xr,socks5-sb";;
+    *) echo "$item";;
+  esac
+}
 egress_url_decode(){ local s="$1"; s=$(printf '%s' "$s" | sed 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g'); printf '%b' "$s"; }
 egress_query_param(){ local q="&$1&" k="$2" v=""; case "$q" in *"&${k}="*) v="${q#*&${k}=}"; v="${v%%&*}"; egress_url_decode "$v";; *) printf '';; esac; }
 egress_json_array(){ local list="$1" out="" item="" oldifs="$IFS"; IFS=','; for item in $list; do item=$(printf '%s' "$item" | xargs 2>/dev/null || printf '%s' "$item"); [ -n "$item" ] || continue; [ -n "$out" ] && out="${out}, "; out="${out}\"$(egress_json_escape "$item")\""; done; IFS="$oldifs"; printf '%s' "$out"; }
@@ -168,7 +204,15 @@ egress_parse_rules(){
     [ -n "$rule" ] || continue
     case "$rule" in *'=>'*) mp="${rule%%=>*}"; tag="${rule##*=>}";; *) echo "分流规则格式错误，已跳过：$rule"; continue;; esac
     case " $egress_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) echo "分流规则目标出口不存在，已跳过：$rule"; continue;; esac
-    typ="${mp%%:*}"; val="${mp#*:}"; arr=$(egress_json_array "$val")
+    typ="${mp%%:*}"; val="${mp#*:}"
+    if [ "$typ" = "inbound" ]; then
+      # Expand protocol aliases to real inbound tags, deduping in order.
+      # e.g. inbound:vlpt,hypt => reality-vision,vl-reality-sb,hy2-xr,hy2-sb
+      local _exp="" _it="" _tg="" _goldifs="$IFS"
+      IFS=','; for _it in $val; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; done; IFS="$_goldifs"
+      val="$_exp"
+    fi
+    arr=$(egress_json_array "$val")
     case "$typ" in
       domain) egress_sb_rules="${egress_sb_rules}      {\"domain_suffix\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},

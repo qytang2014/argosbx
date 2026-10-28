@@ -18,6 +18,7 @@ bash tests/test_container.sh
 bash tests/test_container_egress.sh
 bash tests/test_egress_geo.sh
 bash tests/test_egress_add.sh
+bash tests/test_egress_inbound.sh
 bash tests/test_container_vars.sh
 bash tests/test_vlpt_dual.sh
 bash tests/test_selfsigned_san.sh
