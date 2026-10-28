@@ -455,8 +455,18 @@ fi
     # (which is also the only case for old installs, where sb.json has no
     # vlpt inbound). This detection works for fresh installs and for
     # `list` (which re-reads the files from disk, with no vlpt_on in scope).
-    t = replace(t, 'short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)\nsskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)',
-                'short_id_s=$(cat "$HOME/agsbx/sbk/short_id" 2>/dev/null)\nsskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi', "vlpt-display-pbk", 1)
+    # FIX (2026-10-28): vlpt_pbk/sid MUST be assigned OUTSIDE the
+    # sing-box-binary check. Previously it was assigned inside that
+    # block, so a pure-Xray install (no sing-box binary downloaded)
+    # left vlpt_pbk/sid unset and printed pbk=&sid=, even though
+    # xrk/ was fine and the server would have worked with the right
+    # link. The container version already did it outside the block;
+    # main script now matches it: default to Xray, override to
+    # Sing-box only when sb.json actually contains vl-reality-sb.
+    # The assignment is inserted after the sing-box block's fi,
+    # before the xhttp-reality display block.
+    t = replace(t, 'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep xhttp-reality "$HOME/agsbx/xr.json"',
+                'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi\nif grep xhttp-reality "$HOME/agsbx/xr.json"', "vlpt-display-pbk", 1)
     t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then',
                 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then', "vlpt-display-guard", 1)
     t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',

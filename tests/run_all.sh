@@ -24,6 +24,7 @@ bash tests/test_vlpt_more.sh
 bash tests/test_proto_more.sh
 bash tests/test_container_vars.sh
 bash tests/test_vlpt_dual.sh
+bash tests/test_vlpt_pbk.sh
 bash tests/test_selfsigned_san.sh
 bash tests/test_pin_vmtls.sh
 bash tests/test_ufw.sh
