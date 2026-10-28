@@ -517,45 +517,26 @@ fi
     # shows the original comma command. Install loops are inserted
     # at the end of installxray / installsb / each xrsb* function,
     # display loops before the subscription lists (which are extended
-    # below with the *_more functions). Top lists gain *_more so the
-    # bashrc recovery line and vars.env can carry extra instances;
+    # below with the *_more functions). vars.env still carries
+    # the internally generated *_more lists for `add`; the top list
+    # and bashrc recovery line do NOT (same as vlpt_more);
     # ufw/firewalld already cover extra instances via the tag scan in
     # modules/ufw.sh, and egress aliases gain protoN branches.
-    t = replace(t, "for v in uuid vlpt vmpt vmtls",
-                "for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more", "proto-more-top-lists")
+    # Top list deliberately does NOT gain *_more any more (same as
+    # vlpt_more): *_more are internal only, set by proto-comma
+    # expansion. The sh.txt save loop runs before that expansion,
+    # so it only ever sees the original comma command anyway;
+    # vars_save (modules/vars.sh) still carries the internally
+    # generated *_more lists for `add`.
     proto_comma = read("modules/proto-comma.sh")
     t = replace(t, 'fi\n' + vlpt_comma + 'export uuid=${uuid:-\'\'}\n',
                 'fi\n' + vlpt_comma + proto_comma + 'export uuid=${uuid:-\'\'}\n', "proto-comma-expand", 1)
     _bs3 = chr(92)
-    # Recovery line: add *_more after each protocol's port entry.
-    t = replace(t, '$xhp=' + _bs3 + '"${port_xh}' + _bs3 + '"',
-                '$xhp=' + _bs3 + '"${port_xh}' + _bs3 + '" xhpt_more=' + _bs3 + '"${xhpt_more}' + _bs3 + '"', "proto-more-recovery-xh", 1)
-    t = replace(t, '$xup=' + _bs3 + '"${port_xu}' + _bs3 + '"',
-                '$xup=' + _bs3 + '"${port_xu}' + _bs3 + '" xupt_more=' + _bs3 + '"${xupt_more}' + _bs3 + '"', "proto-more-recovery-xu", 1)
-    t = replace(t, '$vxp=' + _bs3 + '"${port_vx}' + _bs3 + '"',
-                '$vxp=' + _bs3 + '"${port_vx}' + _bs3 + '" vxpt_more=' + _bs3 + '"${vxpt_more}' + _bs3 + '"', "proto-more-recovery-vx", 1)
-    t = replace(t, '$ssp=' + _bs3 + '"${port_ss}' + _bs3 + '"',
-                '$ssp=' + _bs3 + '"${port_ss}' + _bs3 + '" sspt_more=' + _bs3 + '"${sspt_more}' + _bs3 + '"', "proto-more-recovery-ss", 1)
-    t = replace(t, '$sop=' + _bs3 + '"${port_so}' + _bs3 + '"',
-                '$sop=' + _bs3 + '"${port_so}' + _bs3 + '" sopt_more=' + _bs3 + '"${sopt_more}' + _bs3 + '"', "proto-more-recovery-so", 1)
-    t = replace(t, '$anp=' + _bs3 + '"${port_an}' + _bs3 + '"',
-                '$anp=' + _bs3 + '"${port_an}' + _bs3 + '" anpt_more=' + _bs3 + '"${anpt_more}' + _bs3 + '"', "proto-more-recovery-an", 1)
-    t = replace(t, '$arp=' + _bs3 + '"${port_ar}' + _bs3 + '"',
-                '$arp=' + _bs3 + '"${port_ar}' + _bs3 + '" arpt_more=' + _bs3 + '"${arpt_more}' + _bs3 + '"', "proto-more-recovery-ar", 1)
-    t = replace(t, '$vwp=' + _bs3 + '"${port_vw}' + _bs3 + '"',
-                '$vwp=' + _bs3 + '"${port_vw}' + _bs3 + '" vwpt_more=' + _bs3 + '"${vwpt_more}' + _bs3 + '"', "proto-more-recovery-vw", 1)
-    t = replace(t, '$vmp=' + _bs3 + '"${port_vm_ws}' + _bs3 + '"',
-                '$vmp=' + _bs3 + '"${port_vm_ws}' + _bs3 + '" vmpt_more=' + _bs3 + '"${vmpt_more}' + _bs3 + '"', "proto-more-recovery-vm", 1)
-    t = replace(t, '$vmt=' + _bs3 + '"${port_vm_tls}' + _bs3 + '"',
-                '$vmt=' + _bs3 + '"${port_vm_tls}' + _bs3 + '" vmtls_more=' + _bs3 + '"${vmtls_more}' + _bs3 + '"', "proto-more-recovery-vmt", 1)
-    t = replace(t, '$hyp=' + _bs3 + '"${port_hy2}' + _bs3 + '"',
-                '$hyp=' + _bs3 + '"${port_hy2}' + _bs3 + '" hypt_more=' + _bs3 + '"${hypt_more}' + _bs3 + '"', "proto-more-recovery-hy", 1)
-    t = replace(t, '$tup=' + _bs3 + '"${port_tu}' + _bs3 + '"',
-                '$tup=' + _bs3 + '"${port_tu}' + _bs3 + '" tupt_more=' + _bs3 + '"${tupt_more}' + _bs3 + '"', "proto-more-recovery-tu", 1)
-    t = replace(t, '$xcp=' + _bs3 + '"${port_xc}' + _bs3 + '"',
-                '$xcp=' + _bs3 + '"${port_xc}' + _bs3 + '" xcpt_more=' + _bs3 + '"${xcpt_more}' + _bs3 + '"', "proto-more-recovery-xc", 1)
-    t = replace(t, '$nvp=' + _bs3 + '"${port_nv}' + _bs3 + '"',
-                '$nvp=' + _bs3 + '"${port_nv}' + _bs3 + '" nvpt_more=' + _bs3 + '"${nvpt_more}' + _bs3 + '"', "proto-more-recovery-nv", 1)
+    # Recovery line: NO *_more any more (same as vlpt_more).
+    # The bashrc recovery line carries only the first-instance port;
+    # extra instances are restored from the original comma command
+    # in sh.txt, and vars.env still carries the internal *_more
+    # lists for `add`.
     # Install loops.
     proto_more_xray = read("modules/proto-more-xray.sh")
     t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){',

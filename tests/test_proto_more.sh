@@ -34,6 +34,23 @@ xhpt="10001,10002"; vxpt=","; sspt="10003,"; hypt="10004,10005,10006"
 # single, no comma, unchanged
 tupt="20001"; . modules/proto-comma.sh
 [ "$tupt" = "20001" ] && [ -z "${tupt_more:-}" ] && ok "single port unchanged" || bad "single port changed"
+# direct *_more is NOT a user input any more (same as vlpt_more):
+# it is cleared at the top of proto-comma, before expansion, so a
+# command that still passes xhpt_more= / sspt_more= does nothing
+# with them; only a comma in the main variable creates a _more list.
+xhpt="10001"; xhpt_more="99999"; sspt=""; sspt_more="88888"; . modules/proto-comma.sh
+[ "$xhpt" = "10001" ] && [ -z "${xhpt_more:-}" ] && [ -z "${sspt_more:-}" ] && ok "direct *_more cleared" || bad "direct *_more must be cleared: xhpt_more='${xhpt_more:-}' sspt_more='${sspt_more:-}'"
+# top list (sh.txt save loop, the loop right after cmd="") must not
+# carry *_more any more (vars_save, a different loop, still does).
+python3 - argosbx.sh << 'PY' > /tmp/proto_top_check.txt 2>&1 || true
+import re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r'cmd=""\nfor v in ([^;]+);', t)
+print(m.group(1) if m else "NOTFOUND")
+PY
+grep -q '_more' /tmp/proto_top_check.txt && bad "sh.txt top list must not contain *_more: $(cat /tmp/proto_top_check.txt)" || ok "sh.txt top list without *_more"
+# recovery line (bashrc) must not carry *_more any more
+grep -Fq 'proto-more-recovery-' build/build.py && bad "recovery line must not contain *_more" || ok "recovery line without *_more"
 
 # --- install loops (Xray) ---
 T=$(mktemp -d); export HOME="$T"; mkdir -p "$HOME/agsbx"

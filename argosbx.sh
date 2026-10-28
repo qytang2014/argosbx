@@ -853,7 +853,7 @@ fw_status(){
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -921,6 +921,16 @@ esac
 # protocol (proto-more-xray/sb/auto) consume the _more list.
 # sh.txt is saved before this runs, so it still shows the original
 # comma command; vars.env saves the expanded _more lists.
+# *_more are NO LONGER user inputs (same treatment as vlpt_more,
+# 2026-10-28): they are cleared here unconditionally, before the
+# comma expansion, so a command that still passes xhpt_more= /
+# sspt_more= etc. simply does nothing with them. The _more lists
+# below are INTERNAL only, set by the comma expansion itself, and
+# vars.env keeps saving those internally generated lists so `add`
+# can still carry extra instances.
+for _pc_var in xhpt vxpt vwpt xupt xcpt nvpt tupt anpt arpt sspt hypt vmpt vmtls sopt; do
+  eval "${_pc_var}_more=\"\""
+done
 for _pc_var in xhpt vxpt vwpt xupt xcpt nvpt tupt anpt arpt sspt hypt vmpt vmtls sopt; do
   _pc_val=$(eval "printf '%s' \"\${$_pc_var:-}\"") 2>/dev/null || _pc_val=""
   case "$_pc_val" in *,*)
@@ -3854,7 +3864,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" xhpt_more=\"${xhpt_more}\" $xup=\"${port_xu}\" xupt_more=\"${xupt_more}\" $vxp=\"${port_vx}\" vxpt_more=\"${vxpt_more}\" $ssp=\"${port_ss}\" sspt_more=\"${sspt_more}\" $sop=\"${port_so}\" sopt_more=\"${sopt_more}\" $anp=\"${port_an}\" anpt_more=\"${anpt_more}\" $arp=\"${port_ar}\" arpt_more=\"${arpt_more}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" vwpt_more=\"${vwpt_more}\" $vmp=\"${port_vm_ws}\" vmpt_more=\"${vmpt_more}\" $vmt=\"${port_vm_tls}\" vmtls_more=\"${vmtls_more}\" $hyp=\"${port_hy2}\" hypt_more=\"${hypt_more}\" $tup=\"${port_tu}\" tupt_more=\"${tupt_more}\" $xcp=\"${port_xc}\" xcpt_more=\"${xcpt_more}\" $nvp=\"${port_nv}\" nvpt_more=\"${nvpt_more}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
