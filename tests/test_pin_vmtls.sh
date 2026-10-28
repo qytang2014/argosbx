@@ -30,9 +30,12 @@ need "index.html" "'vmtls'"
 absent_up "$U" "pin_sha"
 absent_up "$U" "xrsbvmtls"
 absent_up "$UC" "xrsbvmtls"
-# Counts: Clash skip lines = 7 old + 1 new vmtls; sing-box insecure = 3 old + 1 new
-ncl=$(grep -c 'skip-cert-verify: $cl_skip' "$F"); [ "$ncl" = "8" ] || { echo "FAIL: Clash pinned skip lines [$ncl] want 8"; FAIL=1; }
-nsb=$(grep -c '"insecure": $sb_insecure$sb_pin_field,' "$F"); [ "$nsb" = "4" ] || { echo "FAIL: sing-box pinned insecure lines [$nsb] want 4"; FAIL=1; }
+# Counts: Clash skip lines = 8 old + 6 new proto-more (xupt, xcpt, anpt,
+# tupt, hypt, vmtls); sing-box insecure = 4 old + 4 new proto-more
+# (anpt, tupt, hypt, vmtls). Other proto-more Clash/SB nodes have no
+# skip/insecure field (shadowsocks, vmess-ws, naive, any-reality).
+ncl=$(grep -c 'skip-cert-verify: $cl_skip' "$F"); [ "$ncl" = "14" ] || { echo "FAIL: Clash pinned skip lines [$ncl] want 14"; FAIL=1; }
+nsb=$(grep -c '"insecure": $sb_insecure$sb_pin_field,' "$F"); [ "$nsb" = "8" ] || { echo "FAIL: sing-box pinned insecure lines [$nsb] want 8"; FAIL=1; }
 # Old skip/insecure variables must be gone from subscriptions (only in
 # pin-compute fallback assignment and in non-subscription contexts)
 [ "$(grep -c 'skip-cert-verify: $msins' "$F")" = "0" ] || { echo "FAIL: old Clash skip \$msins remains"; FAIL=1; }

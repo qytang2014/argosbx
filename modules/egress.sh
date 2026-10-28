@@ -69,19 +69,33 @@ egress_inbound_tags(){
     vlpt) echo "reality-vision,vl-reality-sb";;
     vlpt[0-9]*) echo "reality-vision-${low#vlpt},vl-reality-sb-${low#vlpt}";;
     xhpt) echo "xhttp-reality";;
+    xhpt[0-9]*) echo "xhttp-reality-${low#xhpt}";;
     vxpt) echo "vless-xhttp";;
+    vxpt[0-9]*) echo "vless-xhttp-${low#vxpt}";;
     vwpt) echo "vless-ws";;
+    vwpt[0-9]*) echo "vless-ws-${low#vwpt}";;
     xupt) echo "xhttp-h3";;
+    xupt[0-9]*) echo "xhttp-h3-${low#xupt}";;
     xcpt) echo "xhttp-h23";;
+    xcpt[0-9]*) echo "xhttp-h23-${low#xcpt}";;
     nvpt) echo "naive-sb";;
+    nvpt[0-9]*) echo "naive-sb-${low#nvpt}";;
     tupt) echo "tuic5-sb";;
+    tupt[0-9]*) echo "tuic5-sb-${low#tupt}";;
     anpt) echo "anytls-sb";;
+    anpt[0-9]*) echo "anytls-sb-${low#anpt}";;
     arpt) echo "anyreality-sb";;
+    arpt[0-9]*) echo "anyreality-sb-${low#arpt}";;
     sspt) echo "ss-2022";;
+    sspt[0-9]*) echo "ss-2022-${low#sspt}";;
     hypt) echo "hy2-xr,hy2-sb";;
+    hypt[0-9]*) echo "hy2-xr-${low#hypt},hy2-sb-${low#hypt}";;
     vmpt) echo "vmess-xr,vmess-sb";;
+    vmpt[0-9]*) echo "vmess-xr-${low#vmpt},vmess-sb-${low#vmpt}";;
     vmtls) echo "vmess-tls-xr,vmess-tls-sb";;
+    vmtls[0-9]*) echo "vmess-tls-xr-${low#vmtls},vmess-tls-sb-${low#vmtls}";;
     sopt) echo "socks5-xr,socks5-sb";;
+    sopt[0-9]*) echo "socks5-xr-${low#sopt},socks5-sb-${low#sopt}";;
     *) echo "$item";;
   esac
 }

@@ -41,7 +41,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -507,6 +507,33 @@ ufw_desired_rules(){
   _ufw_emit "$vmp" vmpt "$port_vm_ws" "$HOME/agsbx/port_vm_ws" "tcp"
   _ufw_emit "$vmt" vmtls "$port_vm_tls" "$HOME/agsbx/port_vm_tls" "tcp"
   _ufw_emit "$sop" sopt "$port_so" "$HOME/agsbx/port_so" "tcp udp"
+  # Other protocols comma more instances: fixed ports from *_more,
+  # plus a tag scan for random ports (their ports are only in port
+  # files, not in *_more). Both fw_sync backends use this function,
+  # so ufw and firewalld open the same set. sort -u dedupes.
+  local _mn="" _mv="" _moldifs2="$IFS"
+  for _mn in xhpt_more vxpt_more vwpt_more xupt_more xcpt_more nvpt_more tupt_more anpt_more arpt_more sspt_more hypt_more vmpt_more vmtls_more sopt_more; do
+    _mv=$(eval "printf '%s' \"\${$_mn:-}\"" 2>/dev/null || printf '%s' "")
+    IFS=','; for _p in $_mv; do _p=$(printf '%s' "$_p" | xargs 2>/dev/null || printf '%s' "$_p"); case "$_p" in ''|*[!0-9]*) ;; *) case "$_mn" in xupt_more|tupt_more|hypt_more) echo "$_p/udp";; sspt_more|sopt_more) echo "$_p/tcp"; echo "$_p/udp";; *) echo "$_p/tcp";; esac;; esac; done; IFS="$_moldifs2"
+  done
+  # Tag scan: prefix -> transport -> tag base. Grep allows an
+  # optional space after the colon because xr/sb.json tag formats
+  # differ ("tag":"x" vs "tag": "x").
+  local _pfx _protos _tag _cfg _pr
+  for _spec in "port_xh:tcp:xhttp-reality:xr" "port_vx:tcp:vless-xhttp:xr" "port_vw:tcp:vless-ws:xr" "port_xu:udp:xhttp-h3:xr" "port_xc:tcp:xhttp-h23:xr" "port_nv:tcp:naive-sb:sb" "port_tu:udp:tuic5-sb:sb" "port_an:tcp:anytls-sb:sb" "port_ar:tcp:anyreality-sb:sb" "port_ss:tcp udp:ss-2022:sb" "port_hy2:udp:hy2:both" "port_vm_ws:tcp:vmess:both" "port_vm_tls:tcp:vmess-tls:both" "port_so:tcp udp:socks5:both"; do
+    _pfx="${_spec%%:*}"; _protos=$(printf '%s' "$_spec" | cut -d: -f2); _tag=$(printf '%s' "$_spec" | cut -d: -f3); _cfg=$(printf '%s' "$_spec" | cut -d: -f4)
+    for _f in "$HOME/agsbx"/"$_pfx"[0-9]*; do
+      [ -f "$_f" ] || continue
+      _n="${_f##*$_pfx}"
+      _p=$(_ufw_port "" "$_f"); [ -n "$_p" ] || continue
+      case "$_cfg" in
+        xr) grep -Eq "\"tag\": *\"$_tag-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || continue;;
+        sb) grep -Eq "\"tag\": *\"$_tag-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null || continue;;
+        both) if grep -Eq "\"tag\": *\"$_tag-xr-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || grep -Eq "\"tag\": *\"$_tag-sb-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null; then :; else continue; fi;;
+      esac
+      for _pr in $_protos; do echo "$_p/$_pr"; done
+    done
+  done
 }
 _ufw_fallback_rules(){
   local spec f protos p pr
@@ -523,6 +550,16 @@ _ufw_fallback_rules(){
     case "$f" in *port_vl_re|*port_vl_re2) continue;; esac
     p=$(_ufw_port "" "$f")
     [ -n "$p" ] && echo "$p/tcp"
+  done
+  # Other protocols more instances: same scan, with their transport.
+  local _pfx2 _protos2 _pr2
+  for _spec2 in "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+    _pfx2="${_spec2%%:*}"; _protos2="${_spec2#*:}"
+    for f in "$HOME/agsbx"/"$_pfx2"[0-9]*; do
+      [ -f "$f" ] || continue
+      p=$(_ufw_port "" "$f"); [ -n "$p" ] || continue
+      for _pr2 in $_protos2; do echo "$p/$_pr2"; done
+    done
   done
 }
 ufw_sync(){
@@ -813,7 +850,7 @@ fw_status(){
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)
 cmd=""
-for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -872,6 +909,27 @@ case "$vlpt" in *,*)
   if [ -z "$_vlpt_comma_rest" ]; then vlpt_more="random"; else vlpt_more="$_vlpt_comma_rest"; fi
   ;;
 esac
+# Other protocols comma list (private module, runs at top level, before exports).
+# Same semantics as vlpt comma: comma count + 1 = instance count, an
+# empty item = a random port. Each protocol variable is split into
+# itself (first item) + <proto>_more (rest items). A trailing comma
+# becomes the sentinel "random", because an empty _more string would
+# mean "no extra instance" downstream. The loop modules for each
+# protocol (proto-more-xray/sb/auto) consume the _more list.
+# sh.txt is saved before this runs, so it still shows the original
+# comma command; vars.env saves the expanded _more lists.
+for _pc_var in xhpt vxpt vwpt xupt xcpt nvpt tupt anpt arpt sspt hypt vmpt vmtls sopt; do
+  _pc_val=$(eval "printf '%s' \"\${$_pc_var:-}\"") 2>/dev/null || _pc_val=""
+  case "$_pc_val" in *,*)
+    _pc_rest="${_pc_val#*,}"
+    _pc_first="${_pc_val%%,*}"
+    if [ -z "$_pc_rest" ]; then _pc_rest="random"; fi
+    eval "$_pc_var=\"\$_pc_first\""
+    eval "${_pc_var}_more=\"\$_pc_rest\""
+    ;;
+  esac
+done
+unset _pc_var _pc_val _pc_rest _pc_first
 export uuid=${uuid:-''}
 export port_vl_re=${vlpt:-''}
 export port_vl_re2=${vlpt2:-''}
@@ -1753,6 +1811,267 @@ EOF
 done
 fi
 
+# Other protocols more instances on Xray (private module, loop).
+# Inserted into installxray() after the vlpt-more block, before it ends.
+# Each *_more list installs instances 2, 3, ... in order, sharing the
+# first instance's uuid, keys, SNI, flow and encryption seed, with
+# their own port and inbound tag <base>-N, and port file <base>N.
+# Parsing is a while loop (not for over IFS) so trailing empty items
+# are preserved: "10001," creates instance 2 with a random port.
+# Empty or "random" reuses the existing port file for that index if
+# present, so rep keeps the same random port; non-numeric items are
+# skipped with a warning and the instance number still advances.
+# Xray-only protocols: xhpt, vxpt, vwpt, xupt, xcpt.
+if [ -n "${xhpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$xhpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_xh$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xh$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "xhpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "xhpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_xh$_pm_idx"
+    echo "Vless-xhttp-reality-enc$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/xr.json" <<EOF
+    {
+      "tag":"xhttp-reality-$_pm_idx",
+      "listen": "::",
+      "port": ${_pm_p},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "${dekey}"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "fingerprint": "chrome",
+          "target": "${ym_vl_re}:443",
+          "serverNames": [
+            "${ym_vl_re}"
+          ],
+          "privateKey": "$private_key_x",
+          "shortIds": ["$short_id_x"]
+        },
+        "xhttpSettings": {
+          "host": "",
+          "path": "${uuid}-xh",
+          "mode": "auto"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "metadataOnly": false
+      }
+    },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${vxpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$vxpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_vx$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vx$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "vxpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "vxpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_vx$_pm_idx"
+    echo "Vless-xhttp-enc$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/xr.json" <<EOF
+    {
+      "tag":"vless-xhttp-$_pm_idx",
+      "listen": "::",
+      "port": ${_pm_p},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "${dekey}"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "host": "",
+          "path": "${uuid}-vx",
+          "mode": "auto"
+        }
+      },
+        "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "metadataOnly": false
+      }
+    },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${vwpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$vwpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_vw$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vw$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "vwpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "vwpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_vw$_pm_idx"
+    echo "Vless-ws-enc$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/xr.json" <<EOF
+    {
+      "tag":"vless-ws-$_pm_idx",
+      "listen": "::",
+      "port": ${_pm_p},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "${dekey}"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "${uuid}-vw"
+        }
+      },
+        "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "metadataOnly": false
+      }
+    },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${xupt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$xupt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_xu$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xu$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "xupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "xupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_xu$_pm_idx"
+    echo "Vless-xhttp-tls-UDP$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/xr.json" <<EOF
+{
+  "tag": "xhttp-h3-$_pm_idx",
+  "listen": "::",
+  "port": ${_pm_p},
+  "protocol": "vless",
+  "settings": {
+    "clients": [
+      {
+        "id": "${uuid}",
+        "flow": ""
+      }
+    ],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "tls",
+    "xhttpSettings": {
+    "mode": "auto",
+    "path": "${uuid}-xu"
+    },
+    "tlsSettings": {
+      "alpn": [
+        "h3"
+      ],
+      "certificates": [
+        {
+          "certificateFile": "$certificateHTA",
+          "keyFile": "$keyHTA"
+        }
+      ]
+    }
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"],
+   "metadataOnly": false
+  }
+},
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${xcpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$xcpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_xc$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xc$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "xcpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "xcpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_xc$_pm_idx"
+    echo "Vless-xhttp-tls-TCP/UDP$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/xr.json" <<EOF
+{
+  "tag": "xhttp-h23-$_pm_idx",
+  "listen": "::",
+  "port": ${_pm_p},
+  "protocol": "vless",
+  "settings": {
+    "clients": [
+      {
+        "id": "${uuid}",
+        "flow": ""
+      }
+    ],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "tls",
+    "xhttpSettings": {
+    "mode": "auto",
+    "path": "${uuid}-xc"
+    },
+    "tlsSettings": {
+     "alpn": [
+      "h2","http/1.1"
+       ],
+      "certificates": [
+        {
+          "certificateFile": "$certificateHTA",
+          "keyFile": "$keyHTA"
+        }
+      ]
+    }
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"],
+   "metadataOnly": false
+  }
+},
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
 }
 
 installsb(){
@@ -2154,6 +2473,205 @@ EOF
 else
 ssp=ssptargo
 fi
+# Other protocols more instances on Sing-box (private module, loop).
+# Inserted into installsb() after the vlpt-more block, before sspt is
+# not applicable here: sspt itself is looped below, so this module is
+# inserted at the end of installsb(), after the sspt block.
+# Same while-loop parsing as proto-more-xray: trailing empty items
+# are preserved, empty/random reuses the port file for that index,
+# non-numeric items are skipped with a warning and the index advances.
+# Sing-box protocols: nvpt, tupt, anpt, arpt, sspt.
+# nvpt only installs when a domain certificate is ready, exactly like
+# its first instance; arpt reuses the sbk Reality keypair (generating
+# it if missing, like arpt/vlpt-sb); sspt reuses sskey (generating it
+# if missing, like its first instance).
+if [ -n "${nvpt_more:-}" ] && [ "${domain_cert_ready:-}" = "1" ]; then
+  _pm_idx=2; _pm_rest="$nvpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_nv$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_nv$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "nvpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "nvpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_nv$_pm_idx"
+    echo "Naiveproxy$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/sb.json" <<EOF
+    {
+        "type": "naive",
+        "tag": "naive-sb-$_pm_idx",
+        "listen": "::",
+        "listen_port": ${_pm_p},
+        "users": [
+            {
+                "username": "${uuid}",
+                "password": "${uuid}"
+            }
+        ],
+        "tls": {
+            "enabled": true,
+            "certificate_path": "$CERT_CRT",
+            "key_path": "$CERT_KEY"
+        }
+    },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${tupt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$tupt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_tu$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_tu$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "tupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "tupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_tu$_pm_idx"
+    echo "Tuic$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+            "type":"tuic",
+            "tag": "tuic5-sb-$_pm_idx",
+            "listen": "::",
+            "listen_port": ${_pm_p},
+            "users": [
+                {
+                    "uuid": "${uuid}",
+                    "password": "${uuid}"
+                }
+            ],
+            "congestion_control": "bbr",
+            "tls":{
+                "enabled": true,
+                "alpn": [
+                    "h3"
+                ],
+                "certificate_path": "$certificateHTA",
+                "key_path": "$keyHTA"
+            }
+        },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${anpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$anpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_an$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_an$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "anpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "anpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_an$_pm_idx"
+    echo "Anytls$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+            "type":"anytls",
+            "tag":"anytls-sb-$_pm_idx",
+            "listen":"::",
+            "listen_port":${_pm_p},
+            "users":[
+                {
+                  "password":"${uuid}"
+                }
+            ],
+            "padding_scheme":[],
+            "tls":{
+                "enabled": true,
+                "certificate_path": "$certificateHTA",
+                "key_path": "$keyHTA"
+            }
+        },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${arpt_more:-}" ]; then
+  if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
+  mkdir -p "$HOME/agsbx/sbk"
+  if [ ! -e "$HOME/agsbx/sbk/private_key" ]; then
+    key_pair=$("$HOME/agsbx/sing-box" generate reality-keypair)
+    private_key=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}' | tr -d '"')
+    public_key=$(echo "$key_pair" | awk '/PublicKey/ {print $2}' | tr -d '"')
+    short_id=$("$HOME/agsbx/sing-box" generate rand --hex 4)
+    echo "$private_key" > "$HOME/agsbx/sbk/private_key"
+    echo "$public_key" > "$HOME/agsbx/sbk/public_key"
+    echo "$short_id" > "$HOME/agsbx/sbk/short_id"
+  fi
+  private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
+  public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
+  short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
+  _pm_idx=2; _pm_rest="$arpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_ar$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_ar$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "arpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "arpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_ar$_pm_idx"
+    echo "Any-Reality$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+            "type":"anytls",
+            "tag":"anyreality-sb-$_pm_idx",
+            "listen":"::",
+            "listen_port":${_pm_p},
+            "users":[
+                {
+                  "password":"${uuid}"
+                }
+            ],
+            "padding_scheme":[],
+            "tls": {
+            "enabled": true,
+            "server_name": "${ym_vl_re}",
+             "reality": {
+              "enabled": true,
+              "handshake": {
+              "server": "${ym_vl_re}",
+              "server_port": 443
+             },
+             "private_key": "$private_key_s",
+             "short_id": ["$short_id_s"]
+            }
+          }
+        },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
+if [ -n "${sspt_more:-}" ]; then
+  if [ ! -e "$HOME/agsbx/sskey" ]; then
+    sskey=$("$HOME/agsbx/sing-box" generate rand 16 --base64)
+    echo "$sskey" > "$HOME/agsbx/sskey"
+  fi
+  sskey=$(cat "$HOME/agsbx/sskey")
+  _pm_idx=2; _pm_rest="$sspt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_ss$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_ss$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "sspt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "sspt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_ss$_pm_idx"
+    echo "Shadowsocks-2022$_pm_idx端口：$_pm_p"
+    cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+            "type": "shadowsocks",
+            "tag":"ss-2022-$_pm_idx",
+            "listen": "::",
+            "listen_port": $_pm_p,
+            "method": "2022-blake3-aes-128-gcm",
+            "password": "$sskey"
+    },
+EOF
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
 }
 
 xrsbhy2(){
@@ -2230,6 +2748,84 @@ fi
 else
 hyp=hyptargo
 fi
+# hypt more instances (private module, loop). Inserted into xrsbhy2()
+# after the first instance. Same rule as the first instance: writes to
+# xr.json when Xray is installed, otherwise to sb.json. Shares uuid
+# and the TLS certificate pair, own port and tag hy2-xr-N / hy2-sb-N.
+if [ -n "${hypt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$hypt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_hy2$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "hypt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "hypt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_hy2$_pm_idx"
+    echo "Hysteria2$_pm_idx端口：$_pm_p"
+    if [ -e "$HOME/agsbx/xr.json" ]; then
+      cat >> "$HOME/agsbx/xr.json" <<EOF
+    {
+      "tag": "hy2-xr-$_pm_idx",
+      "protocol": "hysteria",
+      "port": ${_pm_p},
+      "settings": {
+        "version": 2,
+        "clients": [
+          {
+            "auth": "${uuid}"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "hysteria",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": [
+             "h3"
+            ],
+          "certificates": [
+            {
+              "certificateFile": "$certificateHTA",
+              "keyFile": "$keyHTA"
+            }
+          ]
+        }
+      },
+       "sniffing": {
+       "enabled": true,
+       "destOverride": ["http", "tls", "quic"],
+       "metadataOnly": false
+       }
+    },
+EOF
+    else
+      cat >> "$HOME/agsbx/sb.json" <<EOF
+    {
+        "type": "hysteria2",
+        "tag": "hy2-sb-$_pm_idx",
+        "listen": "::",
+        "listen_port": ${_pm_p},
+        "users": [
+            {
+                "password": "${uuid}"
+            }
+        ],
+        "ignore_client_bandwidth":false,
+        "tls": {
+            "enabled": true,
+            "alpn": [
+                "h3"
+            ],
+            "certificate_path": "$certificateHTA",
+            "key_path": "$keyHTA"
+        }
+    },
+EOF
+    fi
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
 }
 
 xrsbvm(){
@@ -2299,6 +2895,74 @@ EOF
 fi
 else
 vmp=vmptargo
+fi
+# vmpt more instances (private module, loop). Inserted into xrsbvm()
+# after the first instance. Same rule as the first instance: xr.json
+# when Xray is installed, otherwise sb.json. Shares uuid and the
+# ws path ${uuid}-vm, own port and tag vmess-xr-N / vmess-sb-N.
+if [ -n "${vmpt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$vmpt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_vm_ws$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "vmpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "vmpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_vm_ws$_pm_idx"
+    echo "Vmess-ws$_pm_idx端口：$_pm_p"
+    if [ -e "$HOME/agsbx/xr.json" ]; then
+      cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+            "tag": "vmess-xr-$_pm_idx",
+            "listen": "::",
+            "port": ${_pm_p},
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}"
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "security": "none",
+                "wsSettings": {
+                  "path": "${uuid}-vm"
+            }
+        },
+            "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": false
+            }
+         },
+EOF
+    else
+      cat >> "$HOME/agsbx/sb.json" <<EOF
+{
+        "type": "vmess",
+        "tag": "vmess-sb-$_pm_idx",
+        "listen": "::",
+        "listen_port": ${_pm_p},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "alterId": 0
+            }
+        ],
+        "transport": {
+            "type": "ws",
+            "path": "${uuid}-vm",
+            "max_early_data":2048,
+            "early_data_header_name": "Sec-WebSocket-Protocol"
+        }
+    },
+EOF
+    fi
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
 fi
 }
 
@@ -2393,6 +3057,88 @@ fi
 else
 vmt=vmtlsargo
 fi
+# vmtls more instances (private module, loop). Inserted into
+# xrsbvmtls() after the first instance. Same rule as the first
+# instance: xr.json when Xray is installed, otherwise sb.json.
+# Shares uuid, the TLS certificate pair and the ws path
+# ${uuid}-vmtls, own port and tag vmess-tls-xr-N / vmess-tls-sb-N.
+if [ -n "${vmtls_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$vmtls_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_vm_tls$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "vmtls 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "vmtls 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_vm_tls$_pm_idx"
+    echo "Vmess-ws-tls$_pm_idx端口：$_pm_p"
+    if [ -e "$HOME/agsbx/xr.json" ]; then
+      cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+            "tag": "vmess-tls-xr-$_pm_idx",
+            "listen": "::",
+            "port": ${_pm_p},
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}"
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                    "certificates": [
+                        {
+                            "certificateFile": "$certificateHTA",
+                            "keyFile": "$keyHTA"
+                        }
+                    ]
+                },
+                "wsSettings": {
+                  "path": "${uuid}-vmtls"
+            }
+        },
+            "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": false
+            }
+         },
+EOF
+    else
+      cat >> "$HOME/agsbx/sb.json" <<EOF
+{
+        "type": "vmess",
+        "tag": "vmess-tls-sb-$_pm_idx",
+        "listen": "::",
+        "listen_port": ${_pm_p},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "alterId": 0
+            }
+        ],
+        "transport": {
+            "type": "ws",
+            "path": "${uuid}-vmtls",
+            "max_early_data":2048,
+            "early_data_header_name": "Sec-WebSocket-Protocol"
+        },
+        "tls": {
+            "enabled": true,
+            "certificate_path": "$certificateHTA",
+            "key_path": "$keyHTA"
+        }
+    },
+EOF
+    fi
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
+fi
 }
 xrsbso(){
 if [ -n "$sop" ]; then
@@ -2447,6 +3193,64 @@ EOF
 fi
 else
 sop=soptargo
+fi
+# sopt more instances (private module, loop). Inserted into xrsbso()
+# after the first instance. Same rule as the first instance: xr.json
+# when Xray is installed, otherwise sb.json. Shares uuid as both
+# username and password, own port and tag socks5-xr-N / socks5-sb-N.
+if [ -n "${sopt_more:-}" ]; then
+  _pm_idx=2; _pm_rest="$sopt_more"
+  while :; do
+    case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
+    _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
+    case "$_pm_p" in ''|random)
+      if [ -s "$HOME/agsbx/port_so$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_so$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      case "$_pm_p" in ''|*[!0-9]*) echo "sopt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
+    *[!0-9]*) echo "sopt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
+    echo "$_pm_p" > "$HOME/agsbx/port_so$_pm_idx"
+    echo "Socks5$_pm_idx端口：$_pm_p"
+    if [ -e "$HOME/agsbx/xr.json" ]; then
+      cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+         "tag": "socks5-xr-$_pm_idx",
+         "port": ${_pm_p},
+         "listen": "::",
+         "protocol": "socks",
+         "settings": {
+            "auth": "password",
+             "accounts": [
+               {
+               "user": "${uuid}",
+               "pass": "${uuid}"
+               }
+            ],
+            "udp": true
+          },
+            "sniffing": {
+            "enabled": true,
+            "destOverride": ["http", "tls", "quic"],
+            "metadataOnly": false
+            }
+         },
+EOF
+    else
+      cat >> "$HOME/agsbx/sb.json" <<EOF
+    {
+      "tag": "socks5-sb-$_pm_idx",
+      "type": "socks",
+      "listen": "::",
+      "listen_port": ${_pm_p},
+      "users": [
+      {
+      "username": "${uuid}",
+      "password": "${uuid}"
+      }
+     ]
+    },
+EOF
+    fi
+    _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break
+  done
 fi
 }
 
@@ -2521,19 +3325,33 @@ egress_inbound_tags(){
     vlpt) echo "reality-vision,vl-reality-sb";;
     vlpt[0-9]*) echo "reality-vision-${low#vlpt},vl-reality-sb-${low#vlpt}";;
     xhpt) echo "xhttp-reality";;
+    xhpt[0-9]*) echo "xhttp-reality-${low#xhpt}";;
     vxpt) echo "vless-xhttp";;
+    vxpt[0-9]*) echo "vless-xhttp-${low#vxpt}";;
     vwpt) echo "vless-ws";;
+    vwpt[0-9]*) echo "vless-ws-${low#vwpt}";;
     xupt) echo "xhttp-h3";;
+    xupt[0-9]*) echo "xhttp-h3-${low#xupt}";;
     xcpt) echo "xhttp-h23";;
+    xcpt[0-9]*) echo "xhttp-h23-${low#xcpt}";;
     nvpt) echo "naive-sb";;
+    nvpt[0-9]*) echo "naive-sb-${low#nvpt}";;
     tupt) echo "tuic5-sb";;
+    tupt[0-9]*) echo "tuic5-sb-${low#tupt}";;
     anpt) echo "anytls-sb";;
+    anpt[0-9]*) echo "anytls-sb-${low#anpt}";;
     arpt) echo "anyreality-sb";;
+    arpt[0-9]*) echo "anyreality-sb-${low#arpt}";;
     sspt) echo "ss-2022";;
+    sspt[0-9]*) echo "ss-2022-${low#sspt}";;
     hypt) echo "hy2-xr,hy2-sb";;
+    hypt[0-9]*) echo "hy2-xr-${low#hypt},hy2-sb-${low#hypt}";;
     vmpt) echo "vmess-xr,vmess-sb";;
+    vmpt[0-9]*) echo "vmess-xr-${low#vmpt},vmess-sb-${low#vmpt}";;
     vmtls) echo "vmess-tls-xr,vmess-tls-sb";;
+    vmtls[0-9]*) echo "vmess-tls-xr-${low#vmtls},vmess-tls-sb-${low#vmtls}";;
     sopt) echo "socks5-xr,socks5-sb";;
+    sopt[0-9]*) echo "socks5-xr-${low#sopt},socks5-sb-${low#sopt}";;
     *) echo "$item";;
   esac
 }
@@ -3157,7 +3975,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vlp2=\"${port_vl_re2}\" vlpt_more=\"${vlpt_more}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" xhpt_more=\"${xhpt_more}\" $xup=\"${port_xu}\" xupt_more=\"${xupt_more}\" $vxp=\"${port_vx}\" vxpt_more=\"${vxpt_more}\" $ssp=\"${port_ss}\" sspt_more=\"${sspt_more}\" $sop=\"${port_so}\" sopt_more=\"${sopt_more}\" $anp=\"${port_an}\" anpt_more=\"${anpt_more}\" $arp=\"${port_ar}\" arpt_more=\"${arpt_more}\" $vlp=\"${port_vl_re}\" $vlp2=\"${port_vl_re2}\" vlpt_more=\"${vlpt_more}\" $vwp=\"${port_vw}\" vwpt_more=\"${vwpt_more}\" $vmp=\"${port_vm_ws}\" vmpt_more=\"${vmpt_more}\" $vmt=\"${port_vm_tls}\" vmtls_more=\"${vmtls_more}\" $hyp=\"${port_hy2}\" hypt_more=\"${hypt_more}\" $tup=\"${port_tu}\" tupt_more=\"${tupt_more}\" $xcp=\"${port_xc}\" xcpt_more=\"${xcpt_more}\" $nvp=\"${port_nv}\" nvpt_more=\"${nvpt_more}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -3756,6 +4574,574 @@ for _vlpt_more_i in $(vlpt_more_idx_list); do
 echo "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"
 done
 }
+# Other protocols more instances display (private module, loop).
+# Instance numbers come from the inbound tags actually present in
+# xr.json / sb.json (base-N, N >= 2), never from port files alone,
+# so a stale port file from a removed instance cannot resurrect a
+# link. Native links are printed here; subscription nodes are
+# produced by the sb*_more / cl*_more functions below, which loop
+# over the same tag list at subscription-build time.
+# Extra instances use the direct (non-CDN) variant, like the first
+# instance's direct link; CDN variants for extra instances are not
+# generated, the first instance's CDN link remains usable.
+# Protocols with no SB/Clash node in the first instance (xhpt, vxpt,
+# vwpt, sopt) get native links only, exactly like the first instance.
+_pm_idx_list() {
+_pm_base="$1"; _pm_file="$2"
+grep -o "\"tag\"[^,]*\"$_pm_base-[0-9][0-9]*\"" "$_pm_file" 2>/dev/null | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
+}
+# xhpt
+for _pm_i in $(_pm_idx_list "xhttp-reality" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_xh$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣支持ENC加密，节点信息如下："
+_pm_link="vless://$uuid@$reality_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=xhttp&path=$uuid-xh&mode=auto#${sxname}vl-xhttp-reality-enc-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+# vxpt
+for _pm_i in $(_pm_idx_list "vless-xhttp" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_vx$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣支持ENC加密，节点信息如下："
+_pm_link="vless://$uuid@$domain_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+# vwpt
+for _pm_i in $(_pm_idx_list "vless-ws" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_vw$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣支持ENC加密，节点信息如下："
+_pm_link="vless://$uuid@$domain_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&type=ws&path=$uuid-vw#${sxname}vl-ws-enc-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+# xupt
+for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+if [ "$pin_on" = "1" ]; then _pm_sha=$(cat "$HOME/agsbx/SHA256.txt" 2>/dev/null); else _pm_sha=""; fi
+_pm_link="vless://$uuid@$add:$_pm_p?encryption=none&security=tls&sni=$sni&alpn=h3&insecure=0&allowInsecure=0&hpkp=$_pm_sha&pcs=$_pm_sha&type=xhttp&path=$uuid-xu&mode=auto#${sxname}Vless-xhttp-tls-UDP-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+clxupt_more() {
+for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}Xhttp-UDP-$_pm_i-$hostname
+type: vless
+server: $add
+port: $_pm_p
+uuid: $uuid
+udp: true
+tls: true
+network: xhttp
+alpn:
+- h3
+servername: $sni
+client-fingerprint: chrome
+skip-cert-verify: $cl_skip
+$cl_pin_line
+xhttp-opts:
+path: "$uuid-xu"
+mode: auto
+EOF
+done
+}
+clxupt_more_1() {
+for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do echo "- ${sxname}Xhttp-UDP-$_pm_i-$hostname"; done
+}
+# xcpt
+for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="vless://$uuid@$add:$_pm_p?encryption=none&security=tls&sni=$sni&insecure=0&allowInsecure=0&type=xhttp&path=$uuid-xc&mode=auto#${sxname}Vless-xhttp-tls-TCP-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+clxcpt_more() {
+for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}Xhttp-TCP-$_pm_i-$hostname
+type: vless
+server: $add
+port: $_pm_p
+uuid: $uuid
+udp: true
+tls: true
+network: xhttp
+servername: $sni
+client-fingerprint: chrome
+skip-cert-verify: $cl_skip
+$cl_pin_line
+xhttp-opts:
+path: "$uuid-xc"
+mode: auto
+EOF
+done
+}
+clxcpt_more_1() {
+for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do echo "- ${sxname}Xhttp-TCP-$_pm_i-$hostname"; done
+}
+# sspt
+for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$_pm_p" | base64 -w0)#${sxname}Shadowsocks-2022-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbsspt_more() {
+for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"type": "shadowsocks",
+"tag": "${sxname}Shadowsocks-2022-$_pm_i-$hostname",
+"server": "$domain_addr",
+"server_port": $_pm_p,
+"method": "2022-blake3-aes-128-gcm",
+"password": "$sskey"
+},
+EOF
+done
+}
+sbsspt_more_1() {
+for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do echo "\"${sxname}Shadowsocks-2022-$_pm_i-$hostname\","; done
+}
+clsspt_more() {
+for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: "${sxname}Shadowsocks-2022-$_pm_i-$hostname"
+type: ss
+server: $domain_addr
+port: $_pm_p
+cipher: 2022-blake3-aes-128-gcm
+password: "$sskey"
+udp: true
+EOF
+done
+}
+clsspt_more_1() {
+for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do echo "- ${sxname}Shadowsocks-2022-$_pm_i-$hostname"; done
+}
+# nvpt
+for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_ym=$(cat "$HOME/agsbx/ym" 2>/dev/null)
+echo "💣节点信息如下："
+_pm_link="naive+https://$uuid:$uuid@$_pm_ym:$_pm_p?security=tls&sni=$_pm_ym&insecure=0&allowInsecure=0#${sxname}naive-h2-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"
+_pm_link="naive+quic://$uuid:$uuid@$_pm_ym:$_pm_p?congestion_control=bbr&security=tls&sni=$_pm_ym&insecure=0&allowInsecure=0#${sxname}naive-h3-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbnvpt_more() {
+for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_ym=$(cat "$HOME/agsbx/ym" 2>/dev/null)
+cat <<EOF
+{
+"type": "naive",
+"tag": "${sxname}naive-h3-$_pm_i-$hostname",
+"server": "$_pm_ym",
+"server_port": $_pm_p,
+"username": "$uuid",
+"password": "$uuid",
+"udp_over_tcp": false,
+"quic": true,
+"quic_congestion_control": "bbr",
+"tls": {
+"enabled": true,
+"insecure": false,
+"server_name": "$_pm_ym"
+}
+},
+{
+"type": "naive",
+"tag": "${sxname}naive-h2-$_pm_i-$hostname",
+"server": "$_pm_ym",
+"server_port": $_pm_p,
+"username": "$uuid",
+"password": "$uuid",
+"udp_over_tcp": true,
+"quic": false,
+"tls": {
+"enabled": true,
+"insecure": false,
+"server_name": "$_pm_ym"
+}
+},
+EOF
+done
+}
+sbnvpt_more_1() {
+for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxname}naive-h3-$_pm_i-$hostname\","; echo "\"${sxname}naive-h2-$_pm_i-$hostname\","; done
+}
+# tupt
+for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="tuic://$uuid:$uuid@$add:$_pm_p?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$sni&insecure=$jhins&allowInsecure=$jhins&allow_insecure=$jhins#${sxname}tuic-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbtupt_more() {
+for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"type":"tuic",
+"tag": "${sxname}tuic5-$_pm_i-$hostname",
+"server": "$add",
+"server_port": $_pm_p,
+"uuid": "$uuid",
+"password": "$uuid",
+"congestion_control": "bbr",
+"udp_relay_mode": "native",
+"udp_over_stream": false,
+"zero_rtt_handshake": false,
+"heartbeat": "10s",
+"tls":{
+"enabled": true,
+"server_name": "$sni",
+"insecure": $sb_insecure$sb_pin_field,
+"alpn": [
+"h3"
+]
+}
+},
+EOF
+done
+}
+sbtupt_more_1() {
+for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxname}tuic5-$_pm_i-$hostname\","; done
+}
+cltupt_more() {
+for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}tuic5-$_pm_i-$hostname
+server: $add
+port: $_pm_p
+type: tuic
+uuid: $uuid
+password: "$uuid"
+alpn: [h3]
+disable-sni: true
+reduce-rtt: true
+udp-relay-mode: native
+congestion-controller: bbr
+sni: $sni
+skip-cert-verify: $cl_skip
+$cl_pin_line
+EOF
+done
+}
+cltupt_more_1() {
+for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do echo "- ${sxname}tuic5-$_pm_i-$hostname"; done
+}
+# anpt
+for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="anytls://$uuid@$add:$_pm_p?sni=$sni&insecure=$jhins&allowInsecure=$jhins#${sxname}anytls-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbanpt_more() {
+for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"type": "anytls",
+"tag": "${sxname}anytls-$_pm_i-$hostname",
+"server": "$add",
+"server_port": $_pm_p,
+"password": "$uuid",
+"idle_session_check_interval": "30s",
+"idle_session_timeout": "30s",
+"min_idle_session": 5,
+"tls": {
+"enabled": true,
+"insecure": $sb_insecure$sb_pin_field,
+"server_name": "$sni"
+}
+},
+EOF
+done
+}
+sbanpt_more_1() {
+for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxname}anytls-$_pm_i-$hostname\","; done
+}
+clanpt_more() {
+for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}anytls-$_pm_i-$hostname
+type: anytls
+server: $add
+port: $_pm_p
+password: "$uuid"
+client-fingerprint: chrome
+udp: true
+idle-session-check-interval: 30
+idle-session-timeout: 30
+sni: $sni
+skip-cert-verify: $cl_skip
+$cl_pin_line
+EOF
+done
+}
+clanpt_more_1() {
+for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do echo "- ${sxname}anytls-$_pm_i-$hostname"; done
+}
+# arpt
+for _pm_i in $(_pm_idx_list "anyreality-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="anytls://$uuid@$reality_addr:$_pm_p?security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_s&sid=$short_id_s&type=tcp&headerType=none#${sxname}any-reality-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbarpt_more() {
+for _pm_i in $(_pm_idx_list "anyreality-sb" "$HOME/agsbx/sb.json"); do
+_pm_p=$(cat "$HOME/agsbx/port_ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"type": "anytls",
+"tag": "${sxname}any-reality-$_pm_i-$hostname",
+"server": "$reality_addr",
+"server_port": $_pm_p,
+"password": "$uuid",
+"tls": {
+"enabled": true,
+"server_name": "$ym_vl_re",
+"reality": {
+"enabled": true,
+"handshake": {
+"server": "$ym_vl_re",
+"server_port": 443
+},
+"private_key": "$private_key_s",
+"short_id": ["$short_id_s"]
+}
+}
+},
+EOF
+done
+}
+sbarpt_more_1() {
+for _pm_i in $(_pm_idx_list "anyreality-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxname}any-reality-$_pm_i-$hostname\","; done
+}
+# hypt (xr or sb, same display template; single-port variant, no port hopping)
+_pm_hy_idx() {
+{ grep -o '"tag": "hy2-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "hy2-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
+}
+for _pm_i in $(_pm_hy_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+if [ "$pin_on" = "1" ]; then _pm_hyps="&pinSHA256=$pin_sha"; else _pm_hyps=""; fi
+echo "💣节点信息如下："
+_pm_link="hysteria2://$uuid@$add:$_pm_p?security=tls&alpn=h3&insecure=0&allowInsecure=0$_pm_hyps&sni=$sni#${sxname}hy2-$_pm_i-$hostname"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbhypt_more() {
+for _pm_i in $(_pm_hy_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"type": "hysteria2",
+"tag": "${sxname}hy2-$_pm_i-$hostname",
+"server": "$add",
+"server_port": $_pm_p,
+"password": "$uuid",
+"tls": {
+"enabled": true,
+"server_name": "$sni",
+"insecure": $sb_insecure$sb_pin_field,
+"alpn": [
+"h3"
+]
+}
+},
+EOF
+done
+}
+sbhypt_more_1() {
+for _pm_i in $(_pm_hy_idx); do echo "\"${sxname}hy2-$_pm_i-$hostname\","; done
+}
+clhypt_more() {
+for _pm_i in $(_pm_hy_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}hysteria2-$_pm_i-$hostname
+type: hysteria2
+server: $add
+port: $_pm_p
+password: "$uuid"
+alpn:
+- h3
+sni: $sni
+skip-cert-verify: $cl_skip
+$cl_pin_line
+fast-open: true
+EOF
+done
+}
+clhypt_more_1() {
+for _pm_i in $(_pm_hy_idx); do echo "- ${sxname}hysteria2-$_pm_i-$hostname"; done
+}
+# vmpt
+_pm_vm_idx() {
+{ grep -o '"tag": "vmess-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "vmess-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
+}
+for _pm_i in $(_pm_vm_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣节点信息如下："
+_pm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-$_pm_i-$hostname\", \"add\": \"$domain_addr\", \"port\": \"$_pm_p\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"www.bing.com\", \"path\": \"/$uuid-vm\", \"tls\": \"\"}" | base64 -w0)"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbvmpt_more() {
+for _pm_i in $(_pm_vm_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"server": "$domain_addr",
+"server_port": $_pm_p,
+"tag": "${sxname}vmess-$_pm_i-$hostname",
+"tls": {
+"enabled": false,
+"server_name": "www.bing.com",
+"insecure": false,
+"utls": {
+"enabled": true,
+"fingerprint": "chrome"
+}
+},
+"transport": {
+"headers": {
+"Host": [
+"www.bing.com"
+]
+},
+"path": "$uuid-vm",
+"type": "ws"
+},
+"type": "vmess",
+"security": "auto",
+"uuid": "$uuid"
+},
+EOF
+done
+}
+sbvmpt_more_1() {
+for _pm_i in $(_pm_vm_idx); do echo "\"${sxname}vmess-$_pm_i-$hostname\","; done
+}
+clvmpt_more() {
+for _pm_i in $(_pm_vm_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}vmess-ws-$_pm_i-$hostname
+type: vmess
+server: $domain_addr
+port: $_pm_p
+uuid: $uuid
+alterId: 0
+cipher: auto
+udp: true
+tls: false
+network: ws
+servername: www.bing.com
+ws-opts:
+path: "$uuid-vm"
+headers:
+Host: www.bing.com
+EOF
+done
+}
+clvmpt_more_1() {
+for _pm_i in $(_pm_vm_idx); do echo "- ${sxname}vmess-ws-$_pm_i-$hostname"; done
+}
+# vmtls
+_pm_vmtls_idx() {
+{ grep -o '"tag": "vmess-tls-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "vmess-tls-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
+}
+for _pm_i in $(_pm_vmtls_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+if [ "$pin_on" = "1" ]; then _pm_hpkp=", \"hpkp\": \"$pin_sha\""; else _pm_hpkp=""; fi
+echo "💣节点信息如下："
+_pm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-tls-$_pm_i-$hostname\", \"add\": \"$add\", \"port\": \"$_pm_p\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$sni\", \"path\": \"/$uuid-vmtls\", \"tls\": \"tls\", \"sni\": \"$sni\", \"alpn\": \"\", \"fp\": \"chrome\"$_pm_hpkp}" | base64 -w0)"
+echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
+done
+sbvmtlspt_more() {
+for _pm_i in $(_pm_vmtls_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+{
+"server": "$add",
+"server_port": $_pm_p,
+"tag": "${sxname}vmess-ws-tls-$_pm_i-$hostname",
+"tls": {
+"enabled": true,
+"server_name": "$sni",
+"insecure": $sb_insecure$sb_pin_field,
+"utls": {
+"enabled": true,
+"fingerprint": "chrome"
+}
+},
+"transport": {
+"headers": {
+"Host": [
+"$sni"
+]
+},
+"path": "$uuid-vmtls",
+"type": "ws"
+},
+"type": "vmess",
+"security": "auto",
+"uuid": "$uuid"
+},
+EOF
+done
+}
+sbvmtlspt_more_1() {
+for _pm_i in $(_pm_vmtls_idx); do echo "\"${sxname}vmess-ws-tls-$_pm_i-$hostname\","; done
+}
+clvmtlspt_more() {
+for _pm_i in $(_pm_vmtls_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+cat <<EOF
+- name: ${sxname}vmess-ws-tls-$_pm_i-$hostname
+type: vmess
+server: $add
+port: $_pm_p
+uuid: $uuid
+alterId: 0
+cipher: auto
+udp: true
+tls: true
+network: ws
+servername: $sni
+client-fingerprint: chrome
+skip-cert-verify: $cl_skip
+$cl_pin_line
+ws-opts:
+path: "$uuid-vmtls"
+headers:
+Host: $sni
+EOF
+done
+}
+clvmtlspt_more_1() {
+for _pm_i in $(_pm_vmtls_idx); do echo "- ${sxname}vmess-ws-tls-$_pm_i-$hostname"; done
+}
+# sopt: no subscription node in the first instance, only client info
+_pm_so_idx() {
+{ grep -o '"tag": "socks5-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "socks5-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
+}
+for _pm_i in $(_pm_so_idx); do
+_pm_p=$(cat "$HOME/agsbx/port_so$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+echo "💣客户端信息如下："
+echo "请配合其他应用内置代理使用，勿做节点直接使用"
+echo "客户端地址：$server_ip"
+echo "客户端端口：$_pm_p"
+echo "客户端用户名：$uuid"
+echo "客户端密码：$uuid"
+echo
+done
 if grep ss-2022 "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Shadowsocks-2022 】节点信息如下："
 port_ss=$(cat "$HOME/agsbx/port_ss")
@@ -4379,10 +5765,10 @@ out=$($f)
 [ -n "$out" ] && printf "%s\n" "$out"
 fi
 }
-sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
-clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
-sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
-clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
+sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
+clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
+sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
+clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
 sbgz=$(printf "%s\n" "$sbgz" | sed '$ s/,$//')
 cat > $HOME/agsbx/sbox.json <<EOF
 {

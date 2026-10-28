@@ -83,7 +83,7 @@ grep -Fq 'data-proto="vlpt2"' "$ROOT/index.html" && fail "generator vlpt2 checkb
 grep -Fq 'class="section-note"' "$ROOT/index.html" || fail "generator section-note missing"
 grep -Fq '逗号个数 + 1 = 实例数' "$ROOT/index.html" || fail "generator comma rule missing"
 grep -Fq '10001, = 第 1 个固定 10001、第 2 个随机' "$ROOT/index.html" || fail "generator comma example missing"
-grep -Fq '目前仅 Vless-tcp-reality-vision 支持逗号多实例' "$ROOT/index.html" || fail "generator must state only vlpt supports comma today"
+grep -Fq '全部协议都支持' "$ROOT/index.html" || fail "generator must state all protocols support comma now"
 grep -Fq 'class="field-note"' "$ROOT/index.html" || fail "generator field-note missing"
 grep -Fq '所有 vlpt 实例共用此内核' "$ROOT/index.html" || fail "generator kernel note missing"
 grep -Fq 'Vless-tcp-reality 内核（' "$ROOT/index.html" && fail "vlpt_kernel label must be short (note goes below)"

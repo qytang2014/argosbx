@@ -417,7 +417,7 @@
       <div class="grid-col">
       <section class="card protocol-port">
         <h2>必选内核协议端口：</h2>
-        <p class="section-note">端口用逗号分隔可创建多个实例：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口。目前仅 Vless-tcp-reality-vision 支持逗号多实例，其他协议后续同样适用，暂不要在其他协议的端口里写逗号。</p>
+        <p class="section-note">端口用逗号分隔可创建多个实例，全部协议都支持：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口，其他协议同理，如 inbound:xhpt2、inbound:sspt2、inbound:hypt2。防火墙（ufw/firewalld）会同步放行全部实例的端口，随机端口也不例外。</p>
         <div class="protocol-group separator">
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">

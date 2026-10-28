@@ -85,6 +85,33 @@ ufw_desired_rules(){
   _ufw_emit "$vmp" vmpt "$port_vm_ws" "$HOME/agsbx/port_vm_ws" "tcp"
   _ufw_emit "$vmt" vmtls "$port_vm_tls" "$HOME/agsbx/port_vm_tls" "tcp"
   _ufw_emit "$sop" sopt "$port_so" "$HOME/agsbx/port_so" "tcp udp"
+  # Other protocols comma more instances: fixed ports from *_more,
+  # plus a tag scan for random ports (their ports are only in port
+  # files, not in *_more). Both fw_sync backends use this function,
+  # so ufw and firewalld open the same set. sort -u dedupes.
+  local _mn="" _mv="" _moldifs2="$IFS"
+  for _mn in xhpt_more vxpt_more vwpt_more xupt_more xcpt_more nvpt_more tupt_more anpt_more arpt_more sspt_more hypt_more vmpt_more vmtls_more sopt_more; do
+    _mv=$(eval "printf '%s' \"\${$_mn:-}\"" 2>/dev/null || printf '%s' "")
+    IFS=','; for _p in $_mv; do _p=$(printf '%s' "$_p" | xargs 2>/dev/null || printf '%s' "$_p"); case "$_p" in ''|*[!0-9]*) ;; *) case "$_mn" in xupt_more|tupt_more|hypt_more) echo "$_p/udp";; sspt_more|sopt_more) echo "$_p/tcp"; echo "$_p/udp";; *) echo "$_p/tcp";; esac;; esac; done; IFS="$_moldifs2"
+  done
+  # Tag scan: prefix -> transport -> tag base. Grep allows an
+  # optional space after the colon because xr/sb.json tag formats
+  # differ ("tag":"x" vs "tag": "x").
+  local _pfx _protos _tag _cfg _pr
+  for _spec in "port_xh:tcp:xhttp-reality:xr" "port_vx:tcp:vless-xhttp:xr" "port_vw:tcp:vless-ws:xr" "port_xu:udp:xhttp-h3:xr" "port_xc:tcp:xhttp-h23:xr" "port_nv:tcp:naive-sb:sb" "port_tu:udp:tuic5-sb:sb" "port_an:tcp:anytls-sb:sb" "port_ar:tcp:anyreality-sb:sb" "port_ss:tcp udp:ss-2022:sb" "port_hy2:udp:hy2:both" "port_vm_ws:tcp:vmess:both" "port_vm_tls:tcp:vmess-tls:both" "port_so:tcp udp:socks5:both"; do
+    _pfx="${_spec%%:*}"; _protos=$(printf '%s' "$_spec" | cut -d: -f2); _tag=$(printf '%s' "$_spec" | cut -d: -f3); _cfg=$(printf '%s' "$_spec" | cut -d: -f4)
+    for _f in "$HOME/agsbx"/"$_pfx"[0-9]*; do
+      [ -f "$_f" ] || continue
+      _n="${_f##*$_pfx}"
+      _p=$(_ufw_port "" "$_f"); [ -n "$_p" ] || continue
+      case "$_cfg" in
+        xr) grep -Eq "\"tag\": *\"$_tag-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || continue;;
+        sb) grep -Eq "\"tag\": *\"$_tag-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null || continue;;
+        both) if grep -Eq "\"tag\": *\"$_tag-xr-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || grep -Eq "\"tag\": *\"$_tag-sb-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null; then :; else continue; fi;;
+      esac
+      for _pr in $_protos; do echo "$_p/$_pr"; done
+    done
+  done
 }
 _ufw_fallback_rules(){
   local spec f protos p pr
@@ -101,6 +128,16 @@ _ufw_fallback_rules(){
     case "$f" in *port_vl_re|*port_vl_re2) continue;; esac
     p=$(_ufw_port "" "$f")
     [ -n "$p" ] && echo "$p/tcp"
+  done
+  # Other protocols more instances: same scan, with their transport.
+  local _pfx2 _protos2 _pr2
+  for _spec2 in "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+    _pfx2="${_spec2%%:*}"; _protos2="${_spec2#*:}"
+    for f in "$HOME/agsbx"/"$_pfx2"[0-9]*; do
+      [ -f "$f" ] || continue
+      p=$(_ufw_port "" "$f"); [ -n "$p" ] || continue
+      for _pr2 in $_protos2; do echo "$p/$_pr2"; done
+    done
   done
 }
 ufw_sync(){

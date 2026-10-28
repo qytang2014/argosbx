@@ -273,12 +273,13 @@ def build_index():
     h = replace(h, "    .protocol-grid {\n      display: grid;",
                 "    .field-note {\n      grid-column: 1 / -1;\n      font-size: 12px;\n      color: var(--sub);\n      margin-top: -4px;\n    }\n    .section-note {\n      font-size: 12px;\n      color: var(--sub);\n      line-height: 1.6;\n      margin: 4px 0 12px;\n    }\n    .protocol-grid {\n      display: grid;", "index-field-note-css", 1)
     # Section note under "必选内核协议端口：": comma = multiple
-    # instances, empty = random. It lives under the card title, not
-    # inside any label, so it never squeezes an input. It states
-    # clearly that only vlpt supports comma lists today, so a user
-    # does not try a comma on another protocol and get an invalid port.
+    # instances, empty = random, for every protocol in this card.
+    # It lives under the card title, not inside any label, so it
+    # never squeezes an input. Routing for extra instances is
+    # inbound:<proto>2, inbound:<proto>3, ... (e.g. inbound:xhpt2,
+    # inbound:sspt2, inbound:hypt2), same as vlpt2/vlpt3.
     h = replace(h, '        <h2>必选内核协议端口：</h2>',
-                '        <h2>必选内核协议端口：</h2>\n        <p class="section-note">端口用逗号分隔可创建多个实例：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口。目前仅 Vless-tcp-reality-vision 支持逗号多实例，其他协议后续同样适用，暂不要在其他协议的端口里写逗号。</p>', "index-comma-section-note", 1)
+                '        <h2>必选内核协议端口：</h2>\n        <p class="section-note">端口用逗号分隔可创建多个实例，全部协议都支持：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口，其他协议同理，如 inbound:xhpt2、inbound:sspt2、inbound:hypt2。防火墙（ufw/firewalld）会同步放行全部实例的端口，随机端口也不例外。</p>', "index-comma-section-note", 1)
     h = replace(h, """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';""",
@@ -571,6 +572,92 @@ fi
                 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
     t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;',
                 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
+
+    # --- other protocols comma multi-instance (private): same comma
+    # semantics as vlpt, for every other protocol. Comma expansion
+    # runs with vlpt-comma, before the port exports, so sh.txt still
+    # shows the original comma command. Install loops are inserted
+    # at the end of installxray / installsb / each xrsb* function,
+    # display loops before the subscription lists (which are extended
+    # below with the *_more functions). Top lists gain *_more so the
+    # bashrc recovery line and vars.env can carry extra instances;
+    # ufw/firewalld already cover extra instances via the tag scan in
+    # modules/ufw.sh, and egress aliases gain protoN branches.
+    t = replace(t, "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls",
+                "for v in uuid vlpt vlpt2 vlpt_more vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more", "proto-more-top-lists")
+    proto_comma = read("modules/proto-comma.sh")
+    t = replace(t, 'fi\n' + vlpt_comma + 'export uuid=${uuid:-\'\'}\n',
+                'fi\n' + vlpt_comma + proto_comma + 'export uuid=${uuid:-\'\'}\n', "proto-comma-expand", 1)
+    _bs3 = chr(92)
+    # Recovery line: add *_more after each protocol's port entry.
+    t = replace(t, '$xhp=' + _bs3 + '"${port_xh}' + _bs3 + '"',
+                '$xhp=' + _bs3 + '"${port_xh}' + _bs3 + '" xhpt_more=' + _bs3 + '"${xhpt_more}' + _bs3 + '"', "proto-more-recovery-xh", 1)
+    t = replace(t, '$xup=' + _bs3 + '"${port_xu}' + _bs3 + '"',
+                '$xup=' + _bs3 + '"${port_xu}' + _bs3 + '" xupt_more=' + _bs3 + '"${xupt_more}' + _bs3 + '"', "proto-more-recovery-xu", 1)
+    t = replace(t, '$vxp=' + _bs3 + '"${port_vx}' + _bs3 + '"',
+                '$vxp=' + _bs3 + '"${port_vx}' + _bs3 + '" vxpt_more=' + _bs3 + '"${vxpt_more}' + _bs3 + '"', "proto-more-recovery-vx", 1)
+    t = replace(t, '$ssp=' + _bs3 + '"${port_ss}' + _bs3 + '"',
+                '$ssp=' + _bs3 + '"${port_ss}' + _bs3 + '" sspt_more=' + _bs3 + '"${sspt_more}' + _bs3 + '"', "proto-more-recovery-ss", 1)
+    t = replace(t, '$sop=' + _bs3 + '"${port_so}' + _bs3 + '"',
+                '$sop=' + _bs3 + '"${port_so}' + _bs3 + '" sopt_more=' + _bs3 + '"${sopt_more}' + _bs3 + '"', "proto-more-recovery-so", 1)
+    t = replace(t, '$anp=' + _bs3 + '"${port_an}' + _bs3 + '"',
+                '$anp=' + _bs3 + '"${port_an}' + _bs3 + '" anpt_more=' + _bs3 + '"${anpt_more}' + _bs3 + '"', "proto-more-recovery-an", 1)
+    t = replace(t, '$arp=' + _bs3 + '"${port_ar}' + _bs3 + '"',
+                '$arp=' + _bs3 + '"${port_ar}' + _bs3 + '" arpt_more=' + _bs3 + '"${arpt_more}' + _bs3 + '"', "proto-more-recovery-ar", 1)
+    t = replace(t, '$vwp=' + _bs3 + '"${port_vw}' + _bs3 + '"',
+                '$vwp=' + _bs3 + '"${port_vw}' + _bs3 + '" vwpt_more=' + _bs3 + '"${vwpt_more}' + _bs3 + '"', "proto-more-recovery-vw", 1)
+    t = replace(t, '$vmp=' + _bs3 + '"${port_vm_ws}' + _bs3 + '"',
+                '$vmp=' + _bs3 + '"${port_vm_ws}' + _bs3 + '" vmpt_more=' + _bs3 + '"${vmpt_more}' + _bs3 + '"', "proto-more-recovery-vm", 1)
+    t = replace(t, '$vmt=' + _bs3 + '"${port_vm_tls}' + _bs3 + '"',
+                '$vmt=' + _bs3 + '"${port_vm_tls}' + _bs3 + '" vmtls_more=' + _bs3 + '"${vmtls_more}' + _bs3 + '"', "proto-more-recovery-vmt", 1)
+    t = replace(t, '$hyp=' + _bs3 + '"${port_hy2}' + _bs3 + '"',
+                '$hyp=' + _bs3 + '"${port_hy2}' + _bs3 + '" hypt_more=' + _bs3 + '"${hypt_more}' + _bs3 + '"', "proto-more-recovery-hy", 1)
+    t = replace(t, '$tup=' + _bs3 + '"${port_tu}' + _bs3 + '"',
+                '$tup=' + _bs3 + '"${port_tu}' + _bs3 + '" tupt_more=' + _bs3 + '"${tupt_more}' + _bs3 + '"', "proto-more-recovery-tu", 1)
+    t = replace(t, '$xcp=' + _bs3 + '"${port_xc}' + _bs3 + '"',
+                '$xcp=' + _bs3 + '"${port_xc}' + _bs3 + '" xcpt_more=' + _bs3 + '"${xcpt_more}' + _bs3 + '"', "proto-more-recovery-xc", 1)
+    t = replace(t, '$nvp=' + _bs3 + '"${port_nv}' + _bs3 + '"',
+                '$nvp=' + _bs3 + '"${port_nv}' + _bs3 + '" nvpt_more=' + _bs3 + '"${nvpt_more}' + _bs3 + '"', "proto-more-recovery-nv", 1)
+    # Install loops.
+    proto_more_xray = read("modules/proto-more-xray.sh")
+    t = replace(t, '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){',
+                '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + proto_more_xray + '}\n\ninstallsb(){', "proto-more-xray-block", 1)
+    proto_more_sb = read("modules/proto-more-sb.sh")
+    # installsb ends with the sspt block; insert after it, before the
+    # closing brace of installsb (the sspt else branch + fi + blank
+    # line + closing brace, followed by xrsbhy2).
+    t = replace(t, 'else\nssp=ssptargo\nfi\n}\n\nxrsbhy2(){',
+                'else\nssp=ssptargo\nfi\n' + proto_more_sb + '}\n\nxrsbhy2(){', "proto-more-sb-block", 1)
+    # Auto loops: insert each into its xrsb* function, after the first
+    # instance, before the function's closing else/fi. The anchor is
+    # the else branch that sets the recovery dummy for that protocol.
+    proto_more_hy = read("modules/proto-more-hy.sh")
+    t = replace(t, 'else\nhyp=hyptargo\nfi\n}',
+                'else\nhyp=hyptargo\nfi\n' + proto_more_hy + '}', "proto-more-hy-block", 1)
+    proto_more_vm = read("modules/proto-more-vm.sh")
+    # xrsbvm's else branch is the first "else\nvmp=vmptargo" in the file
+    # after xrsbvm definition; use the function-end pattern with the
+    # following xrsbvmtls comment to anchor it uniquely.
+    t = replace(t, 'else\nvmp=vmptargo\nfi\n}\n\n# Vmess-ws-tls',
+                'else\nvmp=vmptargo\nfi\n' + proto_more_vm + '}\n\n# Vmess-ws-tls', "proto-more-vm-block", 1)
+    proto_more_vmtls = read("modules/proto-more-vmtls.sh")
+    t = replace(t, 'else\nvmt=vmtlsargo\nfi\n}',
+                'else\nvmt=vmtlsargo\nfi\n' + proto_more_vmtls + '}', "proto-more-vmtls-block", 1)
+    proto_more_so = read("modules/proto-more-so.sh")
+    t = replace(t, 'else\nsop=soptargo\nfi\n}',
+                'else\nsop=soptargo\nfi\n' + proto_more_so + '}', "proto-more-so-block", 1)
+    # Display loops + subscription lists.
+    proto_more_display = read("modules/proto-more-display.sh")
+    t = replace(t, 'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n',
+                'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n' + proto_more_display, "proto-more-display-block", 1)
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more;', "proto-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt;',
+                'clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more;', "proto-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1;', "proto-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1;',
+                'clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1;', "proto-more-clgz", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
