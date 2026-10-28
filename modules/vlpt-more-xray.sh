@@ -1,13 +1,16 @@
 # vlpt more instances on Xray (private module, loop, not per-instance copies).
-# vlpt_more="10003,10004" installs instances 3, 4, ... in order, sharing
+# vlpt_more="10002,10003" installs instances 2, 3, ... in order, sharing
 # vlpt's uuid, Reality keypair (xrk), SNI and flow, with their own port
-# and inbound tag reality-vision-3, reality-vision-4, ... Only runs when
-# vlpt_on=xray (shared with vlpt/vlpt2). Ports must be explicit; empty
-# or non-numeric items are skipped with a warning, never auto-filled,
-# so a typo cannot silently claim a random port.
+# and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
+# vlpt_on=xray (shared with vlpt). If the old vlpt2 variable is also
+# set, vlpt_more starts at 3, so it never overwrites instance 2.
+# Ports must be explicit; empty or non-numeric items are skipped with
+# a warning, never auto-filled, so a typo cannot silently claim a
+# random port.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-_vlpt_more_idx=3; _vlpt_more_oldifs="$IFS"; IFS=','
+if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_oldifs="$IFS"; IFS=','
 for _vlpt_more_p in $vlpt_more; do
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac

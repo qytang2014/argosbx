@@ -168,6 +168,12 @@
       outline: none;
       transition: background-color 0.3s, border-color 0.3s, color 0.3s;
     }
+    .field-note {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      color: var(--sub);
+      margin-top: -4px;
+    }
     .protocol-grid {
       display: grid;
       grid-template-columns: auto 1fr; 
@@ -409,14 +415,15 @@
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">
             <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
-            <label><input type="checkbox" data-proto="vlpt2"> Vless-tcp-reality-vision-2（第二实例，与 vlpt 同 uuid、同密钥对、不同端口，可分流到不同出口） <span class="pill">vlpt2</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt2">
-            <label for="vlpt_more">Vless-tcp-reality 更多实例（第3个起，循环生成，不用再加变量） <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10003,10004">
-            <label for="vlpt_kernel">Vless-tcp-reality 内核（vlpt、vlpt2 与更多实例共用） <span class="pill">vlpt_kernel</span></label>
+            <label for="vlpt_more">Vless-tcp-reality 更多实例 <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10002,10003">
+            <div class="field-note">只勾选上方即只创建一个；这里填第 2 个起的实例，循环生成，不用再加变量；与第 1 个实例同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
+            <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
               <option value="sb">强制 Sing-box</option>
             </select>
+            <div class="field-note">vlpt 与更多实例共用。</div>
           </div>
         </div>
         <div class="protocol-group separator">
@@ -728,15 +735,18 @@
       cdnymInput.disabled = !isCdnEnabled;
       if (!isCdnEnabled) cdnymInput.value = '';
 
-      const isRealityEnabled = vlessTcpRealityCheckbox.checked || (document.querySelector('[data-proto="vlpt2"]') || {}).checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
+      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
-      const vlessTcpReality2Checkbox = document.querySelector('[data-proto="vlpt2"]');
+      const vlptMoreInput = document.getElementById('vlpt_more');
       if (vlptKernelSelect) {
-        const vlptAny = vlessTcpRealityCheckbox.checked || (vlessTcpReality2Checkbox && vlessTcpReality2Checkbox.checked);
-        vlptKernelSelect.disabled = !vlptAny;
-        if (!vlptAny) vlptKernelSelect.value = '';
+        vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
+      }
+      if (vlptMoreInput) {
+        vlptMoreInput.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptMoreInput.value = '';
       }
 
       const isAlnsEnabled = alnsSelect.value === 'y';
@@ -973,6 +983,15 @@
       }
     });
 
+    if (params['vlpt2'] !== undefined) {
+      const vm = document.getElementById('vlpt_more');
+      if (vm) {
+        const cur = (vm.value || '').trim();
+        vm.value = cur ? params['vlpt2'] + ',' + cur : params['vlpt2'];
+      }
+      const ck = document.querySelector('[data-proto="vlpt"]');
+      if (ck) ck.checked = true;
+    }
     isUpdatingFromOutput = false;
   }
 

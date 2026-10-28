@@ -2,9 +2,11 @@
 # Instance numbers come from the inbound tags actually present in
 # xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 3), never
 # from port files alone, so a stale port file from a removed instance
-# cannot resurrect a link. Native links are printed here; subscription
-# nodes are produced by sbvlpt_more / clvlpt_more below, which loop
-# over the same tag list at subscription-build time.
+# cannot resurrect a link. Instance 2 is always displayed by the
+# vlpt2 block (even when it came from vlpt_more), so this loop only
+# handles N >= 3 and never duplicates it. Native links are printed
+# here; subscription nodes are produced by sbvlpt_more / clvlpt_more
+# below, which loop over the same tag list at subscription-build time.
 vlpt_more_idx_list(){
 { grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1|2);; *) echo "$_n";; esac; done
 }

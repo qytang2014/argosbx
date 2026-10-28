@@ -1,7 +1,8 @@
 # vlpt more instances on Sing-box (private module, loop).
-# Same vlpt_more list as the Xray block, instances 3, 4, ... in order,
-# sharing vlpt's uuid and Sing-box Reality keypair (sbk), with their
-# own port and inbound tag vl-reality-sb-3, vl-reality-sb-4, ...
+# Same vlpt_more list as the Xray block, instances 2, 3, ... in order
+# (3, 4, ... if the old vlpt2 variable is also set), sharing vlpt's
+# uuid and Sing-box Reality keypair (sbk), with their own port and
+# inbound tag vl-reality-sb-2, vl-reality-sb-3, ...
 # Only runs when vlpt_on=sb. Generates sbk if missing, like vlpt-sb.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "sb" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
@@ -20,7 +21,8 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-_vlpt_more_idx=3; _vlpt_more_oldifs="$IFS"; IFS=','
+if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_oldifs="$IFS"; IFS=','
 for _vlpt_more_p in $vlpt_more; do
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac

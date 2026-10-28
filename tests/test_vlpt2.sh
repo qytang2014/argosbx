@@ -55,9 +55,13 @@ open(sys.argv[2], "w").write(m.group(0))
 PY
 out=$(bash -c 'source "$1"; vlp2=vlpt2; port_vl_re2=20001; ufw_desired_rules' _ "$TMP/ufw.sh")
 echo "$out" | grep -Fqx "20001/tcp" || fail "ufw vlpt2 rule missing: $out"
-# 4. generator: vlpt2 checkbox + port, protoKeys, shared kernel label
-grep -Fq 'data-proto="vlpt2"' "$ROOT/index.html" || fail "generator vlpt2 checkbox missing"
-grep -Fq 'data-port="vlpt2"' "$ROOT/index.html" || fail "generator vlpt2 port missing"
+# 4. generator: vlpt2 checkbox is REMOVED (checking vlpt alone creates
+# exactly one instance; extra instances come from vlpt_more only).
+# Script-side vlpt2 still works for old commands, and protoKeys keeps
+# vlpt2 so paste-back migrates it into vlpt_more instead of dropping it.
+grep -Fq 'data-proto="vlpt2"' "$ROOT/index.html" && fail "generator vlpt2 checkbox must be removed"
+grep -Fq 'data-port="vlpt2"' "$ROOT/index.html" && fail "generator vlpt2 port must be removed"
 grep -Fq "'vlpt','vlpt2'" "$ROOT/index.html" || fail "generator protoKeys missing vlpt2"
-grep -Fq 'vlpt、vlpt2 与更多实例共用' "$ROOT/index.html" || fail "generator kernel label not shared"
+grep -Fq 'vlpt 与更多实例共用' "$ROOT/index.html" || fail "generator kernel note not shared"
+grep -Fq "params['vlpt2']" "$ROOT/index.html" || fail "generator paste migration missing vlpt2"
 echo "PASS: vlpt2 second instance"

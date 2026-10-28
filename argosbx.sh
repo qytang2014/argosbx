@@ -1645,15 +1645,18 @@ else
 [ -n "$vlp2" ] || vlp2=vlpt2argo
 fi
 # vlpt more instances on Xray (private module, loop, not per-instance copies).
-# vlpt_more="10003,10004" installs instances 3, 4, ... in order, sharing
+# vlpt_more="10002,10003" installs instances 2, 3, ... in order, sharing
 # vlpt's uuid, Reality keypair (xrk), SNI and flow, with their own port
-# and inbound tag reality-vision-3, reality-vision-4, ... Only runs when
-# vlpt_on=xray (shared with vlpt/vlpt2). Ports must be explicit; empty
-# or non-numeric items are skipped with a warning, never auto-filled,
-# so a typo cannot silently claim a random port.
+# and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
+# vlpt_on=xray (shared with vlpt). If the old vlpt2 variable is also
+# set, vlpt_more starts at 3, so it never overwrites instance 2.
+# Ports must be explicit; empty or non-numeric items are skipped with
+# a warning, never auto-filled, so a typo cannot silently claim a
+# random port.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
-_vlpt_more_idx=3; _vlpt_more_oldifs="$IFS"; IFS=','
+if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_oldifs="$IFS"; IFS=','
 for _vlpt_more_p in $vlpt_more; do
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac
@@ -2005,9 +2008,10 @@ else
 fi
 
 # vlpt more instances on Sing-box (private module, loop).
-# Same vlpt_more list as the Xray block, instances 3, 4, ... in order,
-# sharing vlpt's uuid and Sing-box Reality keypair (sbk), with their
-# own port and inbound tag vl-reality-sb-3, vl-reality-sb-4, ...
+# Same vlpt_more list as the Xray block, instances 2, 3, ... in order
+# (3, 4, ... if the old vlpt2 variable is also set), sharing vlpt's
+# uuid and Sing-box Reality keypair (sbk), with their own port and
+# inbound tag vl-reality-sb-2, vl-reality-sb-3, ...
 # Only runs when vlpt_on=sb. Generates sbk if missing, like vlpt-sb.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "sb" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
@@ -2026,7 +2030,8 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-_vlpt_more_idx=3; _vlpt_more_oldifs="$IFS"; IFS=','
+if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
+_vlpt_more_oldifs="$IFS"; IFS=','
 for _vlpt_more_p in $vlpt_more; do
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac
@@ -3612,9 +3617,11 @@ fi
 # Instance numbers come from the inbound tags actually present in
 # xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 3), never
 # from port files alone, so a stale port file from a removed instance
-# cannot resurrect a link. Native links are printed here; subscription
-# nodes are produced by sbvlpt_more / clvlpt_more below, which loop
-# over the same tag list at subscription-build time.
+# cannot resurrect a link. Instance 2 is always displayed by the
+# vlpt2 block (even when it came from vlpt_more), so this loop only
+# handles N >= 3 and never duplicates it. Native links are printed
+# here; subscription nodes are produced by sbvlpt_more / clvlpt_more
+# below, which loop over the same tag list at subscription-build time.
 vlpt_more_idx_list(){
 { grep -o '"tag":"reality-vision-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null; grep -o '"tag": "vl-reality-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)".*/\1/' | sort -nu | while read -r _n; do case "$_n" in ''|1|2);; *) echo "$_n";; esac; done
 }

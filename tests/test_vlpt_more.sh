@@ -1,14 +1,15 @@
 #!/bin/bash
-# Test: vlpt loop (vlpt_more="10003,10004" = instances 3, 4, ...).
+# Test: vlpt loop (vlpt_more="10002,10003" = instances 2, 3, ...).
 # No new variable per instance: install loops (Xray + Sing-box),
 # display/subscription loops over tags actually present in xr/sb.json,
 # ufw loops over the list, egress alias is generic for any vlptN.
-# vlpt/vlpt2 (instances 1/2) are unchanged for backward compatibility.
+# vlpt is instance 1; vlpt2 (script-side) is unchanged for backward
+# compatibility, and when it is set vlpt_more starts at 3 instead of 2.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 fail(){ echo "FAIL: $*" >&2; exit 1; }
 # 1. generated script carries the loop blocks, not per-instance copies
-grep -Fq 'vlpt_more="10003,10004" installs instances 3, 4' "$ROOT/argosbx.sh" || fail "xray loop comment missing"
+grep -Fq 'vlpt_more="10002,10003" installs instances 2, 3' "$ROOT/argosbx.sh" || fail "xray loop comment missing"
 grep -Fq 'tag":"reality-vision-$_vlpt_more_idx"' "$ROOT/argosbx.sh" || fail "xray loop tag missing"
 grep -Fq '"tag": "vl-reality-sb-$_vlpt_more_idx"' "$ROOT/argosbx.sh" || fail "sb loop tag missing"
 grep -Fq 'vlpt_more_idx_list' "$ROOT/argosbx.sh" || fail "display loop helper missing"
@@ -74,8 +75,34 @@ out2=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; reality
 echo "$out2" | grep -Fq '"server_port": 30003' || fail "sb loop missing port 30003: $out2"
 echo "$out2" | grep -Fq '"server_port": 30005' || fail "sb loop missing port 30005: $out2"
 echo "$out2" | grep -Fq "30004" && fail "sb loop must not include stale 4: $out2"
-# 5. generator: vlpt_more field in the dual group, in optIds
+# 5. generator: vlpt_more field in the dual group, in optIds, with
+# short labels and field-notes below (never in the label, so the
+# input / select on the right is not squeezed); no vlpt2 checkbox.
 grep -Fq 'id="vlpt_more"' "$ROOT/index.html" || fail "generator vlpt_more field missing"
 grep -Fq "'vlpt_more'" "$ROOT/index.html" || fail "generator optIds missing vlpt_more"
 awk '/双内核可选协议/,/Xray可选协议/' "$ROOT/index.html" | grep -Fq 'id="vlpt_more"' || fail "vlpt_more not in dual group"
+grep -Fq 'data-proto="vlpt2"' "$ROOT/index.html" && fail "generator vlpt2 checkbox must be removed"
+grep -Fq 'class="field-note"' "$ROOT/index.html" || fail "generator field-note missing"
+grep -Fq '只勾选上方即只创建一个' "$ROOT/index.html" || fail "generator vlpt_more note missing"
+grep -Fq 'vlpt 与更多实例共用' "$ROOT/index.html" || fail "generator kernel note missing"
+grep -Fq 'Vless-tcp-reality 更多实例（' "$ROOT/index.html" && fail "vlpt_more label must be short (note goes below)"
+grep -Fq 'Vless-tcp-reality 内核（' "$ROOT/index.html" && fail "vlpt_kernel label must be short (note goes below)"
+grep -Fq 'grid-column: 1 / -1' "$ROOT/index.html" || fail "field-note must span the grid row"
+# 6. install loop start index: 2 without vlpt2, 3 with vlpt2
+python3 - "$ROOT/argosbx.sh" "$TMP/xray_loop.sh" << 'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r"# vlpt more instances on Xray.*?^fi\n\n", t, re.S | re.M)
+assert m, "vlpt-more xray module not found in built script"
+open(sys.argv[2], "w").write(m.group(0))
+PY
+mkdir -p "$TMP/agsbx"
+out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlpt_more="20002,20003"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
+grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" || fail "loop without vlpt2 must start at 2: $out"
+grep -Fq '"tag":"reality-vision-3"' "$TMP/agsbx/xr.json" || fail "loop without vlpt2 must include 3: $out"
+: > "$TMP/agsbx/xr.json"
+out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlp2=yes; vlpt_more="20003,20004"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
+grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" && fail "loop with vlpt2 must not overwrite instance 2"
+grep -Fq '"tag":"reality-vision-3"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must start at 3: $out"
+grep -Fq '"tag":"reality-vision-4"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must include 4: $out"
 echo "PASS: vlpt loop (vlpt_more)"

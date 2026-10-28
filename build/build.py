@@ -256,18 +256,24 @@ def build_index():
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">
             <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
-            <label><input type="checkbox" data-proto="vlpt2"> Vless-tcp-reality-vision-2（第二实例，与 vlpt 同 uuid、同密钥对、不同端口，可分流到不同出口） <span class="pill">vlpt2</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt2">
-            <label for="vlpt_more">Vless-tcp-reality 更多实例（第3个起，循环生成，不用再加变量） <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10003,10004">
-            <label for="vlpt_kernel">Vless-tcp-reality 内核（vlpt、vlpt2 与更多实例共用） <span class="pill">vlpt_kernel</span></label>
+            <label for="vlpt_more">Vless-tcp-reality 更多实例 <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10002,10003">
+            <div class="field-note">只勾选上方即只创建一个；这里填第 2 个起的实例，循环生成，不用再加变量；与第 1 个实例同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
+            <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
               <option value="sb">强制 Sing-box</option>
             </select>
+            <div class="field-note">vlpt 与更多实例共用。</div>
           </div>
         </div>
         <div class="protocol-group separator">
           <h3>Xray可选协议：</h3>''', "index-vlpt-dual-group", 1)
+    # field-note: spans the whole protocol-grid row, small and grey, so
+    # a long explanation never widens the label column or squeezes the
+    # input / select on its right.
+    h = replace(h, "    .protocol-grid {\n      display: grid;",
+                "    .field-note {\n      grid-column: 1 / -1;\n      font-size: 12px;\n      color: var(--sub);\n      margin-top: -4px;\n    }\n    .protocol-grid {\n      display: grid;", "index-field-note-css", 1)
     h = replace(h, """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';""",
@@ -275,14 +281,33 @@ def build_index():
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
-      const vlessTcpReality2Checkbox = document.querySelector('[data-proto="vlpt2"]');
+      const vlptMoreInput = document.getElementById('vlpt_more');
       if (vlptKernelSelect) {
-        const vlptAny = vlessTcpRealityCheckbox.checked || (vlessTcpReality2Checkbox && vlessTcpReality2Checkbox.checked);
-        vlptKernelSelect.disabled = !vlptAny;
-        if (!vlptAny) vlptKernelSelect.value = '';
+        vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
+      }
+      if (vlptMoreInput) {
+        vlptMoreInput.disabled = !vlessTcpRealityCheckbox.checked;
+        if (!vlessTcpRealityCheckbox.checked) vlptMoreInput.value = '';
       }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
                 "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
+    # Paste-back migration for the removed vlpt2 checkbox: an old
+    # command with vlpt2=PORT (and possibly vlpt_more=3+ ports) becomes
+    # vlpt + vlpt_more=PORT,old-ports, so the 2nd instance is not
+    # silently dropped by render() (there is no vlpt2 UI element any
+    # more). Script-side vlpt2 is unchanged for old sh.txt / vars.env.
+    h = replace(h, "    isUpdatingFromOutput = false;",
+                """    if (params['vlpt2'] !== undefined) {
+      const vm = document.getElementById('vlpt_more');
+      if (vm) {
+        const cur = (vm.value || '').trim();
+        vm.value = cur ? params['vlpt2'] + ',' + cur : params['vlpt2'];
+      }
+      const ck = document.querySelector('[data-proto="vlpt"]');
+      if (ck) ck.checked = true;
+    }
+    isUpdatingFromOutput = false;""", "index-vlpt2-paste-migration", 1)
     h = replace(h, """  generateUuidBtn.addEventListener('click', () => {
     uuidInput.value = crypto.randomUUID();
     render();
@@ -313,8 +338,8 @@ def build_index():
                 '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n            <label><input type="checkbox" data-proto="vmtls"> Vmess-ws-tls <span class="pill">vmtls</span></label><input type="text" placeholder="留空则随机端口" data-port="vmtls">\n', "index-vmtls-checkbox", 1)
     h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];",
                 "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','vlpt2','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
-    h = replace(h, "      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;",
-                "      const isRealityEnabled = vlessTcpRealityCheckbox.checked || (document.querySelector('[data-proto=\"vlpt2\"]') || {}).checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;", "index-vlpt2-reym-dynamic", 1)
+    # (vlpt2 reym-dynamic is gone with the vlpt2 checkbox; the parse
+    # line below keeps vlpt2 only so paste-back can migrate it.)
     h = replace(h, "    const isRealityEnabled = params['vlpt'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;",
                 "    const isRealityEnabled = params['vlpt'] !== undefined || params['vlpt2'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;", "index-vlpt2-reym-parse", 1)
     h = replace(h, "      if (command === 'rep') {",
@@ -502,10 +527,14 @@ fi
     t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
                 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;', "vlpt2-clgz", 1)
 
-    # --- vlpt loop (private): vlpt_more="10003,10004" = instances 3, 4,
-    # ... in order, no new variable per instance. vlpt/vlpt2 stay as
-    # instances 1/2 for backward compatibility (old commands, vars.env,
-    # sh.txt, port files all keep working); the loop only adds 3+.
+    # --- vlpt loop (private): vlpt_more="10002,10003" = instances 2, 3,
+    # ... in order, no new variable per instance. vlpt stays as instance
+    # 1; vlpt2 stays in the script for backward compatibility (old
+    # commands, vars.env, sh.txt, port files all keep working), and
+    # when vlpt2 is set vlpt_more starts at 3 to avoid overwriting it.
+    # The generator no longer shows a vlpt2 checkbox: checking vlpt
+    # alone creates exactly one instance, extra instances come from
+    # vlpt_more only.
     # Shared uuid/keypair/SNI/flow, own port and tag -N, shared vlpt_on.
     t = replace(t, "for v in uuid vlpt vlpt2 vmpt vmtls",
                 "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls", "vlpt-more-top-lists")
