@@ -45,7 +45,7 @@ BLOCK=$(awk '/^vlpt_on=""$/ {p=1} p {print} /^fi$/ && p {exit}' "$F")
 [ -n "$BLOCK" ] || { echo "FAIL: could not extract vlpt_on block"; FAIL=1; }
 run_case() { # $1=label $2=vlpt_kernel_or_EMPTY $3=want $4..=flags to set to yes
   local label="$1" k="$2" want="$3"; shift 3
-  vlp=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; vlpt_kernel=""
+  vlp=yes; vlp2=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; vlpt_kernel=""
   for f in "$@"; do eval "$f=yes"; done
   [ "$k" != "EMPTY" ] && vlpt_kernel="$k"
   eval "$BLOCK"
@@ -58,12 +58,20 @@ run_case "vlpt+tuic explicit xray" xray xray tup
 run_case "vlpt+xhttp explicit sb" sb sb xhp
 run_case "vlpt+tuic invalid kernel" bogus sb tup
 # no vlpt at all -> empty, regardless of other protocols
-vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=yes; anp=""; arp=""; ssp=""; vlpt_kernel=""
+vlp=""; vlp2=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=yes; anp=""; arp=""; ssp=""; vlpt_kernel=""
 eval "$BLOCK"
 [ -z "$vlpt_on" ] || { echo "FAIL: no-vlpt vlpt_on=[$vlpt_on] want empty"; FAIL=1; }
+# vlpt2 alone (vlp empty, vlp2 set) -> vlpt_on computed, xray by default
+vlp=""; vlp2=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; vlpt_kernel=""
+eval "$BLOCK"
+[ "$vlpt_on" = "xray" ] || { echo "FAIL: vlpt2-alone vlpt_on=[$vlpt_on] want xray"; FAIL=1; }
+# vlpt2 alone + tuic -> sb, same auto rule as vlpt
+vlp=""; vlp2=yes; tup=yes
+eval "$BLOCK"
+[ "$vlpt_on" = "sb" ] || { echo "FAIL: vlpt2+tuic vlpt_on=[$vlpt_on] want sb"; FAIL=1; }
 # ins() branch decisions under the same cases (conditions as in built file)
 # vlpt+tuic auto: sb only (first branch false via vlpt_on=sb, second true)
-vlp=yes; tup=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; anp=""; arp=""; ssp=""; vlpt_kernel=""; eval "$BLOCK"
+vlp=yes; vlp2=""; tup=yes; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; anp=""; arp=""; ssp=""; vlpt_kernel=""; eval "$BLOCK"
 if [ "$vlpt_on" = "sb" ] && { [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; }; then echo "FAIL: vlpt+tuic auto should not be xray-only"; FAIL=1; fi
 if [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ] && [ "$vlpt_on" != "xray" ]; then :; else echo "FAIL: vlpt+tuic auto should be sb-only"; FAIL=1; fi
 # vlpt alone auto: xray only

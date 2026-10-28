@@ -31,7 +31,7 @@ vars_merge(){
     case "$name" in *[!A-Za-z0-9_]*|'') continue;; esac
     if [ -z "${!name+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
-  for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
+  for v in vlpt vlpt2 vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
   done
   echo "增量更新失败：合并后没有任何协议变量，请在 add 命令前至少设置一个新增或修改的协议变量"
@@ -41,7 +41,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
+  for v in uuid vlpt vlpt2 vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -434,7 +434,7 @@ sub_https_display(){
 # managers (guarded, so this module alone still works) so that
 # enabling ufw later and running ufwsync opens everything, not just
 # the node ports:
-#   tcp only: vlpt, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
+#   tcp only: vlpt, vlpt2, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
 #   tcp+udp:  sspt, sopt
 # Why xcpt is tcp only even though its display name says TCP/UDP:
@@ -475,6 +475,7 @@ _ufw_emit(){
 }
 ufw_desired_rules(){
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
+  _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   _ufw_emit "$xhp" xhpt "$port_xh" "$HOME/agsbx/port_xh" "tcp"
   _ufw_emit "$vxp" vxpt "$port_vx" "$HOME/agsbx/port_vx" "tcp"
   _ufw_emit "$vwp" vwpt "$port_vw" "$HOME/agsbx/port_vw" "tcp"
@@ -492,7 +493,7 @@ ufw_desired_rules(){
 }
 _ufw_fallback_rules(){
   local spec f protos p pr
-  for spec in "port_vl_re:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+  for spec in "port_vl_re:tcp" "port_vl_re2:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
     f="${spec%%:*}"; protos="${spec#*:}"
     p=$(_ufw_port "" "$HOME/agsbx/$f")
     if [ -z "$p" ]; then continue; fi
@@ -787,7 +788,7 @@ fw_status(){
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vlpt2 vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -795,6 +796,7 @@ cmd+="$main${*:+ $*}"
 [ "$cmd" != "$main" ] && echo "$cmd" > "$HOME/agsbx/sh.txt"
 ;; esac
 [ -z "${vlpt+x}" ] || vlp=yes
+[ -z "${vlpt2+x}" ] || vlp2=yes
 [ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }
 [ -z "${vmtls+x}" ] || vmt=yes
 [ -z "${vwpt+x}" ] || { vwp=yes; vmag=yes; }
@@ -812,13 +814,14 @@ cmd+="$main${*:+ $*}"
 [ -z "${xcpt+x}" ] || xcp=yes
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then
 if [ "$1" = "rep" ]; then
-[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vlp2" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 else
-[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vlp2" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 export uuid=${uuid:-''}
 export port_vl_re=${vlpt:-''}
+export port_vl_re2=${vlpt2:-''}
 export port_vm_ws=${vmpt:-''}
 export port_vm_tls=${vmtls:-''}
 export port_vw=${vwpt:-''}
@@ -1237,7 +1240,7 @@ cat > "$HOME/agsbx/xr.json" <<EOF
   "inbounds": [
 EOF
 insuuid
-if [ -n "$xhp" ] || [ -n "$vlp" ]; then
+if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then
 if [ -z "$ym_vl_re" ]; then
 ym_vl_re=apple.com
 fi
@@ -1571,6 +1574,66 @@ EOF
 else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
+# vlpt2 on Xray (private module, second vlpt instance).
+# Inserted into installxray() after the vlpt block. Only runs when
+# vlpt2 is selected AND vlpt_on=xray (vlpt_on is shared with vlpt:
+# vlpt_kernel applies to both instances, so both instances always
+# land on the same kernel; they are distinguished by port and by
+# inbound tag, which is what egress inbound: routing needs).
+# Shares vlpt's Xray Reality keypair (xrk) and uuid, so pbk/sid are
+# the same as vlpt's; only the port, tag and display name differ.
+# If vlpt2 is not selected, vlp2 becomes the recovery dummy
+# (vlpt2argo), mirroring the vlpt block's vlptargo.
+if [ -n "$vlp2" ] && [ "$vlpt_on" = "xray" ]; then
+vlp2=vlpt2
+if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
+if [ -z "$port_vl_re2" ] && [ ! -e "$HOME/agsbx/port_vl_re2" ]; then
+port_vl_re2=$(shuf -i 10000-65535 -n 1)
+echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
+elif [ -n "$port_vl_re2" ]; then
+echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
+fi
+port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
+echo "Vless-tcp-reality-v2端口：$port_vl_re2"
+cat >> "$HOME/agsbx/xr.json" <<EOF
+        {
+            "tag":"reality-vision-2",
+            "listen": "::",
+            "port": $port_vl_re2,
+            "protocol": "vless",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}",
+                        "flow": "xtls-rprx-vision"
+                    }
+                ],
+                "decryption": "none"
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "reality",
+                "realitySettings": {
+                    "fingerprint": "chrome",
+                    "dest": "${ym_vl_re}:443",
+                    "serverNames": [
+                      "${ym_vl_re}"
+                    ],
+                    "privateKey": "$private_key_x",
+                    "shortIds": ["$short_id_x"]
+                }
+            },
+          "sniffing": {
+          "enabled": true,
+          "destOverride": ["http", "tls", "quic"],
+          "metadataOnly": false
+      }
+    },
+EOF
+else
+[ -n "$vlp2" ] || vlp2=vlpt2argo
+fi
+
 }
 
 installsb(){
@@ -1814,6 +1877,69 @@ EOF
 else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
+# vlpt2 on Sing-box (private module, second vlpt instance).
+# Inserted into installsb() after the vlpt-sb block, before sspt.
+# Only runs when vlpt2 is selected AND vlpt_on=sb (shared with vlpt).
+# Shares vlpt's Sing-box Reality keypair (sbk, also shared with arpt),
+# so pbk/sid are the same as vlpt's; only port, tag and display
+# name differ. If vlpt2 is not selected, vlp2 becomes vlpt2argo.
+if [ -n "$vlp2" ] && [ "$vlpt_on" = "sb" ]; then
+vlp2=vlpt2
+if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
+echo "$ym_vl_re" > "$HOME/agsbx/ym_vl_re"
+echo "Reality域名：$ym_vl_re"
+mkdir -p "$HOME/agsbx/sbk"
+if [ ! -e "$HOME/agsbx/sbk/private_key" ]; then
+key_pair=$("$HOME/agsbx/sing-box" generate reality-keypair)
+private_key=$(echo "$key_pair" | awk '/PrivateKey/ {print $2}' | tr -d '"')
+public_key=$(echo "$key_pair" | awk '/PublicKey/ {print $2}' | tr -d '"')
+short_id=$("$HOME/agsbx/sing-box" generate rand --hex 4)
+echo "$private_key" > "$HOME/agsbx/sbk/private_key"
+echo "$public_key" > "$HOME/agsbx/sbk/public_key"
+echo "$short_id" > "$HOME/agsbx/sbk/short_id"
+fi
+private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
+public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
+short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
+if [ -z "$port_vl_re2" ] && [ ! -e "$HOME/agsbx/port_vl_re2" ]; then
+port_vl_re2=$(shuf -i 10000-65535 -n 1)
+echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
+elif [ -n "$port_vl_re2" ]; then
+echo "$port_vl_re2" > "$HOME/agsbx/port_vl_re2"
+fi
+port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
+echo "Vless-tcp-reality-v2端口（Sing-box）：$port_vl_re2"
+cat >> "$HOME/agsbx/sb.json" <<EOF
+    {
+        "type": "vless",
+        "tag": "vl-reality-sb-2",
+        "listen": "::",
+        "listen_port": ${port_vl_re2},
+        "users": [
+            {
+                "uuid": "${uuid}",
+                "flow": "xtls-rprx-vision"
+            }
+        ],
+        "tls": {
+            "enabled": true,
+            "server_name": "${ym_vl_re}",
+            "reality": {
+                "enabled": true,
+                "handshake": {
+                    "server": "${ym_vl_re}",
+                    "server_port": 443
+                },
+                "private_key": "$private_key_s",
+                "short_id": ["$short_id_s"]
+            }
+        }
+    },
+EOF
+else
+[ -n "$vlp2" ] || vlp2=vlpt2argo
+fi
+
 if [ -n "$ssp" ]; then
 ssp=sspt
 if [ ! -e "$HOME/agsbx/sskey" ]; then
@@ -2172,8 +2298,9 @@ fi
 #   AND). Comma lists inside one condition are OR, rules in order are
 #   first-match-wins. A rule with an unknown condition or no valid
 #   port is skipped whole, never weakened to a partial AND.
-#   inbound: values may be a protocol variable name (vlpt, xhpt, hypt,
-#   ...) instead of the server inbound tag: egress_inbound_tags expands
+#   inbound: values may be a protocol variable name (vlpt, vlpt2, xhpt,
+#   hypt, ...) instead of the server inbound tag: egress_inbound_tags
+#   expands
 #   it to the real tag(s) for that protocol, so users do not have to
 #   remember that vlpt is reality-vision on Xray but vl-reality-sb on
 #   Sing-box, or that hypt is hy2-xr on Xray but hy2-sb on Sing-box.
@@ -2206,6 +2333,7 @@ egress_inbound_tags(){
   low=$(printf '%s' "$item" | tr 'A-Z' 'a-z')
   case "$low" in
     vlpt) echo "reality-vision,vl-reality-sb";;
+    vlpt2) echo "reality-vision-2,vl-reality-sb-2";;
     xhpt) echo "xhttp-reality";;
     vxpt) echo "vless-xhttp";;
     vwpt) echo "vless-ws";;
@@ -2724,8 +2852,10 @@ fi
 }
 ins(){
 # vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+# vlpt2 shares vlpt_on (and vlpt_kernel): both instances land on the
+# same kernel, distinguished by port and inbound tag only.
 vlpt_on=""
-if [ -n "$vlp" ]; then
+if [ -n "$vlp" ] || [ -n "${vlp2:-}" ]; then
   case "${vlpt_kernel:-auto}" in
     xray) vlpt_on="xray" ;;
     sb|singbox|sing-box) vlpt_on="sb" ;;
@@ -2840,7 +2970,7 @@ mkdir -p "$HOME/bin"
 (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vlp2=\"${port_vl_re2}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -3239,7 +3369,7 @@ cludpxcpt1(){
 echo "- ${sxname}Xhttp-UDP-$hostname"
 }
 fi
-if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+if grep -q '"tag":"reality-vision"' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q '"tag": "vl-reality-sb"' "$HOME/agsbx/sb.json" 2>/dev/null; then
 echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
 port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
 vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
@@ -3294,6 +3424,64 @@ EOF
 }
 clvlpt1(){
 echo "- ${sxname}vless-reality-vision-$hostname"
+}
+fi
+if grep -q '"tag":"reality-vision-2"' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q '"tag": "vl-reality-sb-2"' "$HOME/agsbx/sb.json" 2>/dev/null; then
+if grep -q '"tag": "vl-reality-sb-2"' "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt2_pbk="$public_key_s"; vlpt2_sid="$short_id_s"; else vlpt2_pbk="$public_key_x"; vlpt2_sid="$short_id_x"; fi
+echo "💣节点信息如下："
+port_vl_re2=$(cat "$HOME/agsbx/port_vl_re2")
+vl_link2="vless://$uuid@$reality_addr:$port_vl_re2?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt2_pbk&sid=$vlpt2_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-2-$hostname"
+echo "$vl_link2" >> "$HOME/agsbx/jhsub.txt"
+echo "$vl_link2"
+echo
+sbvlpt2(){
+cat <<EOF
+{
+"type": "vless",
+"tag": "${sxname}vless-2-$hostname",
+"server": "$reality_addr",
+"server_port": $port_vl_re2,
+"uuid": "$uuid",
+"flow": "xtls-rprx-vision",
+"tls": {
+"enabled": true,
+"server_name": "$ym_vl_re",
+"utls": {
+"enabled": true,
+"fingerprint": "chrome"
+},
+"reality": {
+"enabled": true,
+"public_key": "$vlpt2_pbk",
+"short_id": "$vlpt2_sid"
+}
+}
+},
+EOF
+}
+sbvlpt2_1(){
+echo "\"${sxname}vless-2-$hostname\","
+}
+clvlpt2(){
+cat <<EOF
+- name: ${sxname}vless-reality-vision-2-$hostname
+type: vless
+server: $reality_addr
+port: $port_vl_re2
+uuid: $uuid
+network: tcp
+udp: true
+tls: true
+flow: xtls-rprx-vision
+servername: $ym_vl_re
+reality-opts:
+public-key: $vlpt2_pbk
+short-id: $vlpt2_sid
+client-fingerprint: chrome
+EOF
+}
+clvlpt2_1(){
+echo "- ${sxname}vless-reality-vision-2-$hostname"
 }
 fi
 if grep ss-2022 "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
@@ -3919,10 +4107,10 @@ out=$($f)
 [ -n "$out" ] && printf "%s\n" "$out"
 fi
 }
-sbxy="$(get_func sbvlpt; get_func sbsspt; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
-clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
-sbgz="$(get_func sbvlpt1; get_func sbsspt1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
-clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
+sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbsspt; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
+clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clsspt; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
+sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
+clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
 sbgz=$(printf "%s\n" "$sbgz" | sed '$ s/,$//')
 cat > $HOME/agsbx/sbox.json <<EOF
 {

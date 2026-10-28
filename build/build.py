@@ -256,7 +256,8 @@ def build_index():
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">
             <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
-            <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
+            <label><input type="checkbox" data-proto="vlpt2"> Vless-tcp-reality-vision-2（第二实例，与 vlpt 同 uuid、同密钥对、不同端口，可分流到不同出口） <span class="pill">vlpt2</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt2">
+            <label for="vlpt_kernel">Vless-tcp-reality 内核（vlpt 与 vlpt2 共用） <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
@@ -273,9 +274,11 @@ def build_index():
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
+      const vlessTcpReality2Checkbox = document.querySelector('[data-proto="vlpt2"]');
       if (vlptKernelSelect) {
-        vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
-        if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
+        const vlptAny = vlessTcpRealityCheckbox.checked || (vlessTcpReality2Checkbox && vlessTcpReality2Checkbox.checked);
+        vlptKernelSelect.disabled = !vlptAny;
+        if (!vlptAny) vlptKernelSelect.value = '';
       }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
                 "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
@@ -308,7 +311,11 @@ def build_index():
     h = replace(h, '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n',
                 '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n            <label><input type="checkbox" data-proto="vmtls"> Vmess-ws-tls <span class="pill">vmtls</span></label><input type="text" placeholder="留空则随机端口" data-port="vmtls">\n', "index-vmtls-checkbox", 1)
     h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];",
-                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
+                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','vlpt2','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
+    h = replace(h, "      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;",
+                "      const isRealityEnabled = vlessTcpRealityCheckbox.checked || (document.querySelector('[data-proto=\"vlpt2\"]') || {}).checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;", "index-vlpt2-reym-dynamic", 1)
+    h = replace(h, "    const isRealityEnabled = params['vlpt'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;",
+                "    const isRealityEnabled = params['vlpt'] !== undefined || params['vlpt2'] !== undefined || params['xhpt'] !== undefined || params['arpt'] !== undefined;", "index-vlpt2-reym-parse", 1)
     h = replace(h, "      if (command === 'rep') {",
                 "      if (command === 'rep' || command === 'add') {", "index-add-handler", 1)
     h = replace(h, "output.value = (vars ? vars + ' ' : '') + selectedCommand + ' rep';",
@@ -396,8 +403,10 @@ def main():
     #  the current single-xray default. No backward-compat keep: unless
     #  vlpt_kernel=xray is explicitly set, an old install is migrated.
     vlpt_on = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
+# vlpt2 shares vlpt_on (and vlpt_kernel): both instances land on the
+# same kernel, distinguished by port and inbound tag only.
 vlpt_on=""
-if [ -n "$vlp" ]; then
+if [ -n "$vlp" ] || [ -n "${vlp2:-}" ]; then
   case "${vlpt_kernel:-auto}" in
     xray) vlpt_on="xray" ;;
     sb|singbox|sing-box) vlpt_on="sb" ;;
@@ -442,6 +451,54 @@ fi
                 '          "public_key": "$vlpt_pbk",\n          "short_id": "$vlpt_sid"', "vlpt-sb-config-pbk", 1)
     t = replace(t, '    public-key: $public_key_x    \n    short-id: $short_id_x',
                 '    public-key: $vlpt_pbk    \n    short-id: $vlpt_sid', "vlpt-clash-pbk", 1)
+
+    # --- vlpt2 second instance (private): vlpt2 = second vless-tcp-
+    # reality-vision, same uuid and same Reality keypair per kernel as
+    # vlpt, different port (port_vl_re2) and inbound tag
+    # (reality-vision-2 on Xray, vl-reality-sb-2 on Sing-box).
+    # Shared vlpt_kernel / vlpt_on: both instances always land on the
+    # same kernel, so a vlpt rule never matches vlpt2 and vice versa;
+    # routing them apart is inbound:vlpt=>node1 + inbound:vlpt2=>node2.
+    # Main script only in this round (container/SAP not yet).
+    t = replace(t, "for v in uuid vlpt vmpt vmtls",
+                "for v in uuid vlpt vlpt2 vmpt vmtls", "vlpt2-top-lists")
+    t = replace(t, '[ -z "${vlpt+x}" ] || vlp=yes',
+                '[ -z "${vlpt+x}" ] || vlp=yes\n[ -z "${vlpt2+x}" ] || vlp2=yes', "vlpt2-flag", 1)
+    t = replace(t, '[ "$vlp" = yes ]',
+                '[ "$vlp" = yes ] || [ "$vlp2" = yes ]', "vlpt2-guards")
+    t = replace(t, "export port_vl_re=${vlpt:-''}",
+                "export port_vl_re=${vlpt:-''}\nexport port_vl_re2=${vlpt2:-''}", "vlpt2-port-export", 1)
+    _bs = chr(92)
+    t = replace(t, '$vlp=' + _bs + '"${port_vl_re}' + _bs + '"',
+                '$vlp=' + _bs + '"${port_vl_re}' + _bs + '" $vlp2=' + _bs + '"${port_vl_re2}' + _bs + '"', "vlpt2-recovery", 1)
+    t = replace(t, 'if [ -n "$xhp" ] || [ -n "$vlp" ]; then',
+                'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then', "vlpt2-xray-keypair-setup", 1)
+    # installxray vlpt2 block, after the vlpt block, before installxray ends.
+    vlpt2_xray = read("modules/vlpt2-xray.sh")
+    t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n}\n\ninstallsb(){',
+                'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt2_xray + '}\n\ninstallsb(){', "vlpt2-xray-block", 1)
+    # installsb vlpt2 block, after the vlpt-sb block, before sspt.
+    vlpt2_sb = read("modules/vlpt2-sb.sh")
+    t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
+                vlpt2_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt2-sb-block", 1)
+    # display: tighten the vlpt guard to exact tags, otherwise a
+    # vlpt2-only install would match reality-vision-2 / vl-reality-sb-2
+    # by substring and show a broken vlpt link with no port file.
+    t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then',
+                'if grep -q \'"tag":"reality-vision"\' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q \'"tag": "vl-reality-sb"\' "$HOME/agsbx/sb.json" 2>/dev/null; then', "vlpt2-display-guard-tighten", 1)
+    vlpt2_display = read("modules/vlpt2-display.sh")
+    t = replace(t, 'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\nif grep ss-2022',
+                'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\n' + vlpt2_display + 'if grep ss-2022', "vlpt2-display-block", 1)
+    # subscriptions: vlpt2 nodes in sing-box JSON, Clash YAML and the
+    # outbounds lists, with distinct tags (vless-2 / vision-2).
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbsspt;', "vlpt2-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt;',
+                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clsspt;', "vlpt2-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1;', "vlpt2-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
+                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;', "vlpt2-clgz", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")

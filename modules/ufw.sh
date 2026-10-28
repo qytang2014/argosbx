@@ -12,7 +12,7 @@
 # managers (guarded, so this module alone still works) so that
 # enabling ufw later and running ufwsync opens everything, not just
 # the node ports:
-#   tcp only: vlpt, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
+#   tcp only: vlpt, vlpt2, xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
 #   tcp+udp:  sspt, sopt
 # Why xcpt is tcp only even though its display name says TCP/UDP:
@@ -53,6 +53,7 @@ _ufw_emit(){
 }
 ufw_desired_rules(){
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
+  _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   _ufw_emit "$xhp" xhpt "$port_xh" "$HOME/agsbx/port_xh" "tcp"
   _ufw_emit "$vxp" vxpt "$port_vx" "$HOME/agsbx/port_vx" "tcp"
   _ufw_emit "$vwp" vwpt "$port_vw" "$HOME/agsbx/port_vw" "tcp"
@@ -70,7 +71,7 @@ ufw_desired_rules(){
 }
 _ufw_fallback_rules(){
   local spec f protos p pr
-  for spec in "port_vl_re:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+  for spec in "port_vl_re:tcp" "port_vl_re2:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
     f="${spec%%:*}"; protos="${spec#*:}"
     p=$(_ufw_port "" "$HOME/agsbx/$f")
     if [ -z "$p" ]; then continue; fi
