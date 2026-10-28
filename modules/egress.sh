@@ -32,9 +32,9 @@
 #   AND). Comma lists inside one condition are OR, rules in order are
 #   first-match-wins. A rule with an unknown condition or no valid
 #   port is skipped whole, never weakened to a partial AND.
-#   inbound: values may be a protocol variable name (vlpt, vlpt2, xhpt,
-#   hypt, ...) instead of the server inbound tag: egress_inbound_tags
-#   expands
+#   inbound: values may be a protocol variable name (vlpt, vlpt2,
+#   vlpt3, vlpt4, ... any vlptN, xhpt, hypt, ...) instead of the server
+#   inbound tag: egress_inbound_tags expands
 #   it to the real tag(s) for that protocol, so users do not have to
 #   remember that vlpt is reality-vision on Xray but vl-reality-sb on
 #   Sing-box, or that hypt is hy2-xr on Xray but hy2-sb on Sing-box.
@@ -67,7 +67,7 @@ egress_inbound_tags(){
   low=$(printf '%s' "$item" | tr 'A-Z' 'a-z')
   case "$low" in
     vlpt) echo "reality-vision,vl-reality-sb";;
-    vlpt2) echo "reality-vision-2,vl-reality-sb-2";;
+    vlpt[0-9]*) echo "reality-vision-${low#vlpt},vl-reality-sb-${low#vlpt}";;
     xhpt) echo "xhttp-reality";;
     vxpt) echo "vless-xhttp";;
     vwpt) echo "vless-ws";;

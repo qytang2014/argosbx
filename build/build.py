@@ -237,9 +237,9 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];", "index-optids", 1)
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'vlpt_more'];", "index-optids", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
-                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
+                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';\n    document.getElementById('vlpt_more').value = '';", "index-reset-cert", 1)
     # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
     # Listing vlpt under "Xray可选协议" was misleading once vlpt became
     # dual-support: it is not Xray-only any more. The new first group holds
@@ -257,7 +257,8 @@ def build_index():
           <div class="protocol-grid">
             <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
             <label><input type="checkbox" data-proto="vlpt2"> Vless-tcp-reality-vision-2（第二实例，与 vlpt 同 uuid、同密钥对、不同端口，可分流到不同出口） <span class="pill">vlpt2</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt2">
-            <label for="vlpt_kernel">Vless-tcp-reality 内核（vlpt 与 vlpt2 共用） <span class="pill">vlpt_kernel</span></label>
+            <label for="vlpt_more">Vless-tcp-reality 更多实例（第3个起，循环生成，不用再加变量） <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10003,10004">
+            <label for="vlpt_kernel">Vless-tcp-reality 内核（vlpt、vlpt2 与更多实例共用） <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
@@ -304,7 +305,7 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'vlpt_more', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---
@@ -405,8 +406,9 @@ def main():
     vlpt_on = '''# vlpt dual-support: vlpt_kernel=auto (default) / xray / sb
 # vlpt2 shares vlpt_on (and vlpt_kernel): both instances land on the
 # same kernel, distinguished by port and inbound tag only.
+# vlpt_more (loop, instances 3+) shares vlpt_on too.
 vlpt_on=""
-if [ -n "$vlp" ] || [ -n "${vlp2:-}" ]; then
+if [ -n "$vlp" ] || [ -n "${vlp2:-}" ] || [ -n "${vlpt_more:-}" ]; then
   case "${vlpt_kernel:-auto}" in
     xray) vlpt_on="xray" ;;
     sb|singbox|sing-box) vlpt_on="sb" ;;
@@ -499,6 +501,38 @@ fi
                 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1;', "vlpt2-sbgz", 1)
     t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
                 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;', "vlpt2-clgz", 1)
+
+    # --- vlpt loop (private): vlpt_more="10003,10004" = instances 3, 4,
+    # ... in order, no new variable per instance. vlpt/vlpt2 stay as
+    # instances 1/2 for backward compatibility (old commands, vars.env,
+    # sh.txt, port files all keep working); the loop only adds 3+.
+    # Shared uuid/keypair/SNI/flow, own port and tag -N, shared vlpt_on.
+    t = replace(t, "for v in uuid vlpt vlpt2 vmpt vmtls",
+                "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls", "vlpt-more-top-lists")
+    t = replace(t, '[ "$vlp2" = yes ]',
+                '[ "$vlp2" = yes ] || [ -n "$vlpt_more" ]', "vlpt-more-guards")
+    t = replace(t, 'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then',
+                'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ] || [ -n "$vlpt_more" ]; then', "vlpt-more-xray-keypair-setup", 1)
+    _bs2 = chr(92)
+    t = replace(t, '$vlp2=' + _bs2 + '"${port_vl_re2}' + _bs2 + '"',
+                '$vlp2=' + _bs2 + '"${port_vl_re2}' + _bs2 + '" vlpt_more=' + _bs2 + '"${vlpt_more}' + _bs2 + '"', "vlpt-more-recovery", 1)
+    vlpt_more_xray = read("modules/vlpt-more-xray.sh")
+    t = replace(t, '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n\n}\n\ninstallsb(){',
+                '[ -n "$vlp2" ] || vlp2=vlpt2argo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){', "vlpt-more-xray-block", 1)
+    vlpt_more_sb = read("modules/vlpt-more-sb.sh")
+    t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
+                vlpt_more_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt-more-sb-block", 1)
+    vlpt_more_display = read("modules/vlpt-more-display.sh")
+    t = replace(t, 'clvlpt2_1(){\necho "- ${sxname}vless-reality-vision-2-$hostname"\n}\nfi\nif grep ss-2022',
+                'clvlpt2_1(){\necho "- ${sxname}vless-reality-vision-2-$hostname"\n}\nfi\n' + vlpt_more_display + 'if grep ss-2022', "vlpt-more-display-block", 1)
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt2; get_func sbvlpt_more; get_func sbsspt;', "vlpt-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clsspt;',
+                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt2; get_func clvlpt_more; get_func clsspt;', "vlpt-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt2_1; get_func sbvlpt_more_1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clsspt1;',
+                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt2_1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
