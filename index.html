@@ -174,6 +174,12 @@
       color: var(--sub);
       margin-top: -4px;
     }
+    .section-note {
+      font-size: 12px;
+      color: var(--sub);
+      line-height: 1.6;
+      margin: 4px 0 12px;
+    }
     .protocol-grid {
       display: grid;
       grid-template-columns: auto 1fr; 
@@ -411,19 +417,18 @@
       <div class="grid-col">
       <section class="card protocol-port">
         <h2>必选内核协议端口：</h2>
+        <p class="section-note">端口用逗号分隔可创建多个实例：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口。目前仅 Vless-tcp-reality-vision 支持逗号多实例，其他协议后续同样适用，暂不要在其他协议的端口里写逗号。</p>
         <div class="protocol-group separator">
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">
-            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
-            <label for="vlpt_more">Vless-tcp-reality 更多实例 <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10002,10003">
-            <div class="field-note">只勾选上方即只创建一个；这里填第 2 个起的实例，循环生成，不用再加变量；与第 1 个实例同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
+            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空随机；逗号分隔多实例，如 10001, 或 ," data-port="vlpt">
             <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
               <option value="sb">强制 Sing-box</option>
             </select>
-            <div class="field-note">vlpt 与更多实例共用。</div>
+            <div class="field-note">所有 vlpt 实例共用此内核；同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
           </div>
         </div>
         <div class="protocol-group separator">
@@ -622,7 +627,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vmtls','vlpt','vlpt2','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
-  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'vlpt_more'];
+  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agn = document.getElementById('agn');
@@ -713,7 +718,6 @@
     document.getElementById('certmode').value = '';
     document.getElementById('certsrc').value = '';
     document.getElementById('vlpt_kernel').value = '';
-    document.getElementById('vlpt_more').value = '';
     document.getElementById('reym').value = '';
     document.getElementById('cfip').value = '';
     document.getElementById('alns').value = '';
@@ -739,14 +743,9 @@
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
-      const vlptMoreInput = document.getElementById('vlpt_more');
       if (vlptKernelSelect) {
         vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
         if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
-      }
-      if (vlptMoreInput) {
-        vlptMoreInput.disabled = !vlessTcpRealityCheckbox.checked;
-        if (!vlessTcpRealityCheckbox.checked) vlptMoreInput.value = '';
       }
 
       const isAlnsEnabled = alnsSelect.value === 'y';
@@ -880,7 +879,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'vlpt_more', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agn')) ordered.push('agn');
     if (keys.includes('agk')) ordered.push('agk');
@@ -983,12 +982,13 @@
       }
     });
 
-    if (params['vlpt2'] !== undefined) {
-      const vm = document.getElementById('vlpt_more');
-      if (vm) {
-        const cur = (vm.value || '').trim();
-        vm.value = cur ? params['vlpt2'] + ',' + cur : params['vlpt2'];
-      }
+    if (params['vlpt2'] !== undefined || params['vlpt_more'] !== undefined) {
+      const parts = [];
+      if (params['vlpt'] !== undefined) parts.push(params['vlpt']);
+      if (params['vlpt2'] !== undefined) parts.push(params['vlpt2']);
+      if (params['vlpt_more'] !== undefined) parts.push(params['vlpt_more']);
+      const pt = document.querySelector('[data-port="vlpt"]');
+      if (pt) pt.value = parts.join(',');
       const ck = document.querySelector('[data-proto="vlpt"]');
       if (ck) ck.checked = true;
     }

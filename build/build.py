@@ -237,9 +237,9 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'vlpt_more'];", "index-optids", 1)
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];", "index-optids", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
-                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';\n    document.getElementById('vlpt_more').value = '';", "index-reset-cert", 1)
+                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
     # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
     # Listing vlpt under "Xray可选协议" was misleading once vlpt became
     # dual-support: it is not Xray-only any more. The new first group holds
@@ -255,16 +255,14 @@ def build_index():
                 '''        <div class="protocol-group separator">
           <h3>双内核可选协议（Xray 与 Sing-box 都支持，默认自动单内核）：</h3>
           <div class="protocol-grid">
-            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">
-            <label for="vlpt_more">Vless-tcp-reality 更多实例 <span class="pill">vlpt_more</span></label><input type="text" id="vlpt_more" placeholder="多个端口用逗号分隔，例如 10002,10003">
-            <div class="field-note">只勾选上方即只创建一个；这里填第 2 个起的实例，循环生成，不用再加变量；与第 1 个实例同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
+            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空随机；逗号分隔多实例，如 10001, 或 ," data-port="vlpt">
             <label for="vlpt_kernel">Vless-tcp-reality 内核 <span class="pill">vlpt_kernel</span></label>
             <select id="vlpt_kernel">
               <option value="">默认 自动（只剩 Sing-box 时走 Sing-box，否则 Xray；旧安装下次更新即迁移，链接会变）</option>
               <option value="xray">强制 Xray（明确选 Xray 时不迁移，旧链接保留）</option>
               <option value="sb">强制 Sing-box</option>
             </select>
-            <div class="field-note">vlpt 与更多实例共用。</div>
+            <div class="field-note">所有 vlpt 实例共用此内核；同 uuid、同密钥对、不同端口，可分流到不同出口。</div>
           </div>
         </div>
         <div class="protocol-group separator">
@@ -273,7 +271,14 @@ def build_index():
     # a long explanation never widens the label column or squeezes the
     # input / select on its right.
     h = replace(h, "    .protocol-grid {\n      display: grid;",
-                "    .field-note {\n      grid-column: 1 / -1;\n      font-size: 12px;\n      color: var(--sub);\n      margin-top: -4px;\n    }\n    .protocol-grid {\n      display: grid;", "index-field-note-css", 1)
+                "    .field-note {\n      grid-column: 1 / -1;\n      font-size: 12px;\n      color: var(--sub);\n      margin-top: -4px;\n    }\n    .section-note {\n      font-size: 12px;\n      color: var(--sub);\n      line-height: 1.6;\n      margin: 4px 0 12px;\n    }\n    .protocol-grid {\n      display: grid;", "index-field-note-css", 1)
+    # Section note under "必选内核协议端口：": comma = multiple
+    # instances, empty = random. It lives under the card title, not
+    # inside any label, so it never squeezes an input. It states
+    # clearly that only vlpt supports comma lists today, so a user
+    # does not try a comma on another protocol and get an invalid port.
+    h = replace(h, '        <h2>必选内核协议端口：</h2>',
+                '        <h2>必选内核协议端口：</h2>\n        <p class="section-note">端口用逗号分隔可创建多个实例：逗号个数 + 1 = 实例数，空位表示随机端口。例如：留空 = 1 个随机；10001 = 1 个固定；, = 2 个随机；10001, = 第 1 个固定 10001、第 2 个随机；10001,10002 = 2 个固定；,, = 3 个随机。多个实例同 uuid、同密钥对、不同端口，可用 inbound:vlpt、inbound:vlpt2、inbound:vlpt3… 分流到不同出口。目前仅 Vless-tcp-reality-vision 支持逗号多实例，其他协议后续同样适用，暂不要在其他协议的端口里写逗号。</p>', "index-comma-section-note", 1)
     h = replace(h, """      const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';""",
@@ -281,33 +286,29 @@ def build_index():
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
-      const vlptMoreInput = document.getElementById('vlpt_more');
       if (vlptKernelSelect) {
         vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
         if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
-      }
-      if (vlptMoreInput) {
-        vlptMoreInput.disabled = !vlessTcpRealityCheckbox.checked;
-        if (!vlessTcpRealityCheckbox.checked) vlptMoreInput.value = '';
       }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
                 "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
-    # Paste-back migration for the removed vlpt2 checkbox: an old
-    # command with vlpt2=PORT (and possibly vlpt_more=3+ ports) becomes
-    # vlpt + vlpt_more=PORT,old-ports, so the 2nd instance is not
-    # silently dropped by render() (there is no vlpt2 UI element any
-    # more). Script-side vlpt2 is unchanged for old sh.txt / vars.env.
+    # Paste-back migration for removed vlpt2 / vlpt_more fields: an
+    # old command with vlpt2 and/or vlpt_more folds into the single
+    # vlpt comma list (vlpt, vlpt2, vlpt_more in order), so old
+    # instances are not silently dropped by render(). Script-side
+    # vlpt2/vlpt_more are unchanged for old sh.txt / vars.env.
     h = replace(h, "    isUpdatingFromOutput = false;",
-                """    if (params['vlpt2'] !== undefined) {
-      const vm = document.getElementById('vlpt_more');
-      if (vm) {
-        const cur = (vm.value || '').trim();
-        vm.value = cur ? params['vlpt2'] + ',' + cur : params['vlpt2'];
-      }
+                """    if (params['vlpt2'] !== undefined || params['vlpt_more'] !== undefined) {
+      const parts = [];
+      if (params['vlpt'] !== undefined) parts.push(params['vlpt']);
+      if (params['vlpt2'] !== undefined) parts.push(params['vlpt2']);
+      if (params['vlpt_more'] !== undefined) parts.push(params['vlpt_more']);
+      const pt = document.querySelector('[data-port="vlpt"]');
+      if (pt) pt.value = parts.join(',');
       const ck = document.querySelector('[data-proto="vlpt"]');
       if (ck) ck.checked = true;
     }
-    isUpdatingFromOutput = false;""", "index-vlpt2-paste-migration", 1)
+    isUpdatingFromOutput = false;""", "index-vlpt-comma-paste-migration", 1)
     h = replace(h, """  generateUuidBtn.addEventListener('click', () => {
     uuidInput.value = crypto.randomUUID();
     render();
@@ -330,7 +331,7 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'vlpt_more', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---
@@ -538,6 +539,14 @@ fi
     # Shared uuid/keypair/SNI/flow, own port and tag -N, shared vlpt_on.
     t = replace(t, "for v in uuid vlpt vlpt2 vmpt vmtls",
                 "for v in uuid vlpt vlpt2 vlpt_more vmpt vmtls", "vlpt-more-top-lists")
+    # --- vlpt comma list: vlpt itself is now the list (see
+    # modules/vlpt-comma.sh). Inserted before the port exports, after
+    # the rep/del guard block, so sh.txt (saved earlier) still shows
+    # the original comma command and exports use the expanded first
+    # item + vlpt_more rest.
+    vlpt_comma = read("modules/vlpt-comma.sh")
+    t = replace(t, 'fi\nexport uuid=${uuid:-\'\'}\n',
+                'fi\n' + vlpt_comma + 'export uuid=${uuid:-\'\'}\n', "vlpt-comma-expand", 1)
     t = replace(t, '[ "$vlp2" = yes ]',
                 '[ "$vlp2" = yes ] || [ -n "$vlpt_more" ]', "vlpt-more-guards")
     t = replace(t, 'if [ -n "$xhp" ] || [ -n "$vlp" ] || [ -n "$vlp2" ]; then',

@@ -52,11 +52,25 @@ _ufw_emit(){
   for pr in $protos; do echo "$p/$pr"; done
 }
 ufw_desired_rules(){
+  local _f _n _p
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
   _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   if [ -n "$vlpt_more" ]; then
     local _mp="" _moldifs="$IFS"; IFS=','; for _mp in $vlpt_more; do _mp=$(printf '%s' "$_mp" | xargs 2>/dev/null || printf '%s' "$_mp"); case "$_mp" in ''|*[!0-9]*) ;; *) echo "$_mp/tcp";; esac; done; IFS="$_moldifs"
   fi
+  # vlpt instances from a comma list may be random (empty item or
+  # "random"): their ports are only in port files, not in vlpt_more,
+  # so also emit every vlpt tag actually present in xr/sb.json
+  # (N >= 2, including instance 2 when it came from vlpt_more).
+  # sort -u in the callers dedupes against the emits above.
+  for _f in "$HOME/agsbx"/port_vl_re[0-9]*; do
+    [ -f "$_f" ] || continue
+    case "$_f" in *port_vl_re) continue;; esac
+    _n="${_f##*port_vl_re}"
+    if grep -q "\"tag\":\"reality-vision-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || grep -q "\"tag\": \"vl-reality-sb-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null; then
+      _p=$(_ufw_port "" "$_f"); [ -n "$_p" ] && echo "$_p/tcp"
+    fi
+  done
   _ufw_emit "$xhp" xhpt "$port_xh" "$HOME/agsbx/port_xh" "tcp"
   _ufw_emit "$vxp" vxpt "$port_vx" "$HOME/agsbx/port_vx" "tcp"
   _ufw_emit "$vwp" vwpt "$port_vw" "$HOME/agsbx/port_vw" "tcp"

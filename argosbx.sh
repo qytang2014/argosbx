@@ -474,11 +474,25 @@ _ufw_emit(){
   for pr in $protos; do echo "$p/$pr"; done
 }
 ufw_desired_rules(){
+  local _f _n _p
   _ufw_emit "$vlp" vlpt "$port_vl_re" "$HOME/agsbx/port_vl_re" "tcp"
   _ufw_emit "$vlp2" vlpt2 "$port_vl_re2" "$HOME/agsbx/port_vl_re2" "tcp"
   if [ -n "$vlpt_more" ]; then
     local _mp="" _moldifs="$IFS"; IFS=','; for _mp in $vlpt_more; do _mp=$(printf '%s' "$_mp" | xargs 2>/dev/null || printf '%s' "$_mp"); case "$_mp" in ''|*[!0-9]*) ;; *) echo "$_mp/tcp";; esac; done; IFS="$_moldifs"
   fi
+  # vlpt instances from a comma list may be random (empty item or
+  # "random"): their ports are only in port files, not in vlpt_more,
+  # so also emit every vlpt tag actually present in xr/sb.json
+  # (N >= 2, including instance 2 when it came from vlpt_more).
+  # sort -u in the callers dedupes against the emits above.
+  for _f in "$HOME/agsbx"/port_vl_re[0-9]*; do
+    [ -f "$_f" ] || continue
+    case "$_f" in *port_vl_re) continue;; esac
+    _n="${_f##*port_vl_re}"
+    if grep -q "\"tag\":\"reality-vision-$_n\"" "$HOME/agsbx/xr.json" 2>/dev/null || grep -q "\"tag\": \"vl-reality-sb-$_n\"" "$HOME/agsbx/sb.json" 2>/dev/null; then
+      _p=$(_ufw_port "" "$_f"); [ -n "$_p" ] && echo "$_p/tcp"
+    fi
+  done
   _ufw_emit "$xhp" xhpt "$port_xh" "$HOME/agsbx/port_xh" "tcp"
   _ufw_emit "$vxp" vxpt "$port_vx" "$HOME/agsbx/port_vx" "tcp"
   _ufw_emit "$vwp" vwpt "$port_vw" "$HOME/agsbx/port_vw" "tcp"
@@ -830,6 +844,34 @@ fi
 else
 [ "$1" = "del" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vlp2" = yes ] || [ -n "$vlpt_more" ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
+# vlpt comma list (private module, runs at top level, before exports).
+# The generator now has only one vlpt field: its value is a comma list.
+# Comma count + 1 = instance count, an empty item = a random port.
+#   ""            -> 1 instance, random
+#   "10001"       -> 1 instance, port 10001
+#   ","           -> 2 instances, both random
+#   "10001,"      -> instance 1 = 10001, instance 2 = random
+#   ",10002"      -> instance 1 = random, instance 2 = 10002
+#   "10001,10002" -> 2 instances, fixed ports
+#   ",,"          -> 3 instances, all random
+# This expansion turns a comma list into vlpt (first item) + vlpt_more
+# (rest items) for the existing loop, so install/display/ufw/egress
+# need no other change, and sh.txt (saved before this runs) still
+# shows the original comma command. A trailing comma would otherwise
+# vanish in vlpt_more ("" means "no extra instance"), so it becomes
+# the sentinel "random", which the loop treats as a random port.
+# Legacy vlpt2/vlpt_more are kept when vlpt has no comma; if vlpt has
+# a comma AND legacy variables are also set, the comma list wins and
+# legacy is cleared (with a warning), because instance 2 would
+# otherwise be defined twice. The vlp2 flag is cleared too, so the
+# old vlpt2 block cannot create a duplicate instance 2.
+case "$vlpt" in *,*)
+  if [ -n "$vlpt2" ] || [ -n "$vlpt_more" ]; then echo "vlpt 已用逗号分隔多实例，忽略旧的 vlpt2/vlpt_more"; vlpt2=""; vlpt_more=""; vlp2=""; fi
+  _vlpt_comma_rest="${vlpt#*,}"
+  vlpt="${vlpt%%,*}"
+  if [ -z "$_vlpt_comma_rest" ]; then vlpt_more="random"; else vlpt_more="$_vlpt_comma_rest"; fi
+  ;;
+esac
 export uuid=${uuid:-''}
 export port_vl_re=${vlpt:-''}
 export port_vl_re2=${vlpt2:-''}
@@ -1650,16 +1692,25 @@ fi
 # and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
 # vlpt_on=xray (shared with vlpt). If the old vlpt2 variable is also
 # set, vlpt_more starts at 3, so it never overwrites instance 2.
-# Ports must be explicit; empty or non-numeric items are skipped with
-# a warning, never auto-filled, so a typo cannot silently claim a
-# random port.
+# Parsing is a while loop, not a for loop over IFS: a for loop drops
+# trailing empty items ("10001," would lose instance 2), while the
+# while loop preserves every item, including trailing empties. An
+# empty item or "random" means a random port (reusing the port file
+# if it already exists, so rep keeps the same random port); a
+# non-numeric, non-empty item is skipped with a warning, and the
+# instance number still advances, so later instances keep their tag.
 if [ -n "$vlpt_more" ] && [ "$vlpt_on" = "xray" ]; then
 if [ -z "$ym_vl_re" ]; then ym_vl_re=apple.com; fi
 if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
-_vlpt_more_oldifs="$IFS"; IFS=','
-for _vlpt_more_p in $vlpt_more; do
+_vlpt_more_rest="$vlpt_more"
+while :; do
+  case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
-  case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac
+  case "$_vlpt_more_p" in ''|random)
+    if [ -s "$HOME/agsbx/port_vl_re$_vlpt_more_idx" ]; then _vlpt_more_p=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_idx"); else _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
+    case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例随机端口失败，已跳过第 $_vlpt_more_idx 个实例"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
+    ;;
+  *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
   echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
   echo "Vless-tcp-reality-v$_vlpt_more_idx端口：$_vlpt_more_p"
   cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -1698,7 +1749,8 @@ for _vlpt_more_p in $vlpt_more; do
     },
 EOF
   _vlpt_more_idx=$((_vlpt_more_idx + 1))
-done; IFS="$_vlpt_more_oldifs"
+  [ "$_vlpt_more_rest" = "__DONE__" ] && break
+done
 fi
 
 }
@@ -2031,10 +2083,15 @@ private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
 if [ "$vlp2" = yes ] || [ -n "$vlpt2" ]; then _vlpt_more_idx=3; else _vlpt_more_idx=2; fi
-_vlpt_more_oldifs="$IFS"; IFS=','
-for _vlpt_more_p in $vlpt_more; do
+_vlpt_more_rest="$vlpt_more"
+while :; do
+  case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
-  case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); continue;; esac
+  case "$_vlpt_more_p" in ''|random)
+    if [ -s "$HOME/agsbx/port_vl_re$_vlpt_more_idx" ]; then _vlpt_more_p=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_idx"); else _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
+    case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例随机端口失败，已跳过第 $_vlpt_more_idx 个实例"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
+    ;;
+  *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
   echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
   echo "Vless-tcp-reality-v$_vlpt_more_idx端口（Sing-box）：$_vlpt_more_p"
   cat >> "$HOME/agsbx/sb.json" <<EOF
@@ -2065,7 +2122,8 @@ for _vlpt_more_p in $vlpt_more; do
     },
 EOF
   _vlpt_more_idx=$((_vlpt_more_idx + 1))
-done; IFS="$_vlpt_more_oldifs"
+  [ "$_vlpt_more_rest" = "__DONE__" ] && break
+done
 fi
 
 if [ -n "$ssp" ]; then

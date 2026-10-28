@@ -75,19 +75,21 @@ out2=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; reality
 echo "$out2" | grep -Fq '"server_port": 30003' || fail "sb loop missing port 30003: $out2"
 echo "$out2" | grep -Fq '"server_port": 30005' || fail "sb loop missing port 30005: $out2"
 echo "$out2" | grep -Fq "30004" && fail "sb loop must not include stale 4: $out2"
-# 5. generator: vlpt_more field in the dual group, in optIds, with
-# short labels and field-notes below (never in the label, so the
-# input / select on the right is not squeezed); no vlpt2 checkbox.
-grep -Fq 'id="vlpt_more"' "$ROOT/index.html" || fail "generator vlpt_more field missing"
-grep -Fq "'vlpt_more'" "$ROOT/index.html" || fail "generator optIds missing vlpt_more"
-awk '/双内核可选协议/,/Xray可选协议/' "$ROOT/index.html" | grep -Fq 'id="vlpt_more"' || fail "vlpt_more not in dual group"
+# 5. generator: only one vlpt field (its port value is the comma
+# list); no vlpt_more field, no vlpt2 checkbox. Section note under
+# "必选内核协议端口：" explains comma = multiple instances.
+grep -Fq 'id="vlpt_more"' "$ROOT/index.html" && fail "generator vlpt_more field must be removed (vlpt itself is the list)"
 grep -Fq 'data-proto="vlpt2"' "$ROOT/index.html" && fail "generator vlpt2 checkbox must be removed"
+grep -Fq 'class="section-note"' "$ROOT/index.html" || fail "generator section-note missing"
+grep -Fq '逗号个数 + 1 = 实例数' "$ROOT/index.html" || fail "generator comma rule missing"
+grep -Fq '10001, = 第 1 个固定 10001、第 2 个随机' "$ROOT/index.html" || fail "generator comma example missing"
+grep -Fq '目前仅 Vless-tcp-reality-vision 支持逗号多实例' "$ROOT/index.html" || fail "generator must state only vlpt supports comma today"
 grep -Fq 'class="field-note"' "$ROOT/index.html" || fail "generator field-note missing"
-grep -Fq '只勾选上方即只创建一个' "$ROOT/index.html" || fail "generator vlpt_more note missing"
-grep -Fq 'vlpt 与更多实例共用' "$ROOT/index.html" || fail "generator kernel note missing"
-grep -Fq 'Vless-tcp-reality 更多实例（' "$ROOT/index.html" && fail "vlpt_more label must be short (note goes below)"
+grep -Fq '所有 vlpt 实例共用此内核' "$ROOT/index.html" || fail "generator kernel note missing"
 grep -Fq 'Vless-tcp-reality 内核（' "$ROOT/index.html" && fail "vlpt_kernel label must be short (note goes below)"
 grep -Fq 'grid-column: 1 / -1' "$ROOT/index.html" || fail "field-note must span the grid row"
+# paste-back migration: old vlpt2/vlpt_more fold into vlpt list
+grep -Fq "params['vlpt_more']" "$ROOT/index.html" || fail "generator paste migration missing vlpt_more"
 # 6. install loop start index: 2 without vlpt2, 3 with vlpt2
 python3 - "$ROOT/argosbx.sh" "$TMP/xray_loop.sh" << 'PY'
 import re, sys
@@ -105,4 +107,35 @@ out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re
 grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" && fail "loop with vlpt2 must not overwrite instance 2"
 grep -Fq '"tag":"reality-vision-3"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must start at 3: $out"
 grep -Fq '"tag":"reality-vision-4"' "$TMP/agsbx/xr.json" || fail "loop with vlpt2 must include 4: $out"
+# 7. comma expansion + while-loop random: "10001," must create
+# instance 2 (trailing empty is NOT dropped), "," must create 2
+# random instances, and a second run must reuse the same random ports.
+python3 - "$ROOT/argosbx.sh" "$TMP/comma.sh" << 'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r"# vlpt comma list.*?^export uuid=", t, re.S | re.M)
+assert m, "vlpt comma module not found"
+open(sys.argv[2], "w").write(m.group(0).rsplit("export uuid=", 1)[0])
+PY
+out=$(bash -c 'vlpt="10001,"; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more]"' _ "$TMP/comma.sh")
+echo "$out" | grep -Fq 'vlpt=[10001] more=[random]' || fail "comma expansion 10001, wrong: $out"
+out=$(bash -c 'vlpt=","; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more]"' _ "$TMP/comma.sh")
+echo "$out" | grep -Fq 'vlpt=[] more=[random]' || fail "comma expansion , wrong: $out"
+out=$(bash -c 'vlpt="10001,10002"; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more]"' _ "$TMP/comma.sh")
+echo "$out" | grep -Fq 'vlpt=[10001] more=[10002]' || fail "comma expansion 10001,10002 wrong: $out"
+out=$(bash -c 'vlpt="10001"; vlpt2="20002"; vlpt_more="30003"; source "$1"; echo "vlpt=[$vlpt] more=[$vlpt_more] vlpt2=[$vlpt2]"' _ "$TMP/comma.sh")
+echo "$out" | grep -Fq 'vlpt=[10001] more=[30003] vlpt2=[20002]' || fail "single vlpt must keep legacy vlpt2/vlpt_more: $out"
+# while-loop: "10001," via xray loop must write port files for
+# instance 1? (instance 1 is the vlpt block, not this loop) - here
+# check the loop alone: vlpt_more="random" must write a random port
+# file for instance 2, and a second run must reuse it.
+: > "$TMP/agsbx/xr.json"
+out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlpt_more="random"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
+p1=$(cat "$TMP/agsbx/port_vl_re2" 2>/dev/null)
+case "$p1" in ''|*[!0-9]*) fail "random instance 2 port file missing/invalid: $p1";; esac
+grep -Fq '"tag":"reality-vision-2"' "$TMP/agsbx/xr.json" || fail "random instance 2 tag missing"
+: > "$TMP/agsbx/xr.json"
+out=$(HOME="$TMP" bash -c 'uuid="11111111-2222-3333-4444-555555555555"; ym_vl_re="apple.com"; private_key_x="PRIVX"; short_id_x="SIDX"; vlpt_on="xray"; vlpt_more="random"; : > "$HOME/agsbx/xr.json"; source "$1"' _ "$TMP/xray_loop.sh" 2>&1)
+p2=$(cat "$TMP/agsbx/port_vl_re2" 2>/dev/null)
+[ "$p1" = "$p2" ] || fail "random port must be reused on second run: $p1 vs $p2"
 echo "PASS: vlpt loop (vlpt_more)"
