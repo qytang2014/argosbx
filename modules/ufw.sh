@@ -424,3 +424,7 @@ fw_status(){
   fw_print_cloud_checklist
   return 0
 }
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook post_start fw_sync
+  register_hook on_uninstall fw_cleanup
+}

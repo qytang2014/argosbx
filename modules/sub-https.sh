@@ -370,3 +370,7 @@ sub_https_display(){
   fi
   return 0
 }
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook post_start sub_https_sync
+  register_hook on_uninstall sub_https_stop
+}

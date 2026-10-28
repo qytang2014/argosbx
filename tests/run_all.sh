@@ -4,7 +4,17 @@
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+if ! command -v shuf >/dev/null 2>&1; then
+  SHUF_DIR="$(mktemp -d)"
+  cat > "$SHUF_DIR/shuf" << 'EOF'
+#!/bin/bash
+python3 -c 'import random; print(random.randint(10000, 65535))'
+EOF
+  chmod +x "$SHUF_DIR/shuf"
+  export PATH="$SHUF_DIR:$PATH"
+fi
 bash tests/test_build.sh
+bash tests/test_hook.sh
 bash tests/test_egress.sh
 bash tests/test_egress_v2.sh
 bash tests/test_cert.sh

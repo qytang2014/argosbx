@@ -67,3 +67,6 @@ cert_remove_watch(){
   crontab "$tmp" 2>/dev/null || true
   rm -f "$tmp"
 }
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook on_uninstall cert_remove_watch
+}

@@ -12,7 +12,7 @@ if [ -n "${sopt_more:-}" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "sopt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "sopt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_so$_pm_idx"
-    echo "Socks5$_pm_idx端口：$_pm_p"
+    echo "Socks5${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF
         {

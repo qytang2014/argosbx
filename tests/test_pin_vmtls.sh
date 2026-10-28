@@ -4,6 +4,13 @@
 # if /tmp/kernels/sing-box is present, otherwise skipped).
 set -u
 cd "$(dirname "$0")/.." || exit 1
+if ! command -v shuf >/dev/null 2>&1; then
+  SHUF_DIR="$(mktemp -d)"; cat > "$SHUF_DIR/shuf" << 'EOF'
+#!/bin/bash
+python3 -c 'import random; print(random.randint(10000, 65535))'
+EOF
+  chmod +x "$SHUF_DIR/shuf"; export PATH="$SHUF_DIR:$PATH"
+fi
 FAIL=0
 F=argosbx.sh
 C=container/nodejs/start.sh

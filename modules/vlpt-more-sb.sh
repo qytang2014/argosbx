@@ -32,7 +32,7 @@ while :; do
     ;;
   *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
   echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
-  echo "Vless-tcp-reality-v$_vlpt_more_idx端口（Sing-box）：$_vlpt_more_p"
+  echo "Vless-tcp-reality-v${_vlpt_more_idx}端口（Sing-box）：$_vlpt_more_p"
   cat >> "$HOME/agsbx/sb.json" <<EOF
     {
         "type": "vless",

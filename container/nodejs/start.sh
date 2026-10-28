@@ -1395,6 +1395,10 @@ egress_init(){
     egress_add_tag "bind${n}"; done; IFS="$oldifs"
   egress_parse_rules "$egress_rules"
 }
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook pre_xrsbout egress_init
+  register_hook pre_xrsbout egress_geo_setup
+}
 # ===== EGRESS MODULE END =====
 xrsbout(){
 egress_init

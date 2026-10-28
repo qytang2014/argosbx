@@ -349,6 +349,7 @@ def main():
     vars_mod = read("modules/vars.sh")
     ufw_mod = read("modules/ufw.sh")
     subhttps_mod = read("modules/sub-https.sh")
+    hook_mod = read("modules/hook.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
     t = replace(t, "url='https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh'",
@@ -378,7 +379,7 @@ def main():
                 '$vmp=\\"${port_vm_ws}\\" $vmt=\\"${port_vm_tls}\\"', "vmtls-recovery", 1)
     # --- incremental update module (top, before sh.txt save + protocol selection) ---
     t = insert_after(t, 'mkdir -p "$HOME/agsbx"\n',
-                     vars_mod + 'vars_merge "$1"\n', "vars-module-anchor")
+                     hook_mod + vars_mod + 'run_hook on_init "$1"\nvars_merge "$1"\n', "vars-module-anchor")
     # --- ufw module (top level, functions only; called after ins) ---
     t = insert_after(t, 'vars_merge "$1"\n',
                      ufw_mod, "ufw-module-anchor")
@@ -621,7 +622,7 @@ fi
     # rep/add, which flow through the same ins call; list/upx/ups/del
     # exit before ins and are unaffected) ---
     t = replace(t, 'ins\nvars_save\nif [ -n "$sub" ]; then',
-                'ins\nvars_save\nfw_sync\nif [ -n "$sub" ]; then', "ufw-sync-call", 1)
+                'ins\nrun_hook post_start\nrun_hook on_complete\nvars_save\nfw_sync\nif [ -n "$sub" ]; then', "ufw-sync-call", 1)
     t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
                 'cert_migrate_paths\nif [ ! -f "$HOME/agsbx/SHA256.txt" ]; then', "selfsigned-migrate-call", 1)
     t = replace(t, 'command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key"',
@@ -680,9 +681,9 @@ fi
     t = replace(t, 'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
                 'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "subhttpsync-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
-                'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nsub_https_stop\nfw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
+                'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncert_remove_watch\ncleandel\nsub_https_stop\nfw_cleanup\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
-                'xrsbout(){\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
+                'xrsbout(){\nrun_hook pre_xrsbout\negress_init\negress_geo_setup\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
                 '  "route": {\n${egress_sb_geo_cfg}    "rules": [\n       {\n          "action": "sniff"', "sb-geo-cfg-hook", 1)
     # xray geo files must survive restarts, not just the first xrsbout

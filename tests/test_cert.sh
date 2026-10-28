@@ -41,7 +41,7 @@ RUN
 mkdir -p "$TMP/fakehome/agsbx"
 bash "$TMP/run_certmode.sh" "$TMP/fakehome" "$TMP/certdir"
 # write_caddyfile: system path replaced by temp dir, import added once, not duplicated
-sed 's|/etc/caddy|'"$TMP"'/testetc|g' "$TMP/certdir/write_caddyfile.sh" > "$TMP/write_test.sh"
+sed -e 's|/etc/caddy|'"$TMP"'/testetc|g' -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/write_caddyfile.sh" > "$TMP/write_test.sh"
 cat > "$TMP/run_write.sh" << 'RUN'
 #!/bin/bash
 export HOME="$1"

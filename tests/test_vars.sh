@@ -43,7 +43,7 @@ vars_merge add
 [ -z "${anpt+x}" ] || { echo "FAIL: unset anpt leaked in"; exit 1; }
 # Save merged state, then reload it clean
 vars_save
-[ "$(stat -c %a "$HOME/agsbx/vars.env")" = "600" ] || { echo "FAIL: vars.env mode not 600"; exit 1; }
+[ "$(stat -c %a "$HOME/agsbx/vars.env" 2>/dev/null || stat -f %Lp "$HOME/agsbx/vars.env" 2>/dev/null)" = "600" ] || { echo "FAIL: vars.env mode not 600"; exit 1; }
 grep -q "^vlpt=54321" "$HOME/agsbx/vars.env" || { echo "FAIL: saved vlpt"; exit 1; }
 grep -q "^anpt=" "$HOME/agsbx/vars.env" && { echo "FAIL: saved unset anpt"; exit 1; }
 exit 0

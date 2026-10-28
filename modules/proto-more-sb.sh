@@ -20,7 +20,7 @@ if [ -n "${nvpt_more:-}" ] && [ "${domain_cert_ready:-}" = "1" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "nvpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "nvpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_nv$_pm_idx"
-    echo "Naiveproxy$_pm_idx端口：$_pm_p"
+    echo "Naiveproxy${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
     {
         "type": "naive",
@@ -53,7 +53,7 @@ if [ -n "${tupt_more:-}" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "tupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "tupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_tu$_pm_idx"
-    echo "Tuic$_pm_idx端口：$_pm_p"
+    echo "Tuic${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
             "type":"tuic",
@@ -90,7 +90,7 @@ if [ -n "${anpt_more:-}" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "anpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "anpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_an$_pm_idx"
-    echo "Anytls$_pm_idx端口：$_pm_p"
+    echo "Anytls${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
             "type":"anytls",
@@ -137,7 +137,7 @@ if [ -n "${arpt_more:-}" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "arpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "arpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_ar$_pm_idx"
-    echo "Any-Reality$_pm_idx端口：$_pm_p"
+    echo "Any-Reality${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
             "type":"anytls",
@@ -183,7 +183,7 @@ if [ -n "${sspt_more:-}" ]; then
       case "$_pm_p" in ''|*[!0-9]*) echo "sspt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "sspt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
     echo "$_pm_p" > "$HOME/agsbx/port_ss$_pm_idx"
-    echo "Shadowsocks-2022$_pm_idx端口：$_pm_p"
+    echo "Shadowsocks-2022-${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
             "type": "shadowsocks",

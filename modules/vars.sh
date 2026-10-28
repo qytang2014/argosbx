@@ -47,3 +47,7 @@ vars_save(){
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$f" 2>/dev/null || return 1
 }
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook on_init vars_merge
+  register_hook on_complete vars_save
+}

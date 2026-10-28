@@ -5,6 +5,13 @@
 # and runs them in a temp HOME, never a real install.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+if ! command -v shuf >/dev/null 2>&1; then
+  SHUF_DIR="$(mktemp -d)"; cat > "$SHUF_DIR/shuf" << 'EOF'
+#!/bin/bash
+python3 -c 'import random; print(random.randint(10000, 65535))'
+EOF
+  chmod +x "$SHUF_DIR/shuf"; export PATH="$SHUF_DIR:$PATH"
+fi
 fail=0
 ok(){ echo "ok: $1"; }
 bad(){ echo "FAIL: $1"; fail=1; }

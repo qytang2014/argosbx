@@ -28,7 +28,7 @@ egress_nodes="$egress_nodes;$egress_add"
 container_vars_save
 grep -q "egress_nodes=" "$HOME/agsbx/container_vars.env" || { echo "FAIL: egress_nodes not saved"; exit 1; }
 grep -q "egress_add" "$HOME/agsbx/container_vars.env" && { echo "FAIL: egress_add must not be saved"; exit 1; }
-[ "$(stat -c %a "$HOME/agsbx/container_vars.env")" = "600" ] || { echo "FAIL: mode not 600"; exit 1; }
+[ "$(stat -c %a "$HOME/agsbx/container_vars.env" 2>/dev/null || stat -f %Lp "$HOME/agsbx/container_vars.env" 2>/dev/null)" = "600" ] || { echo "FAIL: mode not 600"; exit 1; }
 # Simulate a new container start with only vmpt changed in env
 unset vmpt vlpt reym egress_nodes egress_add
 vmpt=2222
@@ -50,6 +50,7 @@ export HOME="$2"
 container_vars_merge
 container_vars_save
 RUN
-sh "$TMP/run_dash.sh" "$TMP" "$TMP/home2" || { echo "FAIL: dash run failed"; exit 1; }
+SH_CMD="sh"; command -v dash >/dev/null 2>&1 && SH_CMD="dash"
+"$SH_CMD" "$TMP/run_dash.sh" "$TMP" "$TMP/home2" || { echo "FAIL: dash run failed"; exit 1; }
 [ ! -e "$TMP/home2/agsbx/container_vars.env" ] || { echo "FAIL: dash should not save"; exit 1; }
 echo "PASS: container_vars"
