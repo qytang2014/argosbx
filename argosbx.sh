@@ -3340,7 +3340,7 @@ egress_parse_link(){
       local xr_flow=""; [ -n "$flow" ] && xr_flow=", \"flow\": \"$(egress_json_escape "$flow")\""
       egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\"$sb_flow$sb_tls$sb_tr},
 "
-      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\"$xr_flow}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
+      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\", \"encryption\": \"none\"$xr_flow}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
 "
       egress_add_tag "$tag";;
     trojan)

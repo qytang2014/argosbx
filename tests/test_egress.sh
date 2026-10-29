@@ -41,6 +41,13 @@ assert reality["tls"]["reality"]["public_key"]=="AbCdEfGh" and reality["flow"]==
 xr = json.load(open(f"{tmp}/xr_out.json"))
 assert [o["tag"] for o in xr["outbounds"]] == ["socks-out","reality-out","tls-ws-out","socks2","grpc-out","bind1","bind2","direct"]
 assert [o for o in xr["outbounds"] if o["tag"]=="reality-out"][0]["streamSettings"]["security"]=="reality"
+# Xray >= 26.x refuses to start a vless outbound whose users lack
+# "encryption":"none" ("please add/set encryption:none for every user"),
+# which used to surface as "Argosbx脚本进程未启动，安装失败".
+for o in xr["outbounds"]:
+    if o.get("protocol")=="vless":
+        for u in o["settings"]["vnext"][0]["users"]:
+            assert u.get("encryption")=="none", o["tag"]
 rules = json.load(open(f"{tmp}/sb_rules.json"))
 assert len(rules["rules"])==5, rules  # 4 valid rules + 1 final placeholder, invalid rule skipped
 print("PASS: egress (unlimited nodes, reality, bind, rules, invalid-rule skip)")
