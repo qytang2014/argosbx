@@ -1111,6 +1111,7 @@ egress_add_tag(){ case " $egress_tags " in *" $1 "*) ;; *) egress_tags="${egress
   case "${2:-both}" in sb|both) case " $egress_sb_tags " in *" $1 "*) ;; *) egress_sb_tags="${egress_sb_tags:+$egress_sb_tags }$1";; esac;; esac
 }
 egress_parse_link(){
+  local xr_only=0
   local link="$1" scheme="" rest="" frag="" tag="" query="" userinfo="" hostport="" host="" port="" user="" pass="" uuid=""
   scheme="${link%%://*}"; rest="${link#*://}"
   case "$rest" in *'#'*) frag="${rest##*#}"; rest="${rest%%#*}";; esac
@@ -1151,15 +1152,15 @@ egress_parse_link(){
         tcp) sb_tr=""; xr_tr=", \"tcpSettings\": {}";;
         ws) sb_tr=", \"transport\": {\"type\": \"ws\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}"; xr_tr=", \"wsSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}";;
         grpc) sb_tr=", \"transport\": {\"type\": \"grpc\", \"service_name\": \"$(egress_json_escape "$svc")\"}"; xr_tr=", \"grpcSettings\": {\"serviceName\": \"$(egress_json_escape "$svc")\"}";;
-        xhttp) sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
+        xhttp) xr_only=1; echo "$scheme 节点 $tag 使用 xhttp 传输，仅 Xray 支持，sing-box 侧已跳过"; sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
         *) echo "vless 节点 $tag 的传输方式 $typ 暂不支持，已跳过"; return 0;;
       esac
       local xr_flow=""; [ -n "$flow" ] && xr_flow=", \"flow\": \"$(egress_json_escape "$flow")\""
-      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\"$sb_flow$sb_tls$sb_tr},
+      [ "$xr_only" != "1" ] && egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\"$sb_flow$sb_tls$sb_tr},
 "
       egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\", \"encryption\": \"none\"$xr_flow}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
 "
-      egress_add_tag "$tag";;
+      if [ "$xr_only" = "1" ]; then egress_add_tag "$tag" xr; else egress_add_tag "$tag"; fi;;
     trojan)
       egress_trojan_count=$((egress_trojan_count + 1)); [ -n "$tag" ] || tag="trojan${egress_trojan_count}"; [ -z "$port" ] && port=443
       local pass="" sec="" typ="" sni="" pth="" hdr="" fp="" svc="" mode="" sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr=""
@@ -1174,14 +1175,14 @@ egress_parse_link(){
         tcp) sb_tr=""; xr_tr=", \"tcpSettings\": {}";;
         ws) sb_tr=", \"transport\": {\"type\": \"ws\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}"; xr_tr=", \"wsSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}";;
         grpc) sb_tr=", \"transport\": {\"type\": \"grpc\", \"service_name\": \"$(egress_json_escape "$svc")\"}"; xr_tr=", \"grpcSettings\": {\"serviceName\": \"$(egress_json_escape "$svc")\"}";;
-        xhttp) sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
+        xhttp) xr_only=1; echo "$scheme 节点 $tag 使用 xhttp 传输，仅 Xray 支持，sing-box 侧已跳过"; sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
         *) echo "trojan 节点 $tag 的传输方式 $typ 暂不支持，已跳过"; return 0;;
       esac
-      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"trojan\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\"$sb_tls$sb_tr},
+      [ "$xr_only" != "1" ] && egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"trojan\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\"$sb_tls$sb_tr},
 "
       egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"trojan\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"servers\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"password\": \"$(egress_json_escape "$pass")\"}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
 "
-      egress_add_tag "$tag";;
+      if [ "$xr_only" = "1" ]; then egress_add_tag "$tag" xr; else egress_add_tag "$tag"; fi;;
     vmess)
       if [ -z "$userinfo" ]; then echo "vmess base64 链接暂不支持，请用 vmess://uuid@host:port?... 形式，已跳过"; return 0; fi
       egress_vmess_count=$((egress_vmess_count + 1)); [ -n "$tag" ] || tag="vmess${egress_vmess_count}"; [ -z "$port" ] && port=443
@@ -1197,14 +1198,14 @@ egress_parse_link(){
         tcp) sb_tr=""; xr_tr=", \"tcpSettings\": {}";;
         ws) sb_tr=", \"transport\": {\"type\": \"ws\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}"; xr_tr=", \"wsSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}}";;
         grpc) sb_tr=", \"transport\": {\"type\": \"grpc\", \"service_name\": \"$(egress_json_escape "$svc")\"}"; xr_tr=", \"grpcSettings\": {\"serviceName\": \"$(egress_json_escape "$svc")\"}";;
-        xhttp) sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
+        xhttp) xr_only=1; echo "$scheme 节点 $tag 使用 xhttp 传输，仅 Xray 支持，sing-box 侧已跳过"; sb_tr=", \"transport\": {\"type\": \"xhttp\", \"path\": \"$(egress_json_escape "$pth")\", \"headers\": {\"Host\": \"$(egress_json_escape "$hdr")\"}, \"mode\": \"$(egress_json_escape "$mode")\"}"; xr_tr=", \"xhttpSettings\": {\"path\": \"$(egress_json_escape "$pth")\", \"host\": \"$(egress_json_escape "$hdr")\", \"mode\": \"$(egress_json_escape "$mode")\"}";;
         *) echo "vmess 节点 $tag 的传输方式 $typ 暂不支持，已跳过"; return 0;;
       esac
-      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vmess\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\", \"alter_id\": $aid, \"security\": \"$(egress_json_escape "$scy")\"$sb_tls$sb_tr},
+      [ "$xr_only" != "1" ] && egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vmess\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\", \"alter_id\": $aid, \"security\": \"$(egress_json_escape "$scy")\"$sb_tls$sb_tr},
 "
       egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vmess\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\", \"alterId\": $aid, \"security\": \"$(egress_json_escape "$scy")\"}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
 "
-      egress_add_tag "$tag";;
+      if [ "$xr_only" = "1" ]; then egress_add_tag "$tag" xr; else egress_add_tag "$tag"; fi;;
     ss|shadowsocks)
       egress_ss_count=$((egress_ss_count + 1)); [ -n "$tag" ] || tag="ss${egress_ss_count}"; [ -z "$port" ] && port=8388
       local method="" pass="" decoded=""

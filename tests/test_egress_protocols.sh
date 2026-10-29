@@ -27,8 +27,8 @@ run_case() { # $1 = case name, $2 = 1 if sb.json exists
 #!/bin/bash
 source "$TMP/egress.sh"
 export HOME="$home"
-egress_nodes='tuic://11111111-2222-3333-4444-555555555555:mypass@203.0.113.20:443?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=tuic.example.com#tuic-node;hysteria2://hy2pass@203.0.113.21:443?sni=hy2.example.com&alpn=h3#hy2-node;anytls://anypass@203.0.113.22:443?sni=any.example.com#anytls-node;naive+https://nuser:npass@203.0.113.23:443?sni=naive.example.com#naive-node'
-egress_bind=''; egress_rules='domain:google.com=>tuic-node;domain:example.com=>hy2-node'
+egress_nodes='tuic://11111111-2222-3333-4444-555555555555:mypass@203.0.113.20:443?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=tuic.example.com#tuic-node;hysteria2://hy2pass@203.0.113.21:443?sni=hy2.example.com&alpn=h3#hy2-node;anytls://anypass@203.0.113.22:443?sni=any.example.com#anytls-node;naive+https://nuser:npass@203.0.113.23:443?sni=naive.example.com#naive-node;vless://22222222-2222-3333-4444-555555555555@203.0.113.24:443?encryption=none&security=tls&sni=xhttp.example.com&type=xhttp&path=/x&host=xhttp.example.com#xhttp-node'
+egress_bind=''; egress_rules='domain:google.com=>tuic-node;domain:example.com=>hy2-node;domain:xhttp.example=>xhttp-node'
 egress_init
 printf '{"outbounds":[\n%s{"type":"direct","tag":"direct"}\n]}\n' "\$egress_sb_outbounds" > "$home/sb_out.json"
 printf '{"outbounds":[\n%s{"protocol":"freedom","tag":"direct"}\n]}\n' "\$egress_xr_outbounds" > "$home/xr_out.json"
@@ -64,20 +64,29 @@ assert hy2xr["settings"] == {"version": 2, "address": "203.0.113.21", "port": 44
 assert hy2xr["streamSettings"]["network"] == "hysteria"
 assert hy2xr["streamSettings"]["hysteriaSettings"] == {"version": 2, "auth": "hy2pass"}, hy2xr["streamSettings"]
 assert "tuic-node" not in xr_tags and "anytls-node" not in xr_tags and "naive-node" not in xr_tags, xr_tags
+# xhttp transport: Xray-only (sing-box 1.14.4 FATALs on unknown transport xhttp)
+assert [o["protocol"] for o in xr["outbounds"] if o["tag"] == "xhttp-node"] == ["vless"], xr_tags
+assert "xhttp-node" not in sb_tags, sb_tags
+xhttpxr = [o for o in xr["outbounds"] if o["tag"] == "xhttp-node"][0]
+assert xhttpxr["streamSettings"]["network"] == "xhttp", xhttpxr["streamSettings"]
 sbr = [r["outbound"] for r in load("dual", "sb_rules.json")["rules"]]
 xrr = [r["outboundTag"] for r in load("dual", "xr_rules.json")["rules"]]
 assert "tuic-node" in sbr and "hy2-node" in sbr, sbr
 assert "tuic-node" not in xrr and "hy2-node" in xrr, xrr
+assert "xhttp-node" not in sbr and "xhttp-node" in xrr, (sbr, xrr)
 msgs = open(f"{tmp}/dual/msgs.txt").read()
 assert "仅 sing-box 支持，Xray 侧已跳过该规则" in msgs, msgs
+assert "vless 节点 xhttp-node 使用 xhttp 传输，仅 Xray 支持，sing-box 侧已跳过" in msgs, msgs
+assert "仅 Xray 支持，sing-box 侧已跳过该规则" in msgs, msgs
 
 # ---- xray only: sb-only nodes skipped with kernel message ----
 sb = load("xrayonly", "sb_out.json"); xr = load("xrayonly", "xr_out.json")
 sb_tags = [o["tag"] for o in sb["outbounds"]]; xr_tags = [o["tag"] for o in xr["outbounds"]]
 assert "hy2-node" in sb_tags and "tuic-node" not in sb_tags and "anytls-node" not in sb_tags, sb_tags
+assert "xhttp-node" not in sb_tags, sb_tags
 assert "hy2-node" in xr_tags and "tuic-node" not in xr_tags and "anytls-node" not in xr_tags, xr_tags
 xrr = [r["outboundTag"] for r in load("xrayonly", "xr_rules.json")["rules"]]
-assert xrr == ["hy2-node", "direct"], xrr
+assert xrr == ["hy2-node", "xhttp-node", "direct"], xrr
 msgs = open(f"{tmp}/xrayonly/msgs.txt").read()
 assert "tuic 节点 tuic-node 仅 sing-box 支持，当前未安装 sing-box，已跳过" in msgs, msgs
 assert "anytls 节点 anytls-node 仅 sing-box 支持，当前未安装 sing-box，已跳过" in msgs, msgs

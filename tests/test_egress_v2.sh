@@ -1,8 +1,9 @@
 #!/bin/bash
 # Test: egress v2 (step 3) - trojan, vmess (URL form), shadowsocks
-# (plain + base64, incl. 2022), vless xhttp, and geoip/geosite/port/
-# protocol rules. Also: vmess base64 form is skipped, invalid port
-# rules are skipped whole (an empty rule would match everything).
+# (plain + base64, incl. 2022), vless xhttp (Xray-only: sing-box 1.14.4
+# FATALs on unknown transport xhttp), and geoip/geosite/port/protocol
+# rules. Also: vmess base64 form is skipped, invalid port rules are
+# skipped whole (an empty rule would match everything).
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -35,7 +36,7 @@ for f in ["sb_out.json", "xr_out.json", "sb_rules.json", "xr_rules.json"]:
     json.load(open(f"{tmp}/{f}"))
 sb = json.load(open(f"{tmp}/sb_out.json"))
 tags = [o["tag"] for o in sb["outbounds"]]
-assert tags == ["trojan-out","vmess-out","ss-out","ss2022-out","xhttp-out","direct"], tags
+assert tags == ["trojan-out","vmess-out","ss-out","ss2022-out","direct"], tags
 by = {o["tag"]: o for o in sb["outbounds"]}
 assert by["trojan-out"]["type"] == "trojan" and by["trojan-out"]["password"] == "pass123"
 assert by["trojan-out"]["tls"]["server_name"] == "troj.example.com"
@@ -44,9 +45,10 @@ assert by["vmess-out"]["type"] == "vmess" and by["vmess-out"]["alter_id"] == 0 a
 assert by["vmess-out"]["tls"]["server_name"] == "vm.example.com"
 assert by["ss-out"]["method"] == "aes-256-gcm" and by["ss-out"]["password"] == "secret123"
 assert by["ss2022-out"]["method"] == "2022-blake3-aes-128-gcm" and by["ss2022-out"]["udp_over_tcp"]["version"] == 2
-assert by["xhttp-out"]["transport"]["type"] == "xhttp" and by["xhttp-out"]["transport"]["mode"] == "auto"
+# xhttp is Xray-only: no sing-box outbound for xhttp-out
 xr = json.load(open(f"{tmp}/xr_out.json"))
 xby = {o["tag"]: o for o in xr["outbounds"]}
+assert "xhttp-out" not in by and "xhttp-out" in xby, (list(by), list(xby))
 assert xby["trojan-out"]["protocol"] == "trojan" and xby["trojan-out"]["streamSettings"]["network"] == "ws"
 assert xby["vmess-out"]["protocol"] == "vmess"
 assert xby["ss2022-out"]["settings"]["servers"][0]["uot"] is True
@@ -56,17 +58,17 @@ sbr = json.load(open(f"{tmp}/sb_rules.json"))["rules"]
 assert sbr[0]["geoip"] == ["CN", "US"] and sbr[0]["outbound"] == "trojan-out", sbr[0]
 assert sbr[1]["geosite"] == ["google"] and sbr[1]["outbound"] == "vmess-out", sbr[1]
 assert sbr[2]["port"] == [80, 443] and sbr[2]["outbound"] == "ss-out", sbr[2]
-assert sbr[3]["port_range"] == ["1000:2000"] and sbr[3]["outbound"] == "xhttp-out", sbr[3]
-assert sbr[4]["protocol"] == ["http", "tls"], sbr[4]
+# port:1000-2000=>xhttp-out is Xray-only now, so it is absent from sb rules
+assert sbr[3]["protocol"] == ["http", "tls"], sbr[3]
 xrr = json.load(open(f"{tmp}/xr_rules.json"))["rules"]
 assert xrr[0]["geoip"] == ["CN", "US"], xrr[0]
 assert xrr[1]["domain"] == ["geosite:google"], xrr[1]
 assert xrr[2]["port"] == "80,443", xrr[2]
-assert xrr[3]["port"] == "1000-2000", xrr[3]
+assert xrr[3]["port"] == "1000-2000" and xrr[3]["outboundTag"] == "xhttp-out", xrr[3]
 assert xrr[4]["protocol"] == ["http", "tls"], xrr[4]
 # port:abc has no valid port, so the whole rule is skipped (an empty
-# rule would match everything, which would be wrong); total = 5 + placeholder
-assert len(sbr) == 6, sbr
-assert len(xrr) == 6, xrr
-print("PASS: egress v2 (trojan, vmess, ss incl. 2022, vless xhttp, geoip/geosite/port/protocol)")
+# rule would match everything, which would be wrong)
+assert len(sbr) == 5, sbr  # 4 rules + placeholder (xhttp rule is xr-only)
+assert len(xrr) == 6, xrr  # 5 rules + placeholder
+print("PASS: egress v2 (trojan, vmess, ss incl. 2022, vless xhttp Xray-only, geoip/geosite/port/protocol)")
 PY
