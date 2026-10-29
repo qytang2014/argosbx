@@ -84,7 +84,6 @@ command -v register_hook >/dev/null 2>&1 && {
   register_hook on_complete vars_save
 }
 run_hook on_init "$1"
-vars_merge "$1"
 # HTTPS domain subscription (private module, main script only).
 # Current subscription is plain HTTP on a random port, served from
 # $HOME/websbx/<token>/, protected only by the token in the URL.
@@ -3594,8 +3593,6 @@ command -v register_hook >/dev/null 2>&1 && {
 
 xrsbout(){
 run_hook pre_xrsbout
-egress_init
-egress_geo_setup
 if [ -e "$HOME/agsbx/xr.json" ]; then
 sed -i '${s/,\s*$//}' "$HOME/agsbx/xr.json"
 cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -5990,10 +5987,7 @@ exit
 fi
 if [ "$1" = "del" ]; then
 run_hook on_uninstall
-cert_remove_watch
 cleandel
-sub_https_stop
-fw_cleanup
 rm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"
 echo "卸载完成"
 echo "欢迎继续使用Argosbx一键无交互小钢炮脚本💣" && sleep 2
@@ -6183,8 +6177,6 @@ fi
 ins
 run_hook post_start
 run_hook on_complete
-vars_save
-fw_sync
 if [ -n "$sub" ]; then
 subtokenipsub(){
 if [ -z "$subid" ]; then
