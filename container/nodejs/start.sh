@@ -1102,7 +1102,14 @@ egress_url_decode(){ local s="$1"; s=$(printf '%s' "$s" | sed 's/%\([0-9A-Fa-f][
 egress_query_param(){ local q="&$1&" k="$2" v=""; case "$q" in *"&${k}="*) v="${q#*&${k}=}"; v="${v%%&*}"; egress_url_decode "$v";; *) printf '';; esac; }
 egress_json_array(){ local list="$1" out="" item="" oldifs="$IFS"; IFS=','; for item in $list; do item=$(printf '%s' "$item" | xargs 2>/dev/null || printf '%s' "$item"); [ -n "$item" ] || continue; [ -n "$out" ] && out="${out}, "; out="${out}\"$(egress_json_escape "$item")\""; done; IFS="$oldifs"; printf '%s' "$out"; }
 egress_b64_decode(){ local s="$1"; s=$(printf '%s' "$s" | tr '_-' '+/'); local pad=$(( (4 - ${#s} % 4) % 4 )) i=0; while [ $i -lt $pad ]; do s="${s}="; i=$((i + 1)); done; printf '%s' "$s" | base64 -d 2>/dev/null; }
-egress_add_tag(){ case " $egress_tags " in *" $1 "*) ;; *) egress_tags="${egress_tags:+$egress_tags }$1";; esac; }
+# $2 = xr|sb|both (default both): which kernels get an outbound for this tag.
+# Single-kernel tags (e.g. tuic on sing-box only) stay in egress_tags so rules
+# referencing them pass the existence check; per-kernel rule emitters filter
+# by egress_xr_tags / egress_sb_tags below.
+egress_add_tag(){ case " $egress_tags " in *" $1 "*) ;; *) egress_tags="${egress_tags:+$egress_tags }$1";; esac
+  case "${2:-both}" in xr|both) case " $egress_xr_tags " in *" $1 "*) ;; *) egress_xr_tags="${egress_xr_tags:+$egress_xr_tags }$1";; esac;; esac
+  case "${2:-both}" in sb|both) case " $egress_sb_tags " in *" $1 "*) ;; *) egress_sb_tags="${egress_sb_tags:+$egress_sb_tags }$1";; esac;; esac
+}
 egress_parse_link(){
   local link="$1" scheme="" rest="" frag="" tag="" query="" userinfo="" hostport="" host="" port="" user="" pass="" uuid=""
   scheme="${link%%://*}"; rest="${link#*://}"
@@ -1150,7 +1157,7 @@ egress_parse_link(){
       local xr_flow=""; [ -n "$flow" ] && xr_flow=", \"flow\": \"$(egress_json_escape "$flow")\""
       egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\"$sb_flow$sb_tls$sb_tr},
 "
-      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\"$xr_flow}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
+      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"vless\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"vnext\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"users\": [{\"id\": \"$(egress_json_escape "$uuid")\", \"encryption\": \"none\"$xr_flow}]}]}, \"streamSettings\": {\"network\": \"$typ\", \"security\": \"$xr_sec\"$xr_tls$xr_tr}},
 "
       egress_add_tag "$tag";;
     trojan)
@@ -1216,6 +1223,83 @@ egress_parse_link(){
       egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"shadowsocks\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"servers\": [{\"address\": \"$(egress_json_escape "$host")\", \"port\": $port, \"method\": \"$(egress_json_escape "$method")\", \"password\": \"$(egress_json_escape "$pass")\"$xr_uot}]}},
 "
       egress_add_tag "$tag";;
+    hysteria2|hy2)
+      # Dual kernel: Xray implements Hysteria2 (verified on the pinned
+      # 26.3.27: "protocol": "hysteria" + streamSettings.network "hysteria",
+      # both requiring "version": 2). Xray has no salamander obfs support.
+      egress_hy2_count=$((egress_hy2_count + 1)); [ -n "$tag" ] || tag="hy2${egress_hy2_count}"; [ -z "$port" ] && port=443
+      local pass="" sni="" alpn="" obfs="" obfs_pass="" upmbps="" downmbps=""
+      pass="$userinfo"; [ -n "$pass" ] || pass=$(egress_query_param "$query" "password")
+      pass=$(egress_url_decode "$pass")
+      if [ -z "$pass" ]; then echo "hysteria2 节点 $tag 缺少密码，已跳过"; return 0; fi
+      sni=$(egress_query_param "$query" "sni"); [ -n "$sni" ] || sni="$host"
+      alpn=$(egress_query_param "$query" "alpn"); [ -n "$alpn" ] || alpn="h3"
+      obfs=$(egress_query_param "$query" "obfs")
+      obfs_pass=$(egress_query_param "$query" "obfs-password"); [ -n "$obfs_pass" ] || obfs_pass=$(egress_query_param "$query" "obfs_password")
+      upmbps=$(egress_query_param "$query" "upmbps"); downmbps=$(egress_query_param "$query" "downmbps")
+      local sb_obfs="" sb_bw="" tls_ins=""
+      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      if [ -n "$obfs" ]; then
+        sb_obfs=", \"obfs\": {\"type\": \"$(egress_json_escape "$obfs")\", \"password\": \"$(egress_json_escape "$obfs_pass")\"}"
+        echo "hysteria2 节点 $tag 带 obfs 参数，Xray 不支持 obfs，Xray 侧已忽略（该侧可能无法连接）"
+      fi
+      [ -n "$upmbps" ] && sb_bw="${sb_bw}, \"up_mbps\": $upmbps"
+      [ -n "$downmbps" ] && sb_bw="${sb_bw}, \"down_mbps\": $downmbps"
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"hysteria2\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\"$sb_bw, \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins}$sb_obfs},
+"
+      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"hysteria\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"version\": 2, \"address\": \"$(egress_json_escape "$host")\", \"port\": $port}, \"streamSettings\": {\"network\": \"hysteria\", \"security\": \"tls\", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins}, \"hysteriaSettings\": {\"version\": 2, \"auth\": \"$(egress_json_escape "$pass")\"}}},
+"
+      egress_add_tag "$tag";;
+    tuic)
+      # sing-box only: Xray has no tuic implementation.
+      if [ "$egress_sb_ready" != "1" ]; then echo "tuic 节点 $tag 仅 sing-box 支持，当前未安装 sing-box，已跳过"; return 0; fi
+      egress_tuic_count=$((egress_tuic_count + 1)); [ -n "$tag" ] || tag="tuic${egress_tuic_count}"; [ -z "$port" ] && port=443
+      local uuid="" pass="" sni="" alpn="" cc="" mode="" tls_ins=""
+      case "$userinfo" in *':'*) uuid="${userinfo%%:*}"; pass="${userinfo#*:}";; *) uuid="$userinfo"; pass=$(egress_query_param "$query" "password");; esac
+      uuid=$(egress_url_decode "$uuid"); pass=$(egress_url_decode "$pass")
+      if [ -z "$uuid" ] || [ -z "$pass" ]; then echo "tuic 节点 $tag 缺少 uuid 或密码，已跳过"; return 0; fi
+      sni=$(egress_query_param "$query" "sni"); [ -n "$sni" ] || sni="$host"
+      alpn=$(egress_query_param "$query" "alpn"); [ -n "$alpn" ] || alpn="h3"
+      cc=$(egress_query_param "$query" "congestion_control"); [ -n "$cc" ] || cc="bbr"
+      mode=$(egress_query_param "$query" "udp_relay_mode"); [ -n "$mode" ] || mode="native"
+      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"tuic\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\", \"password\": \"$(egress_json_escape "$pass")\", \"congestion_control\": \"$(egress_json_escape "$cc")\", \"udp_relay_mode\": \"$(egress_json_escape "$mode")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins, \"utls\": {\"enabled\": true, \"fingerprint\": \"chrome\"}}},
+"
+      egress_add_tag "$tag" sb;;
+    anytls)
+      # sing-box only: Xray has no anytls implementation.
+      if [ "$egress_sb_ready" != "1" ]; then echo "anytls 节点 $tag 仅 sing-box 支持，当前未安装 sing-box，已跳过"; return 0; fi
+      egress_anytls_count=$((egress_anytls_count + 1)); [ -n "$tag" ] || tag="anytls${egress_anytls_count}"; [ -z "$port" ] && port=443
+      local pass="" sec="" sni="" fp="" pbk="" sid="" tls_extra="" tls_ins=""
+      pass=$(egress_url_decode "$userinfo")
+      if [ -z "$pass" ]; then echo "anytls 节点 $tag 缺少密码，已跳过"; return 0; fi
+      sec=$(egress_query_param "$query" "security")
+      sni=$(egress_query_param "$query" "sni"); [ -n "$sni" ] || sni="$host"
+      fp=$(egress_query_param "$query" "fp"); [ -n "$fp" ] || fp="chrome"
+      case "$sec" in
+        reality)
+          pbk=$(egress_query_param "$query" "pbk"); sid=$(egress_query_param "$query" "sid")
+          [ -n "$pbk" ] || { echo "anytls reality 节点 $tag 缺少 pbk，已跳过"; return 0; }
+          tls_extra=", \"utls\": {\"enabled\": true, \"fingerprint\": \"$(egress_json_escape "$fp")\"}, \"reality\": {\"enabled\": true, \"public_key\": \"$(egress_json_escape "$pbk")\", \"short_id\": \"$(egress_json_escape "$sid")\"}";;
+        *) tls_extra=", \"utls\": {\"enabled\": true, \"fingerprint\": \"chrome\"}";;
+      esac
+      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"anytls\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_extra$tls_ins}},
+"
+      egress_add_tag "$tag" sb;;
+    naive|naive+https|naive+quic)
+      # sing-box only: Xray has no naive implementation.
+      if [ "$egress_sb_ready" != "1" ]; then echo "naive 节点 $tag 仅 sing-box 支持，当前未安装 sing-box，已跳过"; return 0; fi
+      egress_naive_count=$((egress_naive_count + 1)); [ -n "$tag" ] || tag="naive${egress_naive_count}"; [ -z "$port" ] && port=443
+      local user="" pass="" sni="" tls_ins=""
+      case "$userinfo" in *':'*) user="${userinfo%%:*}"; pass="${userinfo#*:}";; *) user="$userinfo"; pass="";; esac
+      user=$(egress_url_decode "$user"); pass=$(egress_url_decode "$pass")
+      if [ -z "$user" ] || [ -z "$pass" ]; then echo "naive 节点 $tag 缺少用户名或密码，已跳过"; return 0; fi
+      sni=$(egress_query_param "$query" "sni"); [ -n "$sni" ] || sni="$host"
+      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"naive\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"username\": \"$(egress_json_escape "$user")\", \"password\": \"$(egress_json_escape "$pass")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_ins}},
+"
+      egress_add_tag "$tag" sb;;
     *) echo "出口节点协议 $scheme 暂不支持，已跳过：$tag";;
   esac
 }
@@ -1229,6 +1313,11 @@ egress_parse_and_rule(){
   local xr_domain="" xr_ip="" xr_source="" xr_inbound="" xr_geoip="" xr_protocol=""
   local port_seen=0 sb_obj="" xr_obj="" sep="" oldifs2="$IFS" pitem="" poldifs2="" gitem="" goldifs2=""
   local _exp="" _it="" _tg="" _goldifs2=""
+  # Same per-kernel filtering as egress_parse_rules; messages were already
+  # printed by the caller, so this stays silent.
+  _rule_xr=1; _rule_sb=1
+  case " $egress_xr_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) _rule_xr=0;; esac
+  case " $egress_sb_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) _rule_sb=0;; esac
   IFS='&'; for cond in $mp; do
     cond=$(printf '%s' "$cond" | xargs 2>/dev/null || printf '%s' "$cond")
     case "$cond" in *':'*) ctyp="${cond%%:*}"; cval="${cond#*:}";; *) echo "分流规则条件格式错误，已跳过整条：$rule"; IFS="$oldifs2"; return 0;; esac
@@ -1271,8 +1360,8 @@ egress_parse_and_rule(){
   if [ -n "$xr_protocol" ]; then xr_obj="${xr_obj}${sep}\"protocol\": [$xr_protocol]"; sep=", "; fi
   xr_obj="${xr_obj}${sep}\"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "
-  egress_sb_rules="${egress_sb_rules}${sb_obj}"
-  egress_xr_rules="${egress_xr_rules}${xr_obj}"
+  [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}${sb_obj}"
+  [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}${xr_obj}"
   return 0
 }
 egress_parse_rules(){
@@ -1281,6 +1370,14 @@ egress_parse_rules(){
     [ -n "$rule" ] || continue
     case "$rule" in *'=>'*) mp="${rule%%=>*}"; tag="${rule##*=>}";; *) echo "分流规则格式错误，已跳过：$rule"; continue;; esac
     case " $egress_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) echo "分流规则目标出口不存在，已跳过：$rule"; continue;; esac
+    # Single-kernel tags (tuic/anytls/naive on sing-box only): the rule still
+    # applies on the kernel that has the outbound; the other side is skipped
+    # with a message instead of emitting a dangling outbound reference.
+    _rule_xr=1; _rule_sb=1
+    case " $egress_xr_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) _rule_xr=0;; esac
+    case " $egress_sb_tags direct warp-out x-warp-out " in *" $tag "*) ;; *) _rule_sb=0;; esac
+    [ "$_rule_xr" = "0" ] && echo "分流规则 $rule 的目标出口 $tag 仅 sing-box 支持，Xray 侧已跳过该规则"
+    [ "$_rule_sb" = "0" ] && echo "分流规则 $rule 的目标出口 $tag 仅 Xray 支持，sing-box 侧已跳过该规则"
     case "$mp" in *'&'*) egress_parse_and_rule "$mp" "$tag" "$rule"; continue;; esac
     typ="${mp%%:*}"; val="${mp#*:}"
     if [ "$typ" = "inbound" ]; then
@@ -1292,39 +1389,39 @@ egress_parse_rules(){
     fi
     arr=$(egress_json_array "$val")
     case "$typ" in
-      domain) egress_sb_rules="${egress_sb_rules}      {\"domain_suffix\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      domain) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"domain_suffix\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
-      ip) egress_sb_rules="${egress_sb_rules}      {\"ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"ip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      ip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"ip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
-      source) egress_sb_rules="${egress_sb_rules}      {\"source_ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"source\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      source) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"source_ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"source\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
-      inbound) egress_sb_rules="${egress_sb_rules}      {\"inbound\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"inboundTag\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      inbound) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"inbound\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"inboundTag\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
-      geoip) egress_sb_rules="${egress_sb_rules}      {\"geoip\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"geoip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      geoip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geoip\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"geoip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       geosite) local garr="" gitem="" goldifs="$IFS"; IFS=','; for gitem in $val; do gitem=$(printf '%s' "$gitem" | xargs 2>/dev/null || printf '%s' "$gitem"); [ -n "$gitem" ] || continue; [ -n "$garr" ] && garr="${garr}, "; garr="${garr}\"geosite:$(egress_json_escape "$gitem")\""; done; IFS="$goldifs"
-        egress_sb_rules="${egress_sb_rules}      {\"geosite\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$garr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+        [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geosite\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$garr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       port) local sb_p="" sb_r="" xr_p="" pitem="" poldifs="$IFS"; IFS=','; for pitem in $val; do pitem=$(printf '%s' "$pitem" | xargs 2>/dev/null || printf '%s' "$pitem"); case "$pitem" in *'-'*) case "$pitem" in [0-9]*-[0-9]*) sb_r="${sb_r:+$sb_r, }\"${pitem%-*}:${pitem#*-}\""; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口范围格式错误，已跳过：$pitem";; esac;; [0-9]*) sb_p="${sb_p:+$sb_p, }$pitem"; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口格式错误，已跳过：$pitem";; esac; done; IFS="$poldifs"
         if [ -n "$sb_p" ] || [ -n "$sb_r" ]; then
-          egress_sb_rules="${egress_sb_rules}      {"
-          [ -n "$sb_p" ] && egress_sb_rules="${egress_sb_rules}\"port\": [$sb_p], "
-          [ -n "$sb_r" ] && egress_sb_rules="${egress_sb_rules}\"port_range\": [$sb_r], "
-          egress_sb_rules="${egress_sb_rules}\"outbound\": \"$(egress_json_escape "$tag")\"},
+          [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {"
+          [ "$_rule_sb" = "1" ] && [ -n "$sb_p" ] && egress_sb_rules="${egress_sb_rules}\"port\": [$sb_p], "
+          [ "$_rule_sb" = "1" ] && [ -n "$sb_r" ] && egress_sb_rules="${egress_sb_rules}\"port_range\": [$sb_r], "
+          [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}\"outbound\": \"$(egress_json_escape "$tag")\"},
 "
-          egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"port\": \"$(egress_json_escape "$xr_p")\", \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+          [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"port\": \"$(egress_json_escape "$xr_p")\", \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "
         else
           echo "分流规则无有效端口，已跳过整条：$rule"
         fi;;
-      protocol) egress_sb_rules="${egress_sb_rules}      {\"protocol\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"protocol\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      protocol) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"protocol\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"protocol\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       *) echo "分流规则类型 $typ 暂不支持，已跳过：$rule";;
     esac
@@ -1363,7 +1460,10 @@ egress_geo_setup(){
   export XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray"
 }
 egress_init(){
-  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0
+  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
+  # sing-box-only egress nodes (tuic/anytls/naive) need a sing-box config to
+  # live in; at pre_xrsbout time sb.json exists iff sing-box was installed.
+  [ -e "$HOME/agsbx/sb.json" ] && egress_sb_ready=1
   # egress_add: one-time append to egress_nodes, idempotent. If a node
   # (exact ';' delimited string) is already in egress_nodes it is skipped,
   # so calling xrsbout twice (or restarting a container that still has
