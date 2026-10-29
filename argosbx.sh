@@ -1200,6 +1200,14 @@ cert_watch(){
   [ -s "$CERT_CRT" ] || return 0
   local ym_watch="" cur="" old="" cert_text=""
   ym_watch="${ym:-$(cat "$HOME/agsbx/ym" 2>/dev/null)}"
+  # validity warning: the hash check below only fires when the cert CHANGES.
+  # A silently failed renewal (broken acme hook, Caddy not reloading) leaves
+  # the hash unchanged until expiry day. Warn when <7 days remain, daily.
+  if command -v openssl >/dev/null 2>&1; then
+    if ! openssl x509 -in "$CERT_CRT" -noout -checkend 604800 2>/dev/null; then
+      echo "⚠ 域名证书（${ym_watch:-未知域名}）7 天内过期但未检测到续期，请检查 acme.sh / Caddy 续期是否正常"
+    fi
+  fi
   cur=$(cert_cert_hash); [ -n "$cur" ] || return 0
   if [ ! -f "$HOME/agsbx/cert.hash" ]; then echo "$cur" > "$HOME/agsbx/cert.hash"; return 0; fi
   old=$(cat "$HOME/agsbx/cert.hash" 2>/dev/null)
@@ -1368,12 +1376,14 @@ fi
 upxray(){
 url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/xray-$cpu"; out="$HOME/agsbx/xray"; (command -v curl >/dev/null 2>&1 && curl -Lo "$out" -# --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -O "$out" --tries=2 "$url")
 chmod +x "$HOME/agsbx/xray"
+if [ ! -x "$HOME/agsbx/xray" ] || ! "$HOME/agsbx/xray" version 2>/dev/null | grep -q '^Xray'; then echo "Xray 内核下载失败，安装中止"; rm -f "$HOME/agsbx/xray"; exit 1; fi
 sbcore=$("$HOME/agsbx/xray" version 2>/dev/null | awk '/^Xray/{print $2}')
 echo "已安装Xray正式版内核：$sbcore"
 }
 upsingbox(){
 url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/sing-box-$cpu"; out="$HOME/agsbx/sing-box"; (command -v curl>/dev/null 2>&1 && curl -Lo "$out" -# --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -O "$out" --tries=2 "$url")
 chmod +x "$HOME/agsbx/sing-box"
+if [ ! -x "$HOME/agsbx/sing-box" ] || ! "$HOME/agsbx/sing-box" version 2>/dev/null | grep -q 'sing-box version'; then echo "Sing-box 内核下载失败，安装中止"; rm -f "$HOME/agsbx/sing-box"; exit 1; fi
 sbcore=$("$HOME/agsbx/sing-box" version 2>/dev/null | awk '/version/{print $NF}')
 echo "已安装Sing-box正式版内核：$sbcore"
 }
@@ -6224,11 +6234,6 @@ if [ ! -f "$HOME/agsbx/SHA256.txt" ] || ! openssl x509 -in "$HOME/agsbx/selfsign
 mkdir -p "$HOME/agsbx/selfsigned" 2>/dev/null || true
 command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/selfsigned/private.key" >/dev/null 2>&1
 command -v openssl >/dev/null 2>&1 && openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" -addext "subjectAltName=DNS:www.bing.com" >/dev/null 2>&1 || openssl req -new -x509 -days 36500 -key "$HOME/agsbx/selfsigned/private.key" -out "$HOME/agsbx/selfsigned/cert.crt" -subj "/CN=www.bing.com" >/dev/null 2>&1
-#if [ ! -f "$HOME/agsbx/private.key" ]; then
-#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/private.key"; out="$HOME/agsbx/private.key"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")
-#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/cert.crt"; out="$HOME/agsbx/cert.crt"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")
-#echo "fc6dca8cfc4081102aa9655d0d4805c27d7266f605541d242ad66ad00a284a35" > "$HOME/agsbx/SHA256.txt"
-#else
 SHA256=$(openssl x509 -in $HOME/agsbx/selfsigned/cert.crt -outform DER | sha256sum | awk '{print $1}')
 echo "$SHA256" > "$HOME/agsbx/SHA256.txt"
 fi

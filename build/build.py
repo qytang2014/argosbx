@@ -364,6 +364,22 @@ def main():
     t = replace(t, "echo \"申请本地IP域名证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)\"",
                 "echo \"域名证书：由 Caddy 或 acme.sh 申请（certsrc 自动：低内存走 acme，否则走 Caddy；certmode 自动：未代理用 HTTP，已代理/Argo 用 DNS），固定目录 $HOME/agsbx/cert\"", "showmode-acme-line", 1)
 
+    # --- kernel download verification (private): abort on failed download ---
+    # upxray/upsingbox silently continued when curl/wget both failed (the
+    # version probe swallowed errors with 2>/dev/null), surfacing much later
+    # as a confusing "process not started" failure. Verify the binary exists,
+    # is executable and reports its version; otherwise abort with a clear
+    # message instead of limping on.
+    t = replace(t, 'chmod +x "$HOME/agsbx/xray"\nsbcore=$("$HOME/agsbx/xray" version 2>/dev/null | awk \'/^Xray/{print $2}\')',
+                'chmod +x "$HOME/agsbx/xray"\nif [ ! -x "$HOME/agsbx/xray" ] || ! "$HOME/agsbx/xray" version 2>/dev/null | grep -q \'^Xray\'; then echo "Xray 内核下载失败，安装中止"; rm -f "$HOME/agsbx/xray"; exit 1; fi\nsbcore=$("$HOME/agsbx/xray" version 2>/dev/null | awk \'/^Xray/{print $2}\')', "kernel-verify-xray", 1)
+    t = replace(t, 'chmod +x "$HOME/agsbx/sing-box"\nsbcore=$("$HOME/agsbx/sing-box" version 2>/dev/null | awk \'/version/{print $NF}\')',
+                'chmod +x "$HOME/agsbx/sing-box"\nif [ ! -x "$HOME/agsbx/sing-box" ] || ! "$HOME/agsbx/sing-box" version 2>/dev/null | grep -q \'sing-box version\'; then echo "Sing-box 内核下载失败，安装中止"; rm -f "$HOME/agsbx/sing-box"; exit 1; fi\nsbcore=$("$HOME/agsbx/sing-box" version 2>/dev/null | awk \'/version/{print $NF}\')', "kernel-verify-sb", 1)
+
+    # --- dead code: remove commented-out upstream private.key/cert.crt download ---
+    # The original public private.key was deliberately dropped (it is public,
+    # so it is not private); the commented block is dead weight.
+    t = replace(t, '#if [ ! -f "$HOME/agsbx/private.key" ]; then\n#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/private.key"; out="$HOME/agsbx/private.key"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")\n#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/cert.crt"; out="$HOME/agsbx/cert.crt"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")\n#echo "fc6dca8cfc4081102aa9655d0d4805c27d7266f605541d242ad66ad00a284a35" > "$HOME/agsbx/SHA256.txt"\n#else\n', '', "dead-private-key-block", 1)
+
     # --- vmess-ws-tls (private): new protocol flag vmtls, internal flag vmt ---
     # Top variable list, flag handling, rep/install guards, port export,
     # recovery line, and vars_save list all gain vmtls, following vmpt.

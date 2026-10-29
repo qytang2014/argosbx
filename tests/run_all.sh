@@ -33,6 +33,7 @@ bash tests/test_egress_inbound.sh
 bash tests/test_egress_and.sh
 bash tests/test_egress_protocols.sh
 bash tests/test_egress_misalign.sh
+bash tests/test_kernel_verify.sh
 bash tests/test_vlpt_more.sh
 bash tests/test_proto_more.sh
 bash tests/test_container_vars.sh

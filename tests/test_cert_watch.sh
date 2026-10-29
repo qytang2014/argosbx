@@ -50,6 +50,18 @@ cert_watch; [ ! -f "$HOME/restart.log" ] || { echo "FAIL: wrong-domain cert shou
 # 6. valid same-domain cert again (after the two skipped changes): should restart, proving hash was not updated by skipped cases
 mkcert test.example.com
 cert_watch; grep -q "^sb$" "$HOME/restart.log" || { echo "FAIL: valid cert after skipped cases should restart"; exit 1; }
+rm -f "$HOME/restart.log"
+# 7. expiring cert (<7 days): warns about expiry; first run records the new hash
+# (restarts), second run has unchanged hash -> warns but does NOT restart
+openssl req -new -x509 -days 3 -nodes -out "$CERT_CRT" -keyout "$CERT_KEY" -subj "/CN=test.example.com" >/dev/null 2>&1
+rm -f "$HOME/restart.log"
+out=$(cert_watch 2>&1); echo "$out" | grep -q "7 天内过期" || { echo "FAIL: expiring cert should warn"; exit 1; }
+rm -f "$HOME/restart.log"
+out=$(cert_watch 2>&1); echo "$out" | grep -q "7 天内过期" || { echo "FAIL: expiring cert should warn on repeat"; exit 1; }
+[ ! -f "$HOME/restart.log" ] || { echo "FAIL: unchanged expiring cert should not restart"; exit 1; }
+# 8. long-lived cert: no expiry warning
+mkcert test.example.com
+out=$(cert_watch 2>&1); echo "$out" | grep -q "7 天内过期" && { echo "FAIL: long-lived cert should not warn"; exit 1; }
 echo "cert-watch cases OK"
 RUN
 bash "$TMP/run.sh" "$TMP/fakehome" "$TMP/watch.sh"

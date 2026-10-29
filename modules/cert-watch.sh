@@ -36,6 +36,14 @@ cert_watch(){
   [ -s "$CERT_CRT" ] || return 0
   local ym_watch="" cur="" old="" cert_text=""
   ym_watch="${ym:-$(cat "$HOME/agsbx/ym" 2>/dev/null)}"
+  # validity warning: the hash check below only fires when the cert CHANGES.
+  # A silently failed renewal (broken acme hook, Caddy not reloading) leaves
+  # the hash unchanged until expiry day. Warn when <7 days remain, daily.
+  if command -v openssl >/dev/null 2>&1; then
+    if ! openssl x509 -in "$CERT_CRT" -noout -checkend 604800 2>/dev/null; then
+      echo "⚠ 域名证书（${ym_watch:-未知域名}）7 天内过期但未检测到续期，请检查 acme.sh / Caddy 续期是否正常"
+    fi
+  fi
   cur=$(cert_cert_hash); [ -n "$cur" ] || return 0
   if [ ! -f "$HOME/agsbx/cert.hash" ]; then echo "$cur" > "$HOME/agsbx/cert.hash"; return 0; fi
   old=$(cat "$HOME/agsbx/cert.hash" 2>/dev/null)
