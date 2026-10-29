@@ -3299,6 +3299,12 @@ egress_b64_decode(){ local s="$1"; s=$(printf '%s' "$s" | tr '_-' '+/'); local p
 egress_add_tag(){ case " $egress_tags " in *" $1 "*) ;; *) egress_tags="${egress_tags:+$egress_tags }$1";; esac
   case "${2:-both}" in xr|both) case " $egress_xr_tags " in *" $1 "*) ;; *) egress_xr_tags="${egress_xr_tags:+$egress_xr_tags }$1";; esac;; esac
   case "${2:-both}" in sb|both) case " $egress_sb_tags " in *" $1 "*) ;; *) egress_sb_tags="${egress_sb_tags:+$egress_sb_tags }$1";; esac;; esac
+  # single-kernel-only tag sets, for the misalignment warning below.
+  # A tag lands here iff it was registered with an xr-only / sb-only scope.
+  case "${2:-both}" in
+    xr) case " $egress_xr_only_tags " in *" $1 "*) ;; *) egress_xr_only_tags="${egress_xr_only_tags:+$egress_xr_only_tags }$1";; esac;;
+    sb) case " $egress_sb_only_tags " in *" $1 "*) ;; *) egress_sb_only_tags="${egress_sb_only_tags:+$egress_sb_only_tags }$1";; esac;;
+  esac
 }
 egress_parse_link(){
   local xr_only=0
@@ -3650,8 +3656,28 @@ egress_geo_setup(){
   egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" "$HOME/agsbx/geo/xray/geosite.dat"
   export XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray"
 }
+# Kernel-misalignment warning (cheap, actionable): vlpt is the only movable
+# inbound. If it landed on one kernel while egress nodes exist that only the
+# other kernel supports, the user probably expects them to work from vlpt --
+# but traffic entering vlpt can only reach outbounds on vlpt's own kernel.
+# This runs at the end of egress_init; vlpt_on is computed at the top of
+# ins(), which always runs before xrsbout -> pre_xrsbout -> egress_init, so
+# vlpt_on is available here (main script and container alike). It does NOT
+# move anything, it only names the nodes and the exact fix.
+egress_warn_misalign(){
+  [ -n "$vlpt_on" ] || return 0
+  if [ "$vlpt_on" = "xray" ] && [ -n "$egress_sb_only_tags" ]; then
+    echo "⚠ 内核错位：vlpt 当前在 Xray 上，但以下出口节点仅 sing-box 支持，vlpt 的流量无法使用它们："
+    echo "  $egress_sb_only_tags"
+    echo "  修复（二选一）：1) 设 vlpt_kernel=sb，把 vlpt 建到 sing-box 上；2) 换 Xray 和 sing-box 都支持的出口协议（如 vless/trojan/vmess/ss/socks）"
+  elif [ "$vlpt_on" = "sb" ] && [ -n "$egress_xr_only_tags" ]; then
+    echo "⚠ 内核错位：vlpt 当前在 sing-box 上，但以下出口节点仅 Xray 支持，vlpt 的流量无法使用它们："
+    echo "  $egress_xr_only_tags"
+    echo "  修复（二选一）：1) 设 vlpt_kernel=xray，把 vlpt 建到 Xray 上；2) 换 Xray 和 sing-box 都支持的出口协议（如 vless/trojan/vmess/ss/socks）"
+  fi
+}
 egress_init(){
-  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
+  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_xr_only_tags=""; egress_sb_only_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
   # sing-box-only egress nodes (tuic/anytls/naive) need a sing-box config to
   # live in; at pre_xrsbout time sb.json exists iff sing-box was installed.
   [ -e "$HOME/agsbx/sb.json" ] && egress_sb_ready=1
@@ -3685,6 +3711,7 @@ egress_init(){
 "
     egress_add_tag "bind${n}"; done; IFS="$oldifs"
   egress_parse_rules "$egress_rules"
+  egress_warn_misalign
 }
 command -v register_hook >/dev/null 2>&1 && {
   register_hook pre_xrsbout egress_init
