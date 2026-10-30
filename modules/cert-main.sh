@@ -12,10 +12,10 @@ if [ -n "$ym" ]; then
     ensure_acme || true
     if [ -x "$HOME/.acme.sh/acme.sh" ]; then
       if [ "$certmode_selected" = "dns" ]; then
-        CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
+        CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
         "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
-        "$HOME/.acme.sh/acme.sh" --issue --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
+        "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
         "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       fi
     else

@@ -57,4 +57,7 @@ grep -q "dns cloudflare" "$2/testetc/argosbx.caddyfile" || { echo "FAIL: dns cad
 echo "write_caddyfile system/import/dns OK"
 RUN
 bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/write_test.sh"
+# acme.sh --issue must pin --server letsencrypt (default CA is ZeroSSL which needs EAB registration)
+[ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "2" ] || { echo "FAIL: expected 2 --issue --server letsencrypt commands"; exit 1; }
+echo "acme.sh --server letsencrypt pinned OK"
 echo "PASS: cert (certsrc, certmode, write_caddyfile)"
