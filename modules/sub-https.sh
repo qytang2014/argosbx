@@ -104,8 +104,10 @@ subhttps_decide_mode(){
   echo "https"
 }
 subhttps_write_conf(){
-  local ym_c="$1"
+  local ym_c="$1" token="" _webroot=""
   [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
+  _webroot="${webroot:-/var/www/html}"
   mkdir -p "$HOME/agsbx" 2>/dev/null || true
   {
     echo "{"
@@ -113,10 +115,62 @@ subhttps_write_conf(){
     echo "}"
     echo "https://$ym_c {"
     echo "  tls \"$HOME/agsbx/cert/cert.crt\" \"$HOME/agsbx/cert/private.key\""
-    echo "  root * \"$HOME/websbx\""
+    if [ -n "$token" ]; then
+      echo "  handle_path /$token/* {"
+      echo "    root * \"$HOME/websbx\""
+      echo "    file_server"
+      echo "  }"
+    fi
+    echo "  root * \"$_webroot\""
     echo "  file_server"
     echo "}"
   } > "$HOME/agsbx/Caddyfile.sub" 2>/dev/null || return 1
+  return 0
+}
+# subhttps_write_snippets: 为用户自有 Nginx/Caddy 生成配置片段（脚本不能绑 443 时手动加）
+subhttps_write_snippets(){
+  local ym_c="$1" token="" _webroot=""
+  [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
+  _webroot="${webroot:-/var/www/html}"
+  mkdir -p "$HOME/agsbx" 2>/dev/null || true
+  # Caddy 片段
+  {
+    echo "# 加到你现有 Caddyfile 的 $ym_c 站点块内（handle 顺序：订阅优先，博客兜底）"
+    if [ -n "$token" ]; then
+      echo "handle_path /$token/* {"
+      echo "  root * \"$HOME/websbx\""
+      echo "  file_server"
+      echo "}"
+    fi
+    echo "# 博客（已由 deploy_camouflage_blog 部署到 $_webroot）："
+    echo "# root * $_webroot"
+    echo "# file_server"
+  } > "$HOME/agsbx/caddy-snippet.txt" 2>/dev/null || true
+  # Nginx 片段
+  {
+    echo "# 加到你现有 nginx 的 server { listen 443 ssl; server_name $ym_c; } 块内"
+    echo "# 注意：location 顺序 matters，订阅路径优先"
+    if [ -n "$token" ]; then
+      echo "location ^~ /$token/ {"
+      echo "  alias $HOME/websbx/;"
+      echo "  # 订阅文件：$token/clmi.yaml 等"
+      echo "}"
+    fi
+    echo "# 博客根目录（已部署到 $_webroot）："
+    echo "# location / {"
+    echo "#   root $_webroot;"
+    echo "#   index index.html;"
+    echo "# }"
+    echo "#"
+    echo "# HTTP（80 端口）只保留 ACME 验证 + 跳转 HTTPS："
+    echo "# server {"
+    echo "#   listen 80; server_name $ym_c;"
+    echo "#   location ^~ /.well-known/acme-challenge/ { root $_webroot; }"
+    echo "#   location / { return 301 https://\$host\$request_uri; }"
+    echo "# }"
+  } > "$HOME/agsbx/nginx-snippet.txt" 2>/dev/null || true
+  echo "配置片段已生成：$HOME/agsbx/caddy-snippet.txt / $HOME/agsbx/nginx-snippet.txt"
   return 0
 }
 subhttps_cert_hash(){
@@ -309,9 +363,12 @@ sub_https_sync(){
       subhttps_manage_subport "https"
       echo "https" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
       echo "订阅已切换为 https 域名订阅：https://$ym_c/$token/"
+      subhttps_write_snippets "$ym_c" || true
       return 0
     fi
-    echo "Caddy 启动失败（可能 443 已被占用），回退 http 域名订阅"
+    echo "Caddy 启动失败（可能 443 已被你自己的 Nginx/Caddy 占用），回退 http 域名订阅"
+    subhttps_write_snippets "$ym_c" || true
+    echo "如需在自有 Web 服务器上启用 https 订阅，请按 $HOME/agsbx/caddy-snippet.txt 或 nginx-snippet.txt 手动配置后重载"
     mode="http-domain"
   fi
   subhttps_stop_caddy
