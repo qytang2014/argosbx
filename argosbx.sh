@@ -1144,6 +1144,18 @@ ensure_caddy_download(){
   return 0
 }
 # 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时内为指向 Caddy 证书存储的软链接，acme 时直接安装到该目录）。
+# domain_cert_valid：检查是否已有 $ym 的有效证书（两文件存在非空、可解析、域名匹配、剩余有效期 >7 天）。
+# 有则返回 0，调用方跳过 --issue 直接复用，避免"已有证书还报发证失败"的误导。
+domain_cert_valid(){
+  [ -n "$ym" ] || return 1
+  [ -s "$CERT_CRT" ] && [ -s "$CERT_KEY" ] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+  local cert_text=""
+  cert_text=$(openssl x509 -in "$CERT_CRT" -noout -subject -ext subjectAltName 2>/dev/null || openssl x509 -in "$CERT_CRT" -noout -subject 2>/dev/null) || return 1
+  case "$cert_text" in *"$ym"*) ;; *) return 1;; esac
+  openssl x509 -in "$CERT_CRT" -noout -checkend 604800 >/dev/null 2>&1 || return 1
+  return 0
+}
 # wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
 wait_domain_cert(){
   [ -n "$ym" ] || return 1
@@ -6251,7 +6263,9 @@ if [ -n "$ym" ]; then
     echo "域名证书来源：acme.sh（验证方式：$certmode_selected，低内存机器不常驻 Caddy），固定目录 $CERT_DIR"
     ensure_acme || true
     if [ -x "$HOME/.acme.sh/acme.sh" ]; then
-      if [ "$certmode_selected" = "dns" ]; then
+      if domain_cert_valid; then
+        echo "检测到已有有效域名证书（$ym），跳过申请，直接使用"
+      elif [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
         "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else

@@ -11,7 +11,9 @@ if [ -n "$ym" ]; then
     echo "域名证书来源：acme.sh（验证方式：$certmode_selected，低内存机器不常驻 Caddy），固定目录 $CERT_DIR"
     ensure_acme || true
     if [ -x "$HOME/.acme.sh/acme.sh" ]; then
-      if [ "$certmode_selected" = "dns" ]; then
+      if domain_cert_valid; then
+        echo "检测到已有有效域名证书（$ym），跳过申请，直接使用"
+      elif [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
         "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else

@@ -60,4 +60,33 @@ bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/write_test.sh"
 # acme.sh --issue must pin --server letsencrypt (default CA is ZeroSSL which needs EAB registration)
 [ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "2" ] || { echo "FAIL: expected 2 --issue --server letsencrypt commands"; exit 1; }
 echo "acme.sh --server letsencrypt pinned OK"
+# domain_cert_valid: valid cert -> 0, expiring/wrong-domain/missing -> 1
+python3 - "$ROOT/argosbx.sh" "$TMP/certdir" << 'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+m = re.search(r"domain_cert_valid\(\)\{.*?\n\}\n", t, re.S)
+assert m, "domain_cert_valid not found"
+open(f"{sys.argv[2]}/domain_cert_valid.sh", "w").write(m.group(0))
+PY
+cat > "$TMP/run_valid.sh" << 'RUN'
+#!/bin/bash
+source "$1/certdir/domain_cert_valid.sh"
+export CERT_DIR="$1/certs" CERT_CRT="$1/certs/cert.crt" CERT_KEY="$1/certs/private.key"
+mkdir -p "$1/certs"
+ym="test.example.com"
+# valid cert, 30 days, matching SAN -> 0
+openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 30 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
+domain_cert_valid || { echo "FAIL: valid cert should pass"; exit 1; }
+# expiring in 3 days -> 1
+openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 3 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
+domain_cert_valid && { echo "FAIL: expiring cert should fail"; exit 1; }
+# wrong domain -> 1
+openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 30 -nodes -subj "/CN=other.example.com" -addext "subjectAltName=DNS:other.example.com" 2>/dev/null
+domain_cert_valid && { echo "FAIL: wrong domain should fail"; exit 1; }
+# missing files -> 1
+rm -f "$CERT_CRT" "$CERT_KEY"
+domain_cert_valid && { echo "FAIL: missing files should fail"; exit 1; }
+echo "domain_cert_valid OK"
+RUN
+bash "$TMP/run_valid.sh" "$TMP"
 echo "PASS: cert (certsrc, certmode, write_caddyfile)"
