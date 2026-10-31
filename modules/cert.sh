@@ -44,6 +44,7 @@ detect_certsrc(){
 # 自动逻辑：显式选择优先；否则 Argo 开启时按已代理处理；否则查 ym 的 DNS，若解析 IP 已知且不等于本机 IP 则按已代理处理，否则 HTTP。
 # 注意：本机 IP 以 $HOME/agsbx/server_ip.log 为准，若该文件不存在则不做 DNS 对比，避免误判为已代理。
 detect_certmode(){
+  if [ "$certmode" = "webroot" ]; then echo "webroot"; return; fi
   if [ "$certmode" = "http" ]; then echo "http"; return; fi
   if [ "$certmode" = "dns" ]; then echo "dns"; return; fi
   if [ -n "$argo" ] || [ -n "$agn" ]; then echo "dns"; return; fi
@@ -79,10 +80,17 @@ write_caddyfile(){
     mkdir -p "$HOME/agsbx"
     conf_file="$HOME/agsbx/Caddyfile"
   fi
+  _webroot="${webroot:-/var/www/html}"
+  # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
+  if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+    fi
+  fi
   if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
+    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
   else
-    printf "%s {\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
+    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
   fi
   chmod 644 "$conf_file" 2>/dev/null || true
   caddyfile_path="$conf_file"

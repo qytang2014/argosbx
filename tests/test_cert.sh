@@ -58,7 +58,13 @@ echo "write_caddyfile system/import/dns OK"
 RUN
 bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/write_test.sh"
 # acme.sh --issue must pin --server letsencrypt (default CA is ZeroSSL which needs EAB registration)
-[ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "2" ] || { echo "FAIL: expected 2 --issue --server letsencrypt commands"; exit 1; }
+[ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "3" ] || { echo "FAIL: expected 3 --issue --server letsencrypt commands"; exit 1; }
+# webroot mode: detect_certmode returns webroot, acme uses -w
+grep -q 'if \[ "$certmode" = "webroot" \]; then echo "webroot"; return; fi' "$ROOT/argosbx.sh" || { echo "FAIL: webroot detect_certmode"; exit 1; }
+grep -q 'acme.sh" --issue --server letsencrypt -w "$_webroot" -d "$ym"' "$ROOT/argosbx.sh" || { echo "FAIL: webroot --issue"; exit 1; }
+# Caddy file_server (not respond "ok")
+grep -q 'file_server' "$ROOT/argosbx.sh" || { echo "FAIL: caddy file_server missing"; exit 1; }
+! grep -q 'respond "ok"' "$ROOT/argosbx.sh" || { echo "FAIL: respond ok should be gone"; exit 1; }
 echo "acme.sh --server letsencrypt pinned OK"
 # domain_cert_valid: valid cert -> 0, expiring/wrong-domain/missing -> 1
 python3 - "$ROOT/argosbx.sh" "$TMP/certdir" << 'PY'

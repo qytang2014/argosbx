@@ -2042,6 +2042,7 @@ export port_nv=${nvpt:-''}
 export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
 export ym_vl_re=${reym:-''}
+if [ -n "$reym" ] && [ "$reym" = "$ym" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
 export alns=${alns:-''}
@@ -2089,6 +2090,7 @@ detect_certsrc(){
 # 自动逻辑：显式选择优先；否则 Argo 开启时按已代理处理；否则查 ym 的 DNS，若解析 IP 已知且不等于本机 IP 则按已代理处理，否则 HTTP。
 # 注意：本机 IP 以 $HOME/agsbx/server_ip.log 为准，若该文件不存在则不做 DNS 对比，避免误判为已代理。
 detect_certmode(){
+  if [ "$certmode" = "webroot" ]; then echo "webroot"; return; fi
   if [ "$certmode" = "http" ]; then echo "http"; return; fi
   if [ "$certmode" = "dns" ]; then echo "dns"; return; fi
   if [ -n "$argo" ] || [ -n "$agn" ]; then echo "dns"; return; fi
@@ -2124,10 +2126,17 @@ write_caddyfile(){
     mkdir -p "$HOME/agsbx"
     conf_file="$HOME/agsbx/Caddyfile"
   fi
+  _webroot="${webroot:-/var/www/html}"
+  # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
+  if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+    fi
+  fi
   if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
+    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
   else
-    printf "%s {\n  respond \"ok\"\n}\n" "$ym" > "$conf_file"
+    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
   fi
   chmod 644 "$conf_file" 2>/dev/null || true
   caddyfile_path="$conf_file"
@@ -2531,7 +2540,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
         "security": "reality",
         "realitySettings": {
           "fingerprint": "chrome",
-          "target": "${ym_vl_re}:443",
+          "target": "${ym_vl_fb:-$ym_vl_re}:443",
           "serverNames": [
             "${ym_vl_re}"
           ],
@@ -2786,7 +2795,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
                 "security": "reality",
                 "realitySettings": {
                     "fingerprint": "chrome",
-                    "dest": "${ym_vl_re}:443",
+                    "dest": "${ym_vl_fb:-$ym_vl_re}:443",
                     "serverNames": [
                       "${ym_vl_re}"
                     ],
@@ -2851,7 +2860,7 @@ while :; do
                 "security": "reality",
                 "realitySettings": {
                     "fingerprint": "chrome",
-                    "dest": "${ym_vl_re}:443",
+                    "dest": "${ym_vl_fb:-$ym_vl_re}:443",
                     "serverNames": [
                       "${ym_vl_re}"
                     ],
@@ -2913,7 +2922,7 @@ if [ -n "${xhpt_more:-}" ]; then
         "security": "reality",
         "realitySettings": {
           "fingerprint": "chrome",
-          "target": "${ym_vl_re}:443",
+          "target": "${ym_vl_fb:-$ym_vl_re}:443",
           "serverNames": [
             "${ym_vl_re}"
           ],
@@ -3297,7 +3306,7 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
              "reality": {
               "enabled": true,
               "handshake": {
-              "server": "${ym_vl_re}",
+              "server": "${ym_vl_fb:-$ym_vl_re}",
               "server_port": 443
              },
              "private_key": "$private_key_s",
@@ -3363,7 +3372,7 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
             "reality": {
                 "enabled": true,
                 "handshake": {
-                    "server": "${ym_vl_re}",
+                    "server": "${ym_vl_fb:-$ym_vl_re}",
                     "server_port": 443
                 },
                 "private_key": "$private_key_s",
@@ -3428,7 +3437,7 @@ while :; do
             "reality": {
                 "enabled": true,
                 "handshake": {
-                    "server": "${ym_vl_re}",
+                    "server": "${ym_vl_fb:-$ym_vl_re}",
                     "server_port": 443
                 },
                 "private_key": "$private_key_s",
@@ -3628,7 +3637,7 @@ if [ -n "${arpt_more:-}" ]; then
              "reality": {
               "enabled": true,
               "handshake": {
-              "server": "${ym_vl_re}",
+              "server": "${ym_vl_fb:-$ym_vl_re}",
               "server_port": 443
              },
              "private_key": "$private_key_s",
@@ -7309,6 +7318,11 @@ if [ -n "$ym" ]; then
         echo "检测到已有有效域名证书（$ym），跳过申请，直接使用"
       elif [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+      elif [ "$certmode_selected" = "webroot" ]; then
+        _webroot="${webroot:-/var/www/html}"
+        mkdir -p "$_webroot/.well-known/acme-challenge" 2>/dev/null || true
+        "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt -w "$_webroot" -d "$ym" >/dev/null 2>&1 || echo "acme.sh webroot 发证失败（检查 nginx 是否有 /.well-known/acme-challenge/ location 且指向 $_webroot），脚本仍会继续等待证书，超时回落自签"
         "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
         "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"

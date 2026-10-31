@@ -474,10 +474,18 @@
           </div>
         </div>
         <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后各协议地址优先用该域名（TLS 仍按证书就绪切换，Reality SNI 仍用 reym），留空则用 IP"/></div>
+        <div class="row"><label>伪装博客 <span class="pill">camouflage</span></label>
+          <select id="camouflage">
+            <option value="">默认（webroot 无 index.html 时自动部署）</option>
+            <option value="1">强制部署（覆盖 webroot 现有文件）</option>
+            <option value="0">不部署</option>
+          </select>
+        </div>
         <div class="row"><label>证书验证方式 <span class="pill">certmode</span></label>
           <select id="certmode">
             <option value="">默认 自动（未代理用 HTTP，已代理/Argo 用 DNS）</option>
             <option value="http">HTTP 验证（需 80 端口空闲）</option>
+            <option value="webroot">Webroot 验证（nginx 已占 80 端口时用，需配 /.well-known/ location）</option>
             <option value="dns">DNS 验证（需 Cloudflare API Token）</option>
           </select>
         </div>
@@ -488,7 +496,7 @@
             <option value="acme">acme.sh（低内存、只要证书）</option>
           </select>
         </div>
-        <div class="row"><label>Reality 域名 <span class="pill">reym</span></label><input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com" disabled/></div>
+        <div class="row"><label>Reality 域名 <span class="pill">reym</span></label><input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com；填自有域名且与 ym 相同→探测回落本机443" disabled/></div>
         <div class="row"><label>CDN优选IP域名 <span class="pill">cfip</span></label><input id="cfip" type="text" placeholder="支持2个优选IP域名(空格间隔)，留空默认优选域名" disabled></div>
         <div class="row"><label>启用域名IP证书TLS <span class="pill">alns</span></label>
           <select id="alns">
@@ -628,7 +636,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];
-  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];
+  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agn = document.getElementById('agn');
@@ -718,6 +726,7 @@
     document.getElementById('ym').value = '';
     document.getElementById('certmode').value = '';
     document.getElementById('certsrc').value = '';
+    document.getElementById('camouflage').value = '';
     document.getElementById('vlpt_kernel').value = '';
     document.getElementById('reym').value = '';
     document.getElementById('cfip').value = '';
@@ -880,7 +889,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agn')) ordered.push('agn');
     if (keys.includes('agk')) ordered.push('agk');

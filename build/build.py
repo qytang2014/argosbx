@@ -99,6 +99,7 @@ def build_index():
     if '        <div class="row"><label>Reality 域名' not in h:
         print("BUILD FAIL: anchor missing: index-cert-ui", file=sys.stderr); sys.exit(1)
     h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
+    h = replace(h, '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com" disabled/>', '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com；填自有域名且与 ym 相同→探测回落本机443" disabled/>', "index-reym-hint", 1)
     h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
                 '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
     # alns closed option in upstream omits Naive while the enabled
@@ -268,9 +269,9 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel'];", "index-optids", 1)
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage'];", "index-optids", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
-                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
+                "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('camouflage').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
     # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
     # Listing vlpt under "Xray可选协议" was misleading once vlpt became
     # dual-support: it is not Xray-only any more. The new first group holds
@@ -353,7 +354,7 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---
@@ -949,6 +950,16 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # URLs by mode, with the same asterisk framing as before.
     t = replace(t, 'if [ -s $HOME/agsbx/subport.log ]; then\nshowsubport=$(cat $HOME/agsbx/subport.log)\nif ps -ef 2>/dev/null | grep "$showsubport" | grep -v grep >/dev/null; then\nshowsubtoken=$(cat $HOME/agsbx/subtoken.log 2>/dev/null)\nsubip=$(cat $HOME/agsbx/server_ip.log 2>/dev/null)\nsuburl="$subip:$showsubport/$showsubtoken"\necho "**********************************************************"\necho "Clash/Mihomo本地IP订阅地址：http://$suburl/clmi.yaml"\necho "Sing-box本地IP订阅地址：http://$suburl/sbox.json"\necho "聚合协议本地IP订阅地址：http://$suburl/jhsub.txt"\necho "**********************************************************"\nfi\nfi',
                 'sub_https_sync\nsub_https_display', "subhttps-display", 1)
+
+    # --- Reality own-domain fallback (after all modules inserted) ---
+    # When reym == ym, the SNI is the user's own domain: probes fall back to
+    # the local web server (127.0.0.1:443) instead of the external domain.
+    t = replace(t, "export ym_vl_re=${reym:-''}\n",
+                "export ym_vl_re=${reym:-''}\nif [ -n \"$reym\" ] && [ \"$reym\" = \"$ym\" ]; then export ym_vl_fb=\"127.0.0.1\"; else export ym_vl_fb=\"\"; fi\n",
+                "reality-fb-var", 1)
+    t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
+    t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
+    t = replace(t, '"server": "${ym_vl_re}"', '"server": "${ym_vl_fb:-$ym_vl_re}"', "reality-fb-handshake", 4)
 
     # --- generated header (after shebang) ---
     lines = t.split("\n", 1)
