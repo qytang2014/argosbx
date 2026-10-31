@@ -2041,8 +2041,8 @@ export port_so=${sopt:-''}
 export port_nv=${nvpt:-''}
 export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
-export ym_vl_re=${reym:-''}
-if [ -n "$reym" ] && [ "$reym" = "$ym" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi
+export ym_vl_re=${reym:-$ym}
+if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
 export alns=${alns:-''}

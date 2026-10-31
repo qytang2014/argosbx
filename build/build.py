@@ -954,8 +954,8 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # --- Reality own-domain fallback (after all modules inserted) ---
     # When reym == ym, the SNI is the user's own domain: probes fall back to
     # the local web server (127.0.0.1:443) instead of the external domain.
-    t = replace(t, "export ym_vl_re=${reym:-''}\n",
-                "export ym_vl_re=${reym:-''}\nif [ -n \"$reym\" ] && [ \"$reym\" = \"$ym\" ]; then export ym_vl_fb=\"127.0.0.1\"; else export ym_vl_fb=\"\"; fi\n",
+    t = replace(t, 'export ym_vl_re=${reym:-\'\'}\n',
+                'export ym_vl_re=${reym:-$ym}\nif [ -n \"${ym_vl_re}\" ] && [ \"${ym_vl_re}\" = \"${ym}\" ]; then export ym_vl_fb=\"127.0.0.1\"; else export ym_vl_fb=\"\"; fi\n',
                 "reality-fb-var", 1)
     t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
     t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
