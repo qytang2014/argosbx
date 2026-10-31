@@ -84,6 +84,1048 @@ command -v register_hook >/dev/null 2>&1 && {
   register_hook on_complete vars_save
 }
 run_hook on_init "$1"
+# camouflage-blog.sh: 伪装博客部署模块
+# 每台机器按 /etc/machine-id 确定性随机选一个人设（8 选 1），
+# 同一台机器 rep 不变，不同机器大概率不同，避免"所有站都叫陈默"的指纹。
+
+# 人设池：AUTHOR|SITE_NAME|TAGLINE|BIO|AVATAR|AUTHOR_PINYIN
+_camouflage_personas() {
+  cat << 'PERSONA_EOF'
+陈默|默记|陈默的技术笔记 —— Python、Linux 与 VPS 运维的实践记录|运维工程师，喜欢用 Python 写点自动化脚本，折腾 VPS 和开源软件。这个博客记录工作里踩过的坑和学到的东西，更新不定期。|默|chenmo
+林晓|晓的技术笔记|林晓的技术笔记 —— 后端开发与效率工具|写 Java 和 Go 的后端程序员，偶尔写写 Python 脚本提高效率。这里记录一些开发和运维中的实战经验。|晓|linxiao
+周远|远方笔记|周远的远方笔记 —— 全栈开发的学习记录|前后端都写一点的全栈工程师，对自建服务和开源项目感兴趣，博客用来整理学习笔记。|远|zhouyuan
+苏晴|晴空下|苏晴的博客 —— 前端与 Linux 日常|前端工程师，喜欢捣鼓博客主题和静态网站，也记录一些 Linux 日常使用心得。|晴|suqing
+陆明|明心录|陆明的明心录 —— DevOps 实践|专注自动化运维和 CI/CD，常用 Ansible 和 Docker，博客记录工作中的实践总结。|明|luming
+沈静|静水流深|沈静的技术备忘录 —— 数据与 Python|和数据打交道，写 Python 做 ETL，也折腾服务器。这个博客是我的技术备忘录。|静|shenjing
+高翔|翔宇技术志|高翔的技术志 —— 架构与运维思考|十多年 IT 老兵，经历过物理机、虚拟化到云原生，写点架构思考和运维经验。|翔|gaoxiang
+何欣|欣欣向荣|何欣的博客 —— Python 学习之路|Python 重度用户，从爬虫到 Web 开发都写过，博客记录学习路径上的点滴。|欣|hexin
+PERSONA_EOF
+}
+
+# camouflage_pick_persona: 按机器 id 确定性选人设，设置 P_* 变量
+camouflage_pick_persona() {
+  local seed idx total
+  seed=$(cat /etc/machine-id 2>/dev/null || hostname 2>/dev/null || echo "default")
+  total=$(_camouflage_personas | wc -l)
+  idx=$(echo "$seed" | cksum | awk -v n="$total" '{print $1 % n + 1}')
+  local line
+  line=$(_camouflage_personas | sed -n "${idx}p")
+  P_AUTHOR=$(echo "$line" | cut -d'|' -f1)
+  P_SITE_NAME=$(echo "$line" | cut -d'|' -f2)
+  P_TAGLINE=$(echo "$line" | cut -d'|' -f3)
+  P_BIO=$(echo "$line" | cut -d'|' -f4)
+  P_AVATAR=$(echo "$line" | cut -d'|' -f5)
+  P_AUTHOR_PINYIN=$(echo "$line" | cut -d'|' -f6)
+}
+
+# _camouflage_write <dest>: 从 stdin 读模板，替换占位符后写入 dest
+_camouflage_write() {
+  local _c
+  _c=$(cat)
+  _c="${_c//\{\{SITE_NAME\}\}/$P_SITE_NAME}"
+  _c="${_c//\{\{AUTHOR\}\}/$P_AUTHOR}"
+  _c="${_c//\{\{TAGLINE\}\}/$P_TAGLINE}"
+  _c="${_c//\{\{BIO\}\}/$P_BIO}"
+  _c="${_c//\{\{AVATAR\}\}/$P_AVATAR}"
+  _c="${_c//\{\{AUTHOR_PINYIN\}\}/$P_AUTHOR_PINYIN}"
+  printf '%s' "$_c" > "$1"
+}
+
+# deploy_camouflage_blog <webroot>: 部署伪装博客到 webroot
+# 模板内容由 build.py 从 modules/camouflage/ 嵌入（见 CAMOUFLAGE_TEMPLATES 标记）
+deploy_camouflage_blog() {
+  local webroot="$1"
+  [ -n "$webroot" ] || { echo "deploy_camouflage_blog: 需要 webroot 参数"; return 1; }
+  camouflage_pick_persona
+  mkdir -p "$webroot/posts"
+  echo "伪装博客人设：$P_AUTHOR《$P_SITE_NAME》"
+  _camouflage_write "$webroot/about.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="关于{{AUTHOR}} - {{TAGLINE}}">
+<title>关于 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="index.html">首页</a>
+<a href="archive.html">归档</a>
+<a href="about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="about-box">
+<h1>关于我</h1>
+<div class="profile" style="margin-bottom:8px">
+<div class="avatar">{{AVATAR}}</div>
+<div>
+<h2>{{AUTHOR}}</h2>
+<p>{{BIO}}</p>
+</div>
+</div>
+<h2>这个博客</h2>
+<p>{{SITE_NAME}}是我的个人技术笔记，主要记录 {{AUTHOR}} 在日常工作和学习中遇到的问题、踩过的坑和一些心得。内容以 Python、Linux 系统管理和 VPS 运维为主，偶尔也会写写开源工具的使用体验。</p>
+<p>写博客的初衷很简单：好记性不如烂笔头。很多问题第一次遇到时花了半天才解决，过两个月又忘了，重新踩一遍坑。写下来既是给自己备忘，也希望能帮到有同样困惑的人。</p>
+<h2>联系方式</h2>
+<ul>
+<li>邮箱：{{AUTHOR_PINYIN}}@example.com（占位，暂不公开）</li>
+<li>GitHub：github.com/{{AUTHOR_PINYIN}}（占位）</li>
+</ul>
+<p style="color:#999;font-size:13px;margin-top:18px">本站为静态页面，内容更新不定期。如果文章中的方法已经过时，欢迎指正。</p>
+</div>
+<div class="back"><a href="index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · 由静态页面生成</footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/archive.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="{{SITE_NAME}}文章归档 - {{TAGLINE}}">
+<title>归档 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="index.html">首页</a>
+<a href="archive.html">归档</a>
+<a href="about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="archive-year">2026 年</div>
+<ul class="archive-list">
+<li><span class="archive-date">10-28</span><a href="posts/post-10.html">Python 虚拟环境管理：venv 还是 conda？</a></li>
+<li><span class="archive-date">10-15</span><a href="posts/post-09.html">Linux 磁盘空间告警：一次 df -h 引发的排查</a></li>
+<li><span class="archive-date">09-30</span><a href="posts/post-08.html">用 systemd 管理你的自建服务</a></li>
+<li><span class="archive-date">09-12</span><a href="posts/post-07.html">VPS 到手后的安全加固清单</a></li>
+<li><span class="archive-date">08-28</span><a href="posts/post-06.html">Python 日志模块 logging 的最佳实践</a></li>
+<li><span class="archive-date">08-10</span><a href="posts/post-05.html">Nginx 反向代理配置笔记</a></li>
+<li><span class="archive-date">07-22</span><a href="posts/post-04.html">Rsync 备份脚本：每天凌晨 3 点的安心</a></li>
+<li><span class="archive-date">07-05</span><a href="posts/post-03.html">Docker 容器日志占满磁盘的解决办法</a></li>
+<li><span class="archive-date">06-18</span><a href="posts/post-02.html">SSH 免密登录与 config 文件技巧</a></li>
+<li><span class="archive-date">05-30</span><a href="posts/post-01.html">写给自己的 Python 装饰器教程</a></li>
+</ul>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · 由静态页面生成 · <a href="about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/index.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="{{TAGLINE}}">
+<title>{{SITE_NAME}} - {{AUTHOR}}的技术笔记</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="index.html">首页</a>
+<a href="archive.html">归档</a>
+<a href="about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="profile">
+<div class="avatar">{{AVATAR}}</div>
+<div>
+<h2>{{AUTHOR}}</h2>
+<p>{{BIO}}</p>
+</div>
+</div>
+<ul class="post-list">
+<li class="post-item">
+<h2><a href="posts/post-10.html">Python 虚拟环境管理：venv 还是 conda？</a></h2>
+<div class="post-meta">2026-10-28 · Python</div>
+<div class="post-excerpt">新项目到底用 venv 还是 conda？结合我这几年的使用经验，聊聊两者的适用场景和几个容易踩的坑。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-09.html">Linux 磁盘空间告警：一次 df -h 引发的排查</a></h2>
+<div class="post-meta">2026-10-15 · Linux</div>
+<div class="post-excerpt">半夜收到磁盘告警，df 显示还有空间，服务却写不进文件。记录这次 inode 耗尽的排查过程。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-08.html">用 systemd 管理你的自建服务</a></h2>
+<div class="post-meta">2026-09-30 · Linux</div>
+<div class="post-excerpt">还在用 nohup 跑服务？写一个 systemd unit 文件，开机自启、崩溃重启、日志收集一次搞定。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-07.html">VPS 到手后的安全加固清单</a></h2>
+<div class="post-meta">2026-09-12 · VPS</div>
+<div class="post-excerpt">新开一台 VPS，先别急着装服务。这份清单是我每次开新机器都会过一遍的：SSH、防火墙、自动更新。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-06.html">Python 日志模块 logging 的最佳实践</a></h2>
+<div class="post-meta">2026-08-28 · Python</div>
+<div class="post-excerpt">print 调试一时爽，上线火葬场。从 logging 基础配置到按天切分，这篇是我的常用模板。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-05.html">Nginx 反向代理配置笔记</a></h2>
+<div class="post-meta">2026-08-10 · 运维</div>
+<div class="post-excerpt">proxy_pass 后面加不加斜杠，差别可大了。整理几个常用的反代配置片段和排错思路。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-04.html">Rsync 备份脚本：每天凌晨 3 点的安心</a></h2>
+<div class="post-meta">2026-07-22 · 运维</div>
+<div class="post-excerpt">数据无价。一个 30 行的 rsync 备份脚本 + cron，关键数据每天自动同步到备用机器。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-03.html">Docker 容器日志占满磁盘的解决办法</a></h2>
+<div class="post-meta">2026-07-05 · Docker</div>
+<div class="post-excerpt">容器跑了三个月，宿主机磁盘满了。元凶是没做轮转的 json-file 日志，两种解法记录一下。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-02.html">SSH 免密登录与 config 文件技巧</a></h2>
+<div class="post-meta">2026-06-18 · Linux</div>
+<div class="post-excerpt">管理十几台机器还在一台台输密码？ssh-keygen + config 文件，ssh web1 回车直达。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-01.html">写给自己的 Python 装饰器教程</a></h2>
+<div class="post-meta">2026-05-30 · Python</div>
+<div class="post-excerpt">装饰器看了三遍还是忘，这次换个方式：从一个计时需求开始，一步步写出自己的装饰器。</div>
+</li>
+</ul>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · 由静态页面生成 · <a href="about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/style.css" << 'CAMOUFLAGE_TPL_EOF'
+/* 默记 - 个人技术博客 */
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;font-size:16px;line-height:1.8;color:#333;background:#f7f7f5}
+a{color:#1a73e8;text-decoration:none}
+a:hover{text-decoration:underline}
+.header{background:#fff;border-bottom:1px solid #e8e8e8;padding:28px 0}
+.header-inner{max-width:760px;margin:0 auto;padding:0 20px}
+.site-title{font-size:26px;font-weight:700;color:#222}
+.site-title a{color:#222}
+.site-desc{font-size:14px;color:#888;margin-top:6px}
+.nav{margin-top:14px;font-size:15px}
+.nav a{margin-right:22px;color:#555}
+.nav a:hover{color:#1a73e8}
+.main{max-width:760px;margin:0 auto;padding:30px 20px 60px}
+.post-list{list-style:none}
+.post-item{background:#fff;border:1px solid #eee;border-radius:8px;padding:22px 26px;margin-bottom:18px}
+.post-item h2{font-size:20px;margin-bottom:8px}
+.post-item h2 a{color:#222}
+.post-item h2 a:hover{color:#1a73e8}
+.post-meta{font-size:13px;color:#999;margin-bottom:10px}
+.post-excerpt{font-size:15px;color:#555}
+.article{background:#fff;border:1px solid #eee;border-radius:8px;padding:32px 34px}
+.article h1{font-size:24px;margin-bottom:10px;line-height:1.4}
+.article h2{font-size:19px;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid #f0f0f0}
+.article h3{font-size:16px;margin:22px 0 10px}
+.article p{margin:12px 0}
+.article ul,.article ol{margin:12px 0 12px 24px}
+.article li{margin:6px 0}
+.article code{font-family:SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:14px;background:#f4f4f2;padding:2px 6px;border-radius:4px;color:#c7254e}
+.article pre{background:#2d2d2d;color:#e8e8e8;padding:16px 18px;border-radius:6px;overflow-x:auto;margin:14px 0;font-size:14px;line-height:1.6}
+.article pre code{background:none;color:#e8e8e8;padding:0}
+.article blockquote{border-left:4px solid #1a73e8;background:#f6f9ff;padding:10px 16px;margin:14px 0;color:#555;font-size:15px}
+.profile{display:flex;gap:20px;align-items:center;background:#fff;border:1px solid #eee;border-radius:8px;padding:26px;margin-bottom:20px}
+.avatar{width:72px;height:72px;border-radius:50%;background:#1a73e8;color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center;flex:none}
+.profile h2{font-size:20px;margin-bottom:6px}
+.profile p{font-size:14px;color:#666}
+.archive-year{font-size:20px;font-weight:700;margin:26px 0 12px}
+.archive-list{list-style:none;background:#fff;border:1px solid #eee;border-radius:8px;padding:8px 26px}
+.archive-list li{padding:10px 0;border-bottom:1px dashed #eee;display:flex;gap:16px}
+.archive-list li:last-child{border-bottom:none}
+.archive-date{font-size:13px;color:#999;flex:none;width:86px;padding-top:3px}
+.about-box{background:#fff;border:1px solid #eee;border-radius:8px;padding:32px 34px}
+.about-box h1{font-size:24px;margin-bottom:16px}
+.about-box h2{font-size:18px;margin:24px 0 10px}
+.about-box p,.about-box li{font-size:15px;color:#444}
+.about-box ul{margin:10px 0 10px 22px}
+.footer{text-align:center;font-size:13px;color:#aaa;padding:26px 0;border-top:1px solid #e8e8e8;background:#fff}
+.back{margin-top:26px;font-size:14px}
+@media(max-width:600px){.article{padding:22px 20px}.profile{flex-direction:column;text-align:center}}
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-01.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从一个计时需求开始，一步步理解 Python 装饰器的工作原理">
+<title>写给自己的 Python 装饰器教程 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>写给自己的 Python 装饰器教程</h1>
+<div class="post-meta">2026-05-30 · Python</div>
+<p>装饰器这个概念，我前后看了三遍教程，每次看完都觉得懂了，过两周又忘光。后来换了个学法：不从定义出发，从一个真实需求出发。这篇就是按那个思路写的，先给未来的自己看。</p>
+<h2>需求：给函数计时</h2>
+<p>假设有个数据处理函数，我想知道它每次跑了多久。最直白的写法：</p>
+<pre><code>import time
+
+def process_data():
+    start = time.time()
+    # ... 真正的逻辑 ...
+    time.sleep(1)
+    print(f"耗时：{time.time() - start:.2f}秒")
+
+process_data()</code></pre>
+<p>能用，但如果有十个函数都要计时，每个里面都塞三行计时代码，又丑又容易漏。能不能把"计时"这件事抽出来？</p>
+<h2>第一步：函数也是对象</h2>
+<p>Python 里函数是一等公民，可以当参数传、可以当返回值。利用这点，我们写一个"加工函数"的函数：</p>
+<pre><code>import time
+from functools import wraps
+
+def timer(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        print(f"{func.__name__} 耗时：{time.time() - start:.2f}秒")
+        return result
+    return wrapper</code></pre>
+<p><code>timer</code> 接收一个函数，返回一个"包了计时逻辑"的新函数。<code>@wraps(func)</code> 别漏，它能保留原函数的函数名和文档字符串，否则调试时看到的都是 <code>wrapper</code>，很折磨。</p>
+<h2>第二步：@ 语法糖</h2>
+<p>上面写完之后，用法是：</p>
+<pre><code>@timer
+def process_data():
+    time.sleep(1)
+
+process_data()
+# 输出：process_data 耗时：1.00秒</code></pre>
+<p><code>@timer</code> 等价于 <code>process_data = timer(process_data)</code>，只是写法更优雅。理解到这里，装饰器已经会用了。</p>
+<h2>第三步：带参数的装饰器</h2>
+<p>如果想让计时器支持"超过 N 秒才打印"，装饰器本身要先接收参数，那就再包一层：</p>
+<pre><code>def timer(threshold=0):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start
+            if elapsed &gt; threshold:
+                print(f"{func.__name__} 耗时 {elapsed:.2f}秒，超过阈值！")
+            return result
+        return wrapper
+    return decorator
+
+@timer(threshold=2)
+def slow_task():
+    time.sleep(3)</code></pre>
+<blockquote>记忆口诀：不带参数的装饰器是"一层包"，带参数的是"两层包"。@ 后面有没有括号，决定了你要写几层。</blockquote>
+<h2>实际工作中我用装饰器干过的事</h2>
+<ul>
+<li><strong>重试</strong>：调第三方 API 失败自动重试 3 次，指数退避</li>
+<li><strong>缓存</strong>：函数结果按参数缓存，避免重复算（functools.lru_cache 就是现成的）</li>
+<li><strong>权限检查</strong>：Web 接口里先验登录态，不通过直接返回 401</li>
+</ul>
+<p>写完这篇，我总算把装饰器焊进脑子里了。核心就一句话：<strong>装饰器是一个接收函数、返回新函数的函数，@ 只是语法糖</strong>。其他的都是在这个基础上的变形。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-02.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="ssh-keygen + SSH config 文件，管理多台服务器不再输密码">
+<title>SSH 免密登录与 config 文件技巧 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>SSH 免密登录与 config 文件技巧</h1>
+<div class="post-meta">2026-06-18 · Linux</div>
+<p>手里机器一多，每天 ssh 上去输密码能输到怀疑人生。这篇记录从密码登录切换到密钥登录的全过程，以及 <code>~/.ssh/config</code> 这个被低估的神器。</p>
+<h2>第一步：生成密钥对</h2>
+<p>在本机（你的笔记本）执行：</p>
+<pre><code>ssh-keygen -t ed25519 -C "my-laptop"
+# 一路回车，私钥存 ~/.ssh/id_ed25519，公钥存 ~/.ssh/id_ed25519.pub</code></pre>
+<p>用 ed25519，不用 rsa。短、安全、速度快，是现在的主流选择。passphrase 可以设也可以不设——设了更安全，但每次要用 ssh-agent；不设方便，适合可信的个人电脑。</p>
+<h2>第二步：把公钥传到服务器</h2>
+<pre><code>ssh-copy-id -i ~/.ssh/id_ed25519.pub user@server_ip
+# 输入一次密码，之后就不用了</code></pre>
+<p>这条命令干的事很简单：把你的公钥追加到服务器的 <code>~/.ssh/authorized_keys</code>。如果服务器比较老没有 ssh-copy-id，手动复制粘贴也行，注意文件权限：</p>
+<pre><code>chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys</code></pre>
+<p>权限不对 sshd 会直接拒绝密钥登录，这是最常见的坑，没有之一。</p>
+<h2>第三步（关键）：写 config 文件</h2>
+<p>密钥配好了，但每次还要敲 <code>ssh -i ~/.ssh/id_ed25519 -p 2222 user@192.168.1.100</code>，依然麻烦。<code>~/.ssh/config</code> 登场：</p>
+<pre><code>Host web1
+    HostName 192.168.1.100
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519
+
+Host db1
+    HostName 192.168.1.101
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+
+Host *.internal
+    User admin
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 60</code></pre>
+<p>之后就是 <code>ssh web1</code> 回车直达。<code>Host *.internal</code> 这种通配写法适合一批命名规律的机器。ServerAliveInterval 防止长时间不动被网关掐掉。</p>
+<h2>几个实用技巧</h2>
+<ul>
+<li><strong>跳板机</strong>：<code>ProxyJump bastion</code> 加一行，<code>ssh db1</code> 自动先跳跳板机，不用手动两段跳</li>
+<li><strong>端口转发</strong>：<code>LocalForward 8080 localhost:80</code>，把服务器内网端口映射到本机，调试后台很方便</li>
+<li><strong>禁用密码登录</strong>（服务器端）：密钥调通后，把 <code>/etc/ssh/sshd_config</code> 里的 <code>PasswordAuthentication</code> 设成 <code>no</code>，防暴力破解效果立竿见影</li>
+</ul>
+<blockquote>注意：关密码登录之前，务必先开一个新终端测试密钥能登录！别把自己锁在门外，我吃过这个亏。</blockquote>
+<h2>总结</h2>
+<p>三步：<code>ssh-keygen</code> 生成 → <code>ssh-copy-id</code> 分发 → <code>~/.ssh/config</code> 起别名。配完之后管理十几台机器和串门一样轻松。密钥文件自己备份好，丢了就得一台台重置。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-03.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Docker json-file 日志无限制增长占满磁盘，两种根治办法">
+<title>Docker 容器日志占满磁盘的解决办法 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Docker 容器日志占满磁盘的解决办法</h1>
+<div class="post-meta">2026-07-05 · Docker</div>
+<p>上周一台跑了三个月的机器突然告警，SSH 上去一看：<code>df -h</code> 根分区 100%。<code>du -sh /*</code> 一路查下来，元凶是 <code>/var/lib/docker/containers/</code> —— 某个容器的 json 日志文件涨到了 40 多 GB。</p>
+<h2>根因：json-file 默认无限制</h2>
+<p>Docker 默认的日志驱动是 <code>json-file</code>，而且<strong>默认不做轮转</strong>。容器只要不停地打日志（尤其是开了 debug 的应用），这个文件就会无限增长，直到把宿主机磁盘吃光。更坑的是，删文件都没用——进程还 holding 着句柄，得重启容器才释放。</p>
+<p>先应急，找出罪魁祸首：</p>
+<pre><code>du -sh /var/lib/docker/containers/*/*-json.log | sort -rh | head -5</code></pre>
+<h2>解法一：全局配置日志轮转（推荐）</h2>
+<p>改 <code>/etc/docker/daemon.json</code>，对所有新容器生效：</p>
+<pre><code>{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  }
+}</code></pre>
+<p>意思是单个日志文件最大 50MB，保留 3 个轮转文件，一个容器最多占 150MB。改完 <code>systemctl restart docker</code> 生效（会重启所有容器，挑业务低峰操作）。</p>
+<h2>解法二：单个容器指定</h2>
+<p>如果不想动全局配置（比如宿主机上还有别人的容器），起容器时单独指定：</p>
+<pre><code>docker run -d \
+  --log-driver json-file \
+  --log-opt max-size=50m \
+  --log-opt max-file=3 \
+  --name myapp myimage</code></pre>
+<p>docker-compose 也一样，在 service 下加：</p>
+<pre><code>logging:
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"</code></pre>
+<h2>已经爆了的怎么清理</h2>
+<p>先别直接 <code>rm</code> 日志文件（句柄问题）。正确姿势：</p>
+<pre><code># 1. 先把解法一或二配上
+# 2. 重启出问题的容器，旧的大日志文件会被轮转机制接管
+docker restart &lt;container_id&gt;
+# 3. 确认
+du -sh /var/lib/docker/containers/*/*-json.log | sort -rh | head -3</code></pre>
+<blockquote>教训：任何长期运行的 Docker 宿主机，daemon.json 里都应该有 log-opts。这是装机必备项，和换 apt 源一个优先级。</blockquote>
+<h2>进阶：根本不想存本地日志</h2>
+<p>如果用了 ELK / Loki，直接把 <code>log-driver</code> 换成对应的驱动，日志根本不落本地盘。这属于架构升级了，本文不展开。</p>
+<p>总结一句话：<strong>Docker 日志默认无上限，生产环境必须配 max-size</strong>。别等磁盘满了才想起来。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-04.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="30 行 rsync 脚本 + cron，关键数据每天自动备份到备用机">
+<title>Rsync 备份脚本：每天凌晨 3 点的安心 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Rsync 备份脚本：每天凌晨 3 点的安心</h1>
+<div class="post-meta">2026-07-22 · 运维</div>
+<p>前阵子有个朋友 VPS 到期没续费，上面跑了两年的博客数据全没了，找服务商要快照，人家说过期一周就清掉了。血的教训：<strong>数据只存一份，等于没存</strong>。这篇分享我的备份方案，简单到不好意思，但确实救过我一次。</p>
+<h2>方案设计</h2>
+<p>需求很朴素：每天凌晨，把本机的 <code>/data</code>（网站、数据库 dump、配置文件）同步到另一台备用机器。要求：增量（别每次全量传）、失败要告警、保留最近 7 天。</p>
+<p>工具选 rsync，理由：增量传输只传变化块，断点续传友好，几乎所有 Linux 自带。</p>
+<h2>脚本</h2>
+<pre><code>#!/bin/bash
+# backup.sh - 每天凌晨 3 点执行
+set -e
+SRC="/data/"
+DST="backup@192.168.1.200:/backup/$(hostname)/"
+LOG="/var/log/backup.log"
+DATE=$(date +%Y%m%d)
+
+echo "[$DATE] 备份开始" &gt;&gt; "$LOG"
+
+# 先 dump 数据库（如果有）
+mysqldump -u root mydb &gt; /data/db_mydb.sql 2&gt;/dev/null || true
+
+rsync -avz --delete \
+  --exclude='*.tmp' \
+  --exclude='cache/' \
+  -e "ssh -i /root/.ssh/backup_key -o StrictHostKeyChecking=no" \
+  "$SRC" "$DST" &gt;&gt; "$LOG" 2&gt;&1
+
+if [ $? -eq 0 ]; then
+    echo "[$DATE] 备份成功" &gt;&gt; "$LOG"
+else
+    echo "[$DATE] 备份失败！！" &gt;&gt; "$LOG"
+    # 发告警邮件（需配好 mail）
+    echo "备份失败，请检查" | mail -s "备份告警 $(hostname)" admin@example.com
+fi
+
+# 只保留 7 天日志
+find /var/log -name "backup.log*" -mtime +7 -delete</code></pre>
+<h2>几个关键点</h2>
+<ul>
+<li><strong><code>--delete</code></strong>：目标端同步删除，保持镜像一致。危险但必要——否则删掉的文件永远占着备份空间。怕误删的话，先不加 <code>--delete</code> 跑一周观察</li>
+<li><strong>专用密钥</strong>：给备份单独生成一对 key，只做 rsync 用，和日常登录的 key 分开，丢了影响面小</li>
+<li><strong>先 dump 再同步</strong>：数据库文件直接 rsync 可能拷到一半的状态，先 <code>mysqldump</code> 成 sql 文件再同步才靠谱</li>
+<li><strong>3 点执行</strong>：<code>0 3 * * * /root/backup.sh</code>，业务低峰，传完天亮</li>
+</ul>
+<h2>恢复演练</h2>
+<p>备份了没演练过恢复，等于没备份。每季度我会随机挑一天，在备用机上把数据恢复出来看一眼能不能用。演练过两次，一次发现 dump 出来的 sql 有乱码（字符集问题），一次发现新加的数据目录没进备份列表——都是平时发现不了的坑。</p>
+<blockquote>备份的三个境界：有备份 → 备份能自动跑 → 备份能恢复出来。很多人停在第一层。</blockquote>
+<p>这套方案跑了一年多，传的都是增量，每天几分钟搞定，备用机上躺着 7 天的完整镜像。睡觉踏实多了。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-05.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="proxy_pass 斜杠的坑、WebSocket 转发、几个常用反代配置片段">
+<title>Nginx 反向代理配置笔记 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Nginx 反向代理配置笔记</h1>
+<div class="post-meta">2026-08-10 · 运维</div>
+<p>Nginx 反代配了无数次，但每次还是要翻文档。这篇把最常用的几个片段和最容易踩的坑记下来，下次直接抄。</p>
+<h2>天坑：proxy_pass 后面的斜杠</h2>
+<p>这是 Nginx 反代第一大坑，两种写法天差地别：</p>
+<pre><code># 写法 A：proxy_pass 不带 URI
+location /api/ {
+    proxy_pass http://127.0.0.1:8000;
+}
+# 请求 /api/user → 后端收到 /api/user（完整路径保留）
+
+# 写法 B：proxy_pass 带 URI（注意末尾的斜杠）
+location /api/ {
+    proxy_pass http://127.0.0.1:8000/;
+}
+# 请求 /api/user → 后端收到 /user（/api/ 被替换掉了）</code></pre>
+<p>记住规律：<strong>proxy_pass 后面有没有 URI（哪怕只是一个 <code>/</code>），决定 location 前缀是保留还是替换</strong>。90% 的"反代后 404"都是这个原因。</p>
+<h2>WebSocket 转发</h2>
+<p>反代 WebSocket 应用（比如某些实时服务），必须加 Upgrade 头，否则握手失败：</p>
+<pre><code>location /ws/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+}</code></pre>
+<p><code>proxy_read_timeout</code> 记得调大，默认 60 秒，长连接会被掐掉，表现为"连上后一分钟就断"。</p>
+<h2>常用头设置</h2>
+<pre><code>proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;</code></pre>
+<p>后端应用要拿真实用户 IP 就靠这几个头。特别是 <code>X-Forwarded-Proto</code>，后面挂了 HTTPS 但后端是 HTTP 时，不加这个后端生成的跳转链接会变成 http，浏览器报混合内容。</p>
+<h2>排错三板斧</h2>
+<ul>
+<li><strong><code>nginx -t</code></strong>：改完配置先测语法，别直接 reload。语法错了 reload 不会生效，但也不会报错，你会困惑"为什么改了没用"</li>
+<li><strong>看 error_log</strong>：<code>tail -f /var/log/nginx/error.log</code>，502/504 的原因都在里面（后端没起、连接超时一目了然）</li>
+<li><strong><code>curl -v</code></strong>：从本机 <code>curl -v http://127.0.0.1:8000/</code> 先确认后端本身是好的，再查 nginx 层</li>
+</ul>
+<blockquote>502 = nginx 连不上后端（后端没起、端口错）；504 = 连上了但后端超时（后端hang住或太慢）。先分清是哪个，再往下查。</blockquote>
+<p>最后提醒：生产环境改 nginx 配置，<code>nginx -t && nginx -s reload</code> 两连，别手抖直接 restart，reload 是热加载不掉连接。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-06.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从基础配置到按天切分，Python logging 模块的常用模板">
+<title>Python 日志模块 logging 的最佳实践 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Python 日志模块 logging 的最佳实践</h1>
+<div class="post-meta">2026-08-28 · Python</div>
+<p>刚学 Python 时排错全靠 print，上线后才发现：print 的东西重定向到哪了？时间戳呢？日志级别呢？切到 logging 只需要改个习惯，收益巨大。这篇是我的常用模板。</p>
+<h2>基础配置：一次到位</h2>
+<pre><code>import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+log.info("服务启动")
+log.warning("磁盘使用率超过 80%")
+log.error("数据库连接失败", exc_info=True)</code></pre>
+<p><code>exc_info=True</code> 会自动把异常堆栈打出来，排错时救命。注意 <code>getLogger(__name__)</code> 用模块名，日志里能直接定位到哪个文件哪一行。</p>
+<h2>生产环境：按天切分 + 同时输出到文件</h2>
+<p>日志不能一直往一个文件里写，用 <code>TimedRotatingFileHandler</code> 按天切：</p>
+<pre><code>import logging
+from logging.handlers import TimedRotatingFileHandler
+
+log = logging.getLogger("myapp")
+log.setLevel(logging.INFO)
+
+fmt = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+)
+
+# 每天一个文件，保留 30 天
+fh = TimedRotatingFileHandler(
+    "/var/log/myapp/app.log",
+    when="midnight",
+    backupCount=30,
+    encoding="utf-8",
+)
+fh.setFormatter(fmt)
+log.addHandler(fh)
+
+# 同时输出到控制台，docker logs 能直接看到
+ch = logging.StreamHandler()
+ch.setFormatter(fmt)
+log.addHandler(ch)</code></pre>
+<h2>几个容易踩的坑</h2>
+<ul>
+<li><strong>重复打印</strong>：同一个 logger 加了两次 handler，或者子 logger 向上传播到 root 又打一遍。检查 <code>log.handlers</code>，或者设 <code>log.propagate = False</code></li>
+<li><strong>basicConfig 不生效</strong>：如果之前已经有人调过 basicConfig（比如引用的第三方库），再调就没效果了。解决办法是别依赖 basicConfig，自己配 handler</li>
+<li><strong>多进程写同一个文件</strong>：TimedRotatingFileHandler 不是进程安全的，多进程部署用 <code>concurrent-log-handler</code> 第三方库，或者每个进程写自己的文件</li>
+<li><strong>日志级别</strong>：开发用 DEBUG，上线用 INFO。别在生产环境开 DEBUG，磁盘会哭</li>
+</ul>
+<h2>日志格式建议</h2>
+<p>我的格式固定包含：时间、级别、模块名、行号、消息。 structured logging（json 格式）更适合上 ELK 的场景，小项目文本格式够了，grep 起来方便。</p>
+<blockquote>print 是调试工具，logging 是工程工具。项目超过 500 行，就该换 logging 了。</blockquote>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-07.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="新 VPS 到手先做安全加固：SSH、防火墙、自动更新三件套">
+<title>VPS 到手后的安全加固清单 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>VPS 到手后的安全加固清单</h1>
+<div class="post-meta">2026-09-12 · VPS</div>
+<p>新开一台 VPS，装系统、配服务之前，先花 20 分钟过一遍安全加固。这份清单是我每次开新机器的固定流程，按顺序做。</p>
+<h2>1. 更新系统 + 设时区</h2>
+<pre><code>apt update && apt upgrade -y
+timedatectl set-timezone Asia/Shanghai</code></pre>
+<p>别小看时区，日志时间对不上，排错时能把人绕晕。</p>
+<h2>2. 新建普通用户，禁用 root 直登</h2>
+<pre><code>adduser deploy
+usermod -aG sudo deploy
+# 编辑 /etc/ssh/sshd_config：
+# PermitRootLogin no
+# PasswordAuthentication no
+systemctl restart sshd</code></pre>
+<p>root 密码登录是暴力破解的重灾区。注意顺序：<strong>先配好 deploy 用户的密钥登录，测试能进，再关 root 和密码</strong>。顺序反了就把自己锁外面了。</p>
+<h2>3. 改 SSH 端口（可选但推荐）</h2>
+<p>把 22 改成 20000 以上的随机端口，能挡掉 99% 的自动化扫描。不是高深的安全措施，就是减少噪音，日志干净很多。</p>
+<pre><code># /etc/ssh/sshd_config
+Port 22334</code></pre>
+<h2>4. 防火墙：默认拒绝，只开必要的</h2>
+<pre><code>ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22334/tcp    # SSH
+ufw allow 80/tcp       # Web
+ufw allow 443/tcp      # Web
+ufw --force enable</code></pre>
+<p>用 ufw 就够了，别手搓 iptables，容易把自己玩死。云厂商的安全组也要同步配，双层保险。</p>
+<h2>5. 自动安全更新</h2>
+<pre><code>apt install -y unattended-upgrades
+dpkg-reconfigure -plow unattended-upgrades</code></pre>
+<p>让系统自动装安全补丁。应用层的东西自己管，但内核、openssl 这种基础包的漏洞，有自动更新能省很多心。</p>
+<h2>6. 装个 fail2ban</h2>
+<pre><code>apt install -y fail2ban
+systemctl enable --now fail2ban</code></pre>
+<p>默认配置就能挡 SSH 暴力破解。改了 SSH 端口后其实很少触发，但装上不亏。</p>
+<h2>7. 检查清单</h2>
+<ul>
+<li><code>ss -tlnp</code>：看监听的端口是不是都是你认识的，不认识的查一下是什么进程</li>
+<li><code>lastlog</code> / <code>lastb</code>：看有没有异常的登录尝试</li>
+<li>云厂商控制台：快照备份开一个，万一玩脱了能回滚</li>
+</ul>
+<blockquote>安全加固不是一劳永逸，是个习惯。每装一个新服务，回头想一下：端口有没有必要对外？密码是不是默认的？日志有没有地方看？</blockquote>
+<p>这套做完，一台 VPS 的基础安全就及格了。剩下的就是业务层面的事：应用漏洞、数据备份，那是另一个话题。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-08.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="告别 nohup，用 systemd 实现开机自启、崩溃重启和日志收集">
+<title>用 systemd 管理你的自建服务 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>用 systemd 管理你的自建服务</h1>
+<div class="post-meta">2026-09-30 · Linux</div>
+<p>之前跑自建服务都是 <code>nohup ./app &</code>，机器一重启就得手动再敲一遍，进程挂了也不知道。直到被坑了两次，才老老实实学了 systemd。其实就一个 unit 文件的事。</p>
+<h2>写一个 unit 文件</h2>
+<p>假设你的程序在 <code>/opt/myapp/app</code>，新建 <code>/etc/systemd/system/myapp.service</code>：</p>
+<pre><code>[Unit]
+Description=My Application
+After=network.target
+
+[Service]
+Type=simple
+User=appuser
+WorkingDirectory=/opt/myapp
+ExecStart=/opt/myapp/app --config /opt/myapp/config.yaml
+Restart=on-failure
+RestartSec=5
+# 资源限制，防止失控
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<p>几个关键项：</p>
+<ul>
+<li><code>Restart=on-failure</code>：崩了自动拉起来，5 秒后重试。配合 <code>RestartSec</code> 别太短，避免死循环刷屏</li>
+<li><code>User=appuser</code>：别用 root 跑应用，建个专用用户，权限最小化</li>
+<li><code>MemoryMax</code>：内存泄漏时至少不会把整台机器拖死</li>
+</ul>
+<h2>常用命令</h2>
+<pre><code>systemctl daemon-reload              # 改完 unit 文件后重载
+systemctl enable --now myapp         # 开机自启 + 立刻启动
+systemctl status myapp               # 看状态
+systemctl restart myapp              # 重启
+journalctl -u myapp -f               # 看日志（实时）
+journalctl -u myapp --since "1 hour ago"  # 看最近一小时</code></pre>
+<p><code>journalctl</code> 是真香，应用往 stdout 打的日志 systemd 自动收走，不用自己配 logrotate。</p>
+<h2>需要前置依赖怎么办</h2>
+<p>比如你的应用依赖 Redis，先等 Redis 起来了再起：</p>
+<pre><code>[Unit]
+Description=My Application
+After=network.target redis-server.service
+Requires=redis-server.service</code></pre>
+<p><code>After</code> 是顺序，<code>Requires</code> 是强依赖（Redis 起不来，我也不起）。大多数场景 <code>After</code> 就够了。</p>
+<h2>从 nohup 迁移的 checklist</h2>
+<ul>
+<li>确认程序支持前台运行（别 <code>daemonize</code> 成后台，systemd 要接管进程）</li>
+<li>日志改打到 stdout/stderr，别写文件了，让 journal 接管</li>
+<li>配置文件用绝对路径，别依赖当前工作目录（或者配好 <code>WorkingDirectory</code>）</li>
+<li>信号处理：<code>systemctl stop</code> 发的是 SIGTERM，程序要能优雅退出，别直接 kill -9 的写法</li>
+</ul>
+<blockquote>nohup 适合临时跑个任务，长期服务一律 systemd。这是区分"玩玩"和"生产"的分水岭。</blockquote>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-09.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="df 显示有空间但写不进文件？一次 inode 耗尽的排查记录">
+<title>Linux 磁盘空间告警：一次 df -h 引发的排查 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Linux 磁盘空间告警：一次 df -h 引发的排查</h1>
+<div class="post-meta">2026-10-15 · Linux</div>
+<p>半夜两点，监控告警：磁盘使用率 95%。SSH 上去 <code>df -h</code> 一看，根分区用了 60%，还有 40% 空着。但应用日志里全是 <code>No space left on device</code>。有空间却写不进——这是经典的 inode 耗尽。</p>
+<h2>inode 是什么</h2>
+<p>简单说：磁盘空间分两部分，<strong>block</strong> 存文件内容，<strong>inode</strong> 存文件元数据（每个文件占一个 inode）。<code>df -h</code> 看的是 block，<code>df -i</code> 看的是 inode。block 有剩余但 inode 用完了，照样写不进文件。</p>
+<p>验证：</p>
+<pre><code>$ df -i /
+Filesystem     Inodes  IUsed  IFree IUse% Mounted on
+/dev/vda1     1310720 1310715     5  100% /</code></pre>
+<p>果然，inode 100%，只剩 5 个。</p>
+<h2>找元凶：谁创建了 130 万个文件</h2>
+<pre><code># 按目录统计文件数，揪出大户
+for d in /*; do echo "$d: $(find $d -xdev 2>/dev/null | wc -l)"; done | sort -t: -k2 -nr | head -5</code></pre>
+<p>查出来是 <code>/var/spool/postfix/maildrop/</code> —— 300 多万个小文件。原因是这台机器的 cron 任务有输出，但没装 MTA，邮件投递不出去，全堆在 maildrop 里了。每个邮件一个文件，几年下来把 inode 吃光了。</p>
+<h2>清理 + 根治</h2>
+<pre><code># 清理（文件太多，rm 会卡，用 find 分批删）
+find /var/spool/postfix/maildrop/ -type f -delete
+
+# 根治一：cron 输出重定向到 /dev/null
+# crontab 里：
+* * * * * /path/to/job &gt;/dev/null 2&gt;&amp;1
+
+# 根治二：或者装个 MTA 让邮件能发出去
+# 根治三：监控加 df -i，别只看 df -h</code></pre>
+<p>删了 20 分钟，inode 降到 3%，应用恢复。虚惊一场。</p>
+<h2>其他常见的 inode 杀手</h2>
+<ul>
+<li><strong>PHP session 文件</strong>：<code>/var/lib/php/sessions/</code>，gc 配不好会堆积</li>
+<li><strong>Docker 层</strong>：频繁 build 镜像不清理，<code>docker system prune</code> 定期跑</li>
+<li><strong>应用日志按条切分</strong>：某些框架默认一条日志一个文件，赶紧关了换按天切</li>
+<li><strong>压测残留</strong>：ab/wrk 压测生成的临时文件，测完就删</li>
+</ul>
+<blockquote>监控磁盘只看 <code>df -h</code> 是不够的，<code>df -i</code> 也加上。两个都告警，才算完整。</blockquote>
+<p>这次最大的收获：<code>No space left on device</code> 不一定是空间满了，先 <code>df -i</code> 看一眼，30 秒就能定位方向。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+_camouflage_write "$webroot/posts/post-10.html" << 'CAMOUFLAGE_TPL_EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="venv 和 conda 怎么选？结合使用经验聊聊适用场景和坑">
+<title>Python 虚拟环境管理：venv 还是 conda？ - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Python 虚拟环境管理：venv 还是 conda？</h1>
+<div class="post-meta">2026-10-28 · Python</div>
+<p>上周帮同事配环境，他问我："新项目用 venv 还是 conda？" 我发现这个问题我被问过不下十次，干脆写篇博客，以后直接甩链接。</p>
+<h2>一句话结论</h2>
+<ul>
+<li><strong>纯 Python 项目</strong>（Web、脚本、工具）→ <code>venv</code>，轻量、标准库自带</li>
+<li><strong>数据科学 / 需要非 Python 依赖</strong>（numpy、cuda、gdal 这种）→ <code>conda</code>，二进制包省心</li>
+<li><strong>不确定</strong> → 先 venv，不够用了再换，不丢人</li>
+</ul>
+<h2>venv：标准库亲儿子</h2>
+<pre><code>python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt</code></pre>
+<p>优点：零安装（Python 3.3+ 自带）、速度快、目录小。缺点：只隔离 Python 包，系统级的依赖（比如 <code>libgdal</code>）还得 apt 装，版本对不上就编译报错，新手劝退。</p>
+<p>我的习惯：每个项目根目录一个 <code>.venv</code>，<code>.gitignore</code> 里忽略掉。进目录就 <code>source .venv/bin/activate</code>，肌肉记忆了。</p>
+<h2>conda：开箱即用的重装甲</h2>
+<pre><code>conda create -n myproject python=3.11
+conda activate myproject
+conda install numpy pandas</code></pre>
+<p>优点：连 Python 解释器本身都能多版本共存，二进制包不用编译，数据科学全家桶一键装。缺点：臃肿（base 环境就几个 GB）、慢、和系统 pip 混用容易打架。</p>
+<blockquote>血泪教训：<strong>别在 conda 环境里 pip install</strong>，除非你清楚自己在干什么。conda 和 pip 的依赖解析各管各的，混用三个月后环境必坏。非要混用，pip 装完立刻 <code>conda env export</code> 备份。</blockquote>
+<h2>几个坑</h2>
+<ul>
+<li><strong>venv 套娃</strong>：在已经激活的 venv 里又 <code>python -m venv</code>，路径会乱。先 <code>deactivate</code> 再建新的</li>
+<li><strong>conda 初始化污染 shell</strong>：<code>conda init</code> 会改 <code>~/.bashrc</code>，每开终端自动进 base。我一般 <code>conda config --set auto_activate_base false</code> 关掉</li>
+<li><strong>requirements.txt vs environment.yml</strong>：venv 项目用前者（<code>pip freeze &gt; requirements.txt</code>），conda 项目用后者（<code>conda env export &gt; environment.yml</code>），别混</li>
+<li><strong>生产部署</strong>：Docker 里直接系统 Python + venv，镜像小；conda 镜像动不动 2GB+，能不用就不用</li>
+</ul>
+<h2>2026 年的新选择</h2>
+<p>顺带提一句，<code>uv</code> 最近很火（Rust 写的 pip 替代品），速度快一个数量级，<code>uv venv && uv pip install</code> 一套带走。我已经在几个新项目里用了，体验不错，但生态还在追，生产环境先观望。</p>
+<p>总结：工具没有银弹，看项目类型选。我的默认顺序是 <strong>venv → 不够用 → conda → 尝鲜 uv</strong>。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
+CAMOUFLAGE_TPL_EOF
+  chmod -R 755 "$webroot" 2>/dev/null || true
+  find "$webroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
+  echo "伪装博客已部署到 $webroot"
+}
 # HTTPS domain subscription (private module, main script only).
 # Current subscription is plain HTTP on a random port, served from
 # $HOME/websbx/<token>/, protected only by the token in the URL.

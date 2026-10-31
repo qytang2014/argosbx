@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="venv 和 conda 怎么选？结合使用经验聊聊适用场景和坑">
+<title>Python 虚拟环境管理：venv 还是 conda？ - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Python 虚拟环境管理：venv 还是 conda？</h1>
+<div class="post-meta">2026-10-28 · Python</div>
+<p>上周帮同事配环境，他问我："新项目用 venv 还是 conda？" 我发现这个问题我被问过不下十次，干脆写篇博客，以后直接甩链接。</p>
+<h2>一句话结论</h2>
+<ul>
+<li><strong>纯 Python 项目</strong>（Web、脚本、工具）→ <code>venv</code>，轻量、标准库自带</li>
+<li><strong>数据科学 / 需要非 Python 依赖</strong>（numpy、cuda、gdal 这种）→ <code>conda</code>，二进制包省心</li>
+<li><strong>不确定</strong> → 先 venv，不够用了再换，不丢人</li>
+</ul>
+<h2>venv：标准库亲儿子</h2>
+<pre><code>python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt</code></pre>
+<p>优点：零安装（Python 3.3+ 自带）、速度快、目录小。缺点：只隔离 Python 包，系统级的依赖（比如 <code>libgdal</code>）还得 apt 装，版本对不上就编译报错，新手劝退。</p>
+<p>我的习惯：每个项目根目录一个 <code>.venv</code>，<code>.gitignore</code> 里忽略掉。进目录就 <code>source .venv/bin/activate</code>，肌肉记忆了。</p>
+<h2>conda：开箱即用的重装甲</h2>
+<pre><code>conda create -n myproject python=3.11
+conda activate myproject
+conda install numpy pandas</code></pre>
+<p>优点：连 Python 解释器本身都能多版本共存，二进制包不用编译，数据科学全家桶一键装。缺点：臃肿（base 环境就几个 GB）、慢、和系统 pip 混用容易打架。</p>
+<blockquote>血泪教训：<strong>别在 conda 环境里 pip install</strong>，除非你清楚自己在干什么。conda 和 pip 的依赖解析各管各的，混用三个月后环境必坏。非要混用，pip 装完立刻 <code>conda env export</code> 备份。</blockquote>
+<h2>几个坑</h2>
+<ul>
+<li><strong>venv 套娃</strong>：在已经激活的 venv 里又 <code>python -m venv</code>，路径会乱。先 <code>deactivate</code> 再建新的</li>
+<li><strong>conda 初始化污染 shell</strong>：<code>conda init</code> 会改 <code>~/.bashrc</code>，每开终端自动进 base。我一般 <code>conda config --set auto_activate_base false</code> 关掉</li>
+<li><strong>requirements.txt vs environment.yml</strong>：venv 项目用前者（<code>pip freeze &gt; requirements.txt</code>），conda 项目用后者（<code>conda env export &gt; environment.yml</code>），别混</li>
+<li><strong>生产部署</strong>：Docker 里直接系统 Python + venv，镜像小；conda 镜像动不动 2GB+，能不用就不用</li>
+</ul>
+<h2>2026 年的新选择</h2>
+<p>顺带提一句，<code>uv</code> 最近很火（Rust 写的 pip 替代品），速度快一个数量级，<code>uv venv && uv pip install</code> 一套带走。我已经在几个新项目里用了，体验不错，但生态还在追，生产环境先观望。</p>
+<p>总结：工具没有银弹，看项目类型选。我的默认顺序是 <strong>venv → 不够用 → conda → 尝鲜 uv</strong>。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

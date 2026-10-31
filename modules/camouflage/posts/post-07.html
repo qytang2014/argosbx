@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="新 VPS 到手先做安全加固：SSH、防火墙、自动更新三件套">
+<title>VPS 到手后的安全加固清单 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>VPS 到手后的安全加固清单</h1>
+<div class="post-meta">2026-09-12 · VPS</div>
+<p>新开一台 VPS，装系统、配服务之前，先花 20 分钟过一遍安全加固。这份清单是我每次开新机器的固定流程，按顺序做。</p>
+<h2>1. 更新系统 + 设时区</h2>
+<pre><code>apt update && apt upgrade -y
+timedatectl set-timezone Asia/Shanghai</code></pre>
+<p>别小看时区，日志时间对不上，排错时能把人绕晕。</p>
+<h2>2. 新建普通用户，禁用 root 直登</h2>
+<pre><code>adduser deploy
+usermod -aG sudo deploy
+# 编辑 /etc/ssh/sshd_config：
+# PermitRootLogin no
+# PasswordAuthentication no
+systemctl restart sshd</code></pre>
+<p>root 密码登录是暴力破解的重灾区。注意顺序：<strong>先配好 deploy 用户的密钥登录，测试能进，再关 root 和密码</strong>。顺序反了就把自己锁外面了。</p>
+<h2>3. 改 SSH 端口（可选但推荐）</h2>
+<p>把 22 改成 20000 以上的随机端口，能挡掉 99% 的自动化扫描。不是高深的安全措施，就是减少噪音，日志干净很多。</p>
+<pre><code># /etc/ssh/sshd_config
+Port 22334</code></pre>
+<h2>4. 防火墙：默认拒绝，只开必要的</h2>
+<pre><code>ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22334/tcp    # SSH
+ufw allow 80/tcp       # Web
+ufw allow 443/tcp      # Web
+ufw --force enable</code></pre>
+<p>用 ufw 就够了，别手搓 iptables，容易把自己玩死。云厂商的安全组也要同步配，双层保险。</p>
+<h2>5. 自动安全更新</h2>
+<pre><code>apt install -y unattended-upgrades
+dpkg-reconfigure -plow unattended-upgrades</code></pre>
+<p>让系统自动装安全补丁。应用层的东西自己管，但内核、openssl 这种基础包的漏洞，有自动更新能省很多心。</p>
+<h2>6. 装个 fail2ban</h2>
+<pre><code>apt install -y fail2ban
+systemctl enable --now fail2ban</code></pre>
+<p>默认配置就能挡 SSH 暴力破解。改了 SSH 端口后其实很少触发，但装上不亏。</p>
+<h2>7. 检查清单</h2>
+<ul>
+<li><code>ss -tlnp</code>：看监听的端口是不是都是你认识的，不认识的查一下是什么进程</li>
+<li><code>lastlog</code> / <code>lastb</code>：看有没有异常的登录尝试</li>
+<li>云厂商控制台：快照备份开一个，万一玩脱了能回滚</li>
+</ul>
+<blockquote>安全加固不是一劳永逸，是个习惯。每装一个新服务，回头想一下：端口有没有必要对外？密码是不是默认的？日志有没有地方看？</blockquote>
+<p>这套做完，一台 VPS 的基础安全就及格了。剩下的就是业务层面的事：应用漏洞、数据备份，那是另一个话题。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

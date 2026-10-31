@@ -23,6 +23,7 @@ bash tests/test_cert_migrate.sh
 bash tests/test_vars.sh
 bash tests/test_sap.sh
 bash tests/test_cert_watch.sh
+bash tests/test_camouflage.sh
 bash tests/test_reality_addr.sh
 bash tests/test_plain_addr.sh
 bash tests/test_container.sh

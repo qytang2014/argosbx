@@ -27,6 +27,37 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 def read(p):
     return (ROOT / p).read_text()
 
+def build_camouflage():
+    """Build deploy_camouflage_blog() with embedded templates.
+    Reads modules/camouflage-blog.sh and modules/camouflage/*,
+    replaces the CAMOUFLAGE_TEMPLATES block with _camouflage_write calls."""
+    import os
+    mod = read("modules/camouflage-blog.sh")
+    tpl_dir = ROOT / "modules" / "camouflage"
+    blocks = []
+    for root, dirs, files in os.walk(tpl_dir):
+        for f in sorted(files):
+            fpath = os.path.join(root, f)
+            rel = os.path.relpath(fpath, tpl_dir)
+            content = pathlib.Path(fpath).read_text()
+            if "CAMOUFLAGE_TPL_EOF" in content:
+                print(f"BUILD FAIL: delimiter clash in {fpath}", file=sys.stderr)
+                sys.exit(1)
+            # Ensure content ends with newline for clean heredoc
+            if not content.endswith("\n"):
+                content += "\n"
+            blocks.append('_camouflage_write "$webroot/' + rel + '" << \'CAMOUFLAGE_TPL_EOF\'\n' + content + 'CAMOUFLAGE_TPL_EOF')
+    tpl_code = "\n".join(blocks)
+    start = "# CAMOUFLAGE_TEMPLATES_START"
+    end = "# CAMOUFLAGE_TEMPLATES_END"
+    si = mod.find(start)
+    ei = mod.find(end)
+    if si < 0 or ei < 0:
+        print("BUILD FAIL: camouflage template markers not found", file=sys.stderr)
+        sys.exit(1)
+    mod = mod[:si] + tpl_code + mod[ei + len(end):]
+    return mod
+
 def replace(t, old, new, name, expected=None):
     n = t.count(old)
     if expected is not None and n != expected:
@@ -404,6 +435,10 @@ def main():
     # so first installs get the right mode, not the previous one) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      subhttps_mod, "subhttps-module-anchor")
+    # --- camouflage blog module (functions only; called manually or from
+    # own-domain setup, not on every install) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     build_camouflage(), "camouflage-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
                 "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)

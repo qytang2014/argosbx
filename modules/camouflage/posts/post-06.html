@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从基础配置到按天切分，Python logging 模块的常用模板">
+<title>Python 日志模块 logging 的最佳实践 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Python 日志模块 logging 的最佳实践</h1>
+<div class="post-meta">2026-08-28 · Python</div>
+<p>刚学 Python 时排错全靠 print，上线后才发现：print 的东西重定向到哪了？时间戳呢？日志级别呢？切到 logging 只需要改个习惯，收益巨大。这篇是我的常用模板。</p>
+<h2>基础配置：一次到位</h2>
+<pre><code>import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+log.info("服务启动")
+log.warning("磁盘使用率超过 80%")
+log.error("数据库连接失败", exc_info=True)</code></pre>
+<p><code>exc_info=True</code> 会自动把异常堆栈打出来，排错时救命。注意 <code>getLogger(__name__)</code> 用模块名，日志里能直接定位到哪个文件哪一行。</p>
+<h2>生产环境：按天切分 + 同时输出到文件</h2>
+<p>日志不能一直往一个文件里写，用 <code>TimedRotatingFileHandler</code> 按天切：</p>
+<pre><code>import logging
+from logging.handlers import TimedRotatingFileHandler
+
+log = logging.getLogger("myapp")
+log.setLevel(logging.INFO)
+
+fmt = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+)
+
+# 每天一个文件，保留 30 天
+fh = TimedRotatingFileHandler(
+    "/var/log/myapp/app.log",
+    when="midnight",
+    backupCount=30,
+    encoding="utf-8",
+)
+fh.setFormatter(fmt)
+log.addHandler(fh)
+
+# 同时输出到控制台，docker logs 能直接看到
+ch = logging.StreamHandler()
+ch.setFormatter(fmt)
+log.addHandler(ch)</code></pre>
+<h2>几个容易踩的坑</h2>
+<ul>
+<li><strong>重复打印</strong>：同一个 logger 加了两次 handler，或者子 logger 向上传播到 root 又打一遍。检查 <code>log.handlers</code>，或者设 <code>log.propagate = False</code></li>
+<li><strong>basicConfig 不生效</strong>：如果之前已经有人调过 basicConfig（比如引用的第三方库），再调就没效果了。解决办法是别依赖 basicConfig，自己配 handler</li>
+<li><strong>多进程写同一个文件</strong>：TimedRotatingFileHandler 不是进程安全的，多进程部署用 <code>concurrent-log-handler</code> 第三方库，或者每个进程写自己的文件</li>
+<li><strong>日志级别</strong>：开发用 DEBUG，上线用 INFO。别在生产环境开 DEBUG，磁盘会哭</li>
+</ul>
+<h2>日志格式建议</h2>
+<p>我的格式固定包含：时间、级别、模块名、行号、消息。 structured logging（json 格式）更适合上 ELK 的场景，小项目文本格式够了，grep 起来方便。</p>
+<blockquote>print 是调试工具，logging 是工程工具。项目超过 500 行，就该换 logging 了。</blockquote>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

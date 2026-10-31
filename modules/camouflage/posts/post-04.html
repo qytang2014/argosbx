@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="30 行 rsync 脚本 + cron，关键数据每天自动备份到备用机">
+<title>Rsync 备份脚本：每天凌晨 3 点的安心 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Rsync 备份脚本：每天凌晨 3 点的安心</h1>
+<div class="post-meta">2026-07-22 · 运维</div>
+<p>前阵子有个朋友 VPS 到期没续费，上面跑了两年的博客数据全没了，找服务商要快照，人家说过期一周就清掉了。血的教训：<strong>数据只存一份，等于没存</strong>。这篇分享我的备份方案，简单到不好意思，但确实救过我一次。</p>
+<h2>方案设计</h2>
+<p>需求很朴素：每天凌晨，把本机的 <code>/data</code>（网站、数据库 dump、配置文件）同步到另一台备用机器。要求：增量（别每次全量传）、失败要告警、保留最近 7 天。</p>
+<p>工具选 rsync，理由：增量传输只传变化块，断点续传友好，几乎所有 Linux 自带。</p>
+<h2>脚本</h2>
+<pre><code>#!/bin/bash
+# backup.sh - 每天凌晨 3 点执行
+set -e
+SRC="/data/"
+DST="backup@192.168.1.200:/backup/$(hostname)/"
+LOG="/var/log/backup.log"
+DATE=$(date +%Y%m%d)
+
+echo "[$DATE] 备份开始" &gt;&gt; "$LOG"
+
+# 先 dump 数据库（如果有）
+mysqldump -u root mydb &gt; /data/db_mydb.sql 2&gt;/dev/null || true
+
+rsync -avz --delete \
+  --exclude='*.tmp' \
+  --exclude='cache/' \
+  -e "ssh -i /root/.ssh/backup_key -o StrictHostKeyChecking=no" \
+  "$SRC" "$DST" &gt;&gt; "$LOG" 2&gt;&1
+
+if [ $? -eq 0 ]; then
+    echo "[$DATE] 备份成功" &gt;&gt; "$LOG"
+else
+    echo "[$DATE] 备份失败！！" &gt;&gt; "$LOG"
+    # 发告警邮件（需配好 mail）
+    echo "备份失败，请检查" | mail -s "备份告警 $(hostname)" admin@example.com
+fi
+
+# 只保留 7 天日志
+find /var/log -name "backup.log*" -mtime +7 -delete</code></pre>
+<h2>几个关键点</h2>
+<ul>
+<li><strong><code>--delete</code></strong>：目标端同步删除，保持镜像一致。危险但必要——否则删掉的文件永远占着备份空间。怕误删的话，先不加 <code>--delete</code> 跑一周观察</li>
+<li><strong>专用密钥</strong>：给备份单独生成一对 key，只做 rsync 用，和日常登录的 key 分开，丢了影响面小</li>
+<li><strong>先 dump 再同步</strong>：数据库文件直接 rsync 可能拷到一半的状态，先 <code>mysqldump</code> 成 sql 文件再同步才靠谱</li>
+<li><strong>3 点执行</strong>：<code>0 3 * * * /root/backup.sh</code>，业务低峰，传完天亮</li>
+</ul>
+<h2>恢复演练</h2>
+<p>备份了没演练过恢复，等于没备份。每季度我会随机挑一天，在备用机上把数据恢复出来看一眼能不能用。演练过两次，一次发现 dump 出来的 sql 有乱码（字符集问题），一次发现新加的数据目录没进备份列表——都是平时发现不了的坑。</p>
+<blockquote>备份的三个境界：有备份 → 备份能自动跑 → 备份能恢复出来。很多人停在第一层。</blockquote>
+<p>这套方案跑了一年多，传的都是增量，每天几分钟搞定，备用机上躺着 7 天的完整镜像。睡觉踏实多了。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

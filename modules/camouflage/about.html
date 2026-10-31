@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="关于{{AUTHOR}} - {{TAGLINE}}">
+<title>关于 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="index.html">首页</a>
+<a href="archive.html">归档</a>
+<a href="about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="about-box">
+<h1>关于我</h1>
+<div class="profile" style="margin-bottom:8px">
+<div class="avatar">{{AVATAR}}</div>
+<div>
+<h2>{{AUTHOR}}</h2>
+<p>{{BIO}}</p>
+</div>
+</div>
+<h2>这个博客</h2>
+<p>{{SITE_NAME}}是我的个人技术笔记，主要记录 {{AUTHOR}} 在日常工作和学习中遇到的问题、踩过的坑和一些心得。内容以 Python、Linux 系统管理和 VPS 运维为主，偶尔也会写写开源工具的使用体验。</p>
+<p>写博客的初衷很简单：好记性不如烂笔头。很多问题第一次遇到时花了半天才解决，过两个月又忘了，重新踩一遍坑。写下来既是给自己备忘，也希望能帮到有同样困惑的人。</p>
+<h2>联系方式</h2>
+<ul>
+<li>邮箱：{{AUTHOR_PINYIN}}@example.com（占位，暂不公开）</li>
+<li>GitHub：github.com/{{AUTHOR_PINYIN}}（占位）</li>
+</ul>
+<p style="color:#999;font-size:13px;margin-top:18px">本站为静态页面，内容更新不定期。如果文章中的方法已经过时，欢迎指正。</p>
+</div>
+<div class="back"><a href="index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · 由静态页面生成</footer>
+</body>
+</html>

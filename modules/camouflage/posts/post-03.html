@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Docker json-file 日志无限制增长占满磁盘，两种根治办法">
+<title>Docker 容器日志占满磁盘的解决办法 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Docker 容器日志占满磁盘的解决办法</h1>
+<div class="post-meta">2026-07-05 · Docker</div>
+<p>上周一台跑了三个月的机器突然告警，SSH 上去一看：<code>df -h</code> 根分区 100%。<code>du -sh /*</code> 一路查下来，元凶是 <code>/var/lib/docker/containers/</code> —— 某个容器的 json 日志文件涨到了 40 多 GB。</p>
+<h2>根因：json-file 默认无限制</h2>
+<p>Docker 默认的日志驱动是 <code>json-file</code>，而且<strong>默认不做轮转</strong>。容器只要不停地打日志（尤其是开了 debug 的应用），这个文件就会无限增长，直到把宿主机磁盘吃光。更坑的是，删文件都没用——进程还 holding 着句柄，得重启容器才释放。</p>
+<p>先应急，找出罪魁祸首：</p>
+<pre><code>du -sh /var/lib/docker/containers/*/*-json.log | sort -rh | head -5</code></pre>
+<h2>解法一：全局配置日志轮转（推荐）</h2>
+<p>改 <code>/etc/docker/daemon.json</code>，对所有新容器生效：</p>
+<pre><code>{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  }
+}</code></pre>
+<p>意思是单个日志文件最大 50MB，保留 3 个轮转文件，一个容器最多占 150MB。改完 <code>systemctl restart docker</code> 生效（会重启所有容器，挑业务低峰操作）。</p>
+<h2>解法二：单个容器指定</h2>
+<p>如果不想动全局配置（比如宿主机上还有别人的容器），起容器时单独指定：</p>
+<pre><code>docker run -d \
+  --log-driver json-file \
+  --log-opt max-size=50m \
+  --log-opt max-file=3 \
+  --name myapp myimage</code></pre>
+<p>docker-compose 也一样，在 service 下加：</p>
+<pre><code>logging:
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"</code></pre>
+<h2>已经爆了的怎么清理</h2>
+<p>先别直接 <code>rm</code> 日志文件（句柄问题）。正确姿势：</p>
+<pre><code># 1. 先把解法一或二配上
+# 2. 重启出问题的容器，旧的大日志文件会被轮转机制接管
+docker restart &lt;container_id&gt;
+# 3. 确认
+du -sh /var/lib/docker/containers/*/*-json.log | sort -rh | head -3</code></pre>
+<blockquote>教训：任何长期运行的 Docker 宿主机，daemon.json 里都应该有 log-opts。这是装机必备项，和换 apt 源一个优先级。</blockquote>
+<h2>进阶：根本不想存本地日志</h2>
+<p>如果用了 ELK / Loki，直接把 <code>log-driver</code> 换成对应的驱动，日志根本不落本地盘。这属于架构升级了，本文不展开。</p>
+<p>总结一句话：<strong>Docker 日志默认无上限，生产环境必须配 max-size</strong>。别等磁盘满了才想起来。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

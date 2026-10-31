@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="proxy_pass 斜杠的坑、WebSocket 转发、几个常用反代配置片段">
+<title>Nginx 反向代理配置笔记 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Nginx 反向代理配置笔记</h1>
+<div class="post-meta">2026-08-10 · 运维</div>
+<p>Nginx 反代配了无数次，但每次还是要翻文档。这篇把最常用的几个片段和最容易踩的坑记下来，下次直接抄。</p>
+<h2>天坑：proxy_pass 后面的斜杠</h2>
+<p>这是 Nginx 反代第一大坑，两种写法天差地别：</p>
+<pre><code># 写法 A：proxy_pass 不带 URI
+location /api/ {
+    proxy_pass http://127.0.0.1:8000;
+}
+# 请求 /api/user → 后端收到 /api/user（完整路径保留）
+
+# 写法 B：proxy_pass 带 URI（注意末尾的斜杠）
+location /api/ {
+    proxy_pass http://127.0.0.1:8000/;
+}
+# 请求 /api/user → 后端收到 /user（/api/ 被替换掉了）</code></pre>
+<p>记住规律：<strong>proxy_pass 后面有没有 URI（哪怕只是一个 <code>/</code>），决定 location 前缀是保留还是替换</strong>。90% 的"反代后 404"都是这个原因。</p>
+<h2>WebSocket 转发</h2>
+<p>反代 WebSocket 应用（比如某些实时服务），必须加 Upgrade 头，否则握手失败：</p>
+<pre><code>location /ws/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+}</code></pre>
+<p><code>proxy_read_timeout</code> 记得调大，默认 60 秒，长连接会被掐掉，表现为"连上后一分钟就断"。</p>
+<h2>常用头设置</h2>
+<pre><code>proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;</code></pre>
+<p>后端应用要拿真实用户 IP 就靠这几个头。特别是 <code>X-Forwarded-Proto</code>，后面挂了 HTTPS 但后端是 HTTP 时，不加这个后端生成的跳转链接会变成 http，浏览器报混合内容。</p>
+<h2>排错三板斧</h2>
+<ul>
+<li><strong><code>nginx -t</code></strong>：改完配置先测语法，别直接 reload。语法错了 reload 不会生效，但也不会报错，你会困惑"为什么改了没用"</li>
+<li><strong>看 error_log</strong>：<code>tail -f /var/log/nginx/error.log</code>，502/504 的原因都在里面（后端没起、连接超时一目了然）</li>
+<li><strong><code>curl -v</code></strong>：从本机 <code>curl -v http://127.0.0.1:8000/</code> 先确认后端本身是好的，再查 nginx 层</li>
+</ul>
+<blockquote>502 = nginx 连不上后端（后端没起、端口错）；504 = 连上了但后端超时（后端hang住或太慢）。先分清是哪个，再往下查。</blockquote>
+<p>最后提醒：生产环境改 nginx 配置，<code>nginx -t && nginx -s reload</code> 两连，别手抖直接 restart，reload 是热加载不掉连接。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

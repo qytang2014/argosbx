@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从一个计时需求开始，一步步理解 Python 装饰器的工作原理">
+<title>写给自己的 Python 装饰器教程 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>写给自己的 Python 装饰器教程</h1>
+<div class="post-meta">2026-05-30 · Python</div>
+<p>装饰器这个概念，我前后看了三遍教程，每次看完都觉得懂了，过两周又忘光。后来换了个学法：不从定义出发，从一个真实需求出发。这篇就是按那个思路写的，先给未来的自己看。</p>
+<h2>需求：给函数计时</h2>
+<p>假设有个数据处理函数，我想知道它每次跑了多久。最直白的写法：</p>
+<pre><code>import time
+
+def process_data():
+    start = time.time()
+    # ... 真正的逻辑 ...
+    time.sleep(1)
+    print(f"耗时：{time.time() - start:.2f}秒")
+
+process_data()</code></pre>
+<p>能用，但如果有十个函数都要计时，每个里面都塞三行计时代码，又丑又容易漏。能不能把"计时"这件事抽出来？</p>
+<h2>第一步：函数也是对象</h2>
+<p>Python 里函数是一等公民，可以当参数传、可以当返回值。利用这点，我们写一个"加工函数"的函数：</p>
+<pre><code>import time
+from functools import wraps
+
+def timer(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        print(f"{func.__name__} 耗时：{time.time() - start:.2f}秒")
+        return result
+    return wrapper</code></pre>
+<p><code>timer</code> 接收一个函数，返回一个"包了计时逻辑"的新函数。<code>@wraps(func)</code> 别漏，它能保留原函数的函数名和文档字符串，否则调试时看到的都是 <code>wrapper</code>，很折磨。</p>
+<h2>第二步：@ 语法糖</h2>
+<p>上面写完之后，用法是：</p>
+<pre><code>@timer
+def process_data():
+    time.sleep(1)
+
+process_data()
+# 输出：process_data 耗时：1.00秒</code></pre>
+<p><code>@timer</code> 等价于 <code>process_data = timer(process_data)</code>，只是写法更优雅。理解到这里，装饰器已经会用了。</p>
+<h2>第三步：带参数的装饰器</h2>
+<p>如果想让计时器支持"超过 N 秒才打印"，装饰器本身要先接收参数，那就再包一层：</p>
+<pre><code>def timer(threshold=0):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start
+            if elapsed &gt; threshold:
+                print(f"{func.__name__} 耗时 {elapsed:.2f}秒，超过阈值！")
+            return result
+        return wrapper
+    return decorator
+
+@timer(threshold=2)
+def slow_task():
+    time.sleep(3)</code></pre>
+<blockquote>记忆口诀：不带参数的装饰器是"一层包"，带参数的是"两层包"。@ 后面有没有括号，决定了你要写几层。</blockquote>
+<h2>实际工作中我用装饰器干过的事</h2>
+<ul>
+<li><strong>重试</strong>：调第三方 API 失败自动重试 3 次，指数退避</li>
+<li><strong>缓存</strong>：函数结果按参数缓存，避免重复算（functools.lru_cache 就是现成的）</li>
+<li><strong>权限检查</strong>：Web 接口里先验登录态，不通过直接返回 401</li>
+</ul>
+<p>写完这篇，我总算把装饰器焊进脑子里了。核心就一句话：<strong>装饰器是一个接收函数、返回新函数的函数，@ 只是语法糖</strong>。其他的都是在这个基础上的变形。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

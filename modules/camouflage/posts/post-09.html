@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="df 显示有空间但写不进文件？一次 inode 耗尽的排查记录">
+<title>Linux 磁盘空间告警：一次 df -h 引发的排查 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>Linux 磁盘空间告警：一次 df -h 引发的排查</h1>
+<div class="post-meta">2026-10-15 · Linux</div>
+<p>半夜两点，监控告警：磁盘使用率 95%。SSH 上去 <code>df -h</code> 一看，根分区用了 60%，还有 40% 空着。但应用日志里全是 <code>No space left on device</code>。有空间却写不进——这是经典的 inode 耗尽。</p>
+<h2>inode 是什么</h2>
+<p>简单说：磁盘空间分两部分，<strong>block</strong> 存文件内容，<strong>inode</strong> 存文件元数据（每个文件占一个 inode）。<code>df -h</code> 看的是 block，<code>df -i</code> 看的是 inode。block 有剩余但 inode 用完了，照样写不进文件。</p>
+<p>验证：</p>
+<pre><code>$ df -i /
+Filesystem     Inodes  IUsed  IFree IUse% Mounted on
+/dev/vda1     1310720 1310715     5  100% /</code></pre>
+<p>果然，inode 100%，只剩 5 个。</p>
+<h2>找元凶：谁创建了 130 万个文件</h2>
+<pre><code># 按目录统计文件数，揪出大户
+for d in /*; do echo "$d: $(find $d -xdev 2>/dev/null | wc -l)"; done | sort -t: -k2 -nr | head -5</code></pre>
+<p>查出来是 <code>/var/spool/postfix/maildrop/</code> —— 300 多万个小文件。原因是这台机器的 cron 任务有输出，但没装 MTA，邮件投递不出去，全堆在 maildrop 里了。每个邮件一个文件，几年下来把 inode 吃光了。</p>
+<h2>清理 + 根治</h2>
+<pre><code># 清理（文件太多，rm 会卡，用 find 分批删）
+find /var/spool/postfix/maildrop/ -type f -delete
+
+# 根治一：cron 输出重定向到 /dev/null
+# crontab 里：
+* * * * * /path/to/job &gt;/dev/null 2&gt;&amp;1
+
+# 根治二：或者装个 MTA 让邮件能发出去
+# 根治三：监控加 df -i，别只看 df -h</code></pre>
+<p>删了 20 分钟，inode 降到 3%，应用恢复。虚惊一场。</p>
+<h2>其他常见的 inode 杀手</h2>
+<ul>
+<li><strong>PHP session 文件</strong>：<code>/var/lib/php/sessions/</code>，gc 配不好会堆积</li>
+<li><strong>Docker 层</strong>：频繁 build 镜像不清理，<code>docker system prune</code> 定期跑</li>
+<li><strong>应用日志按条切分</strong>：某些框架默认一条日志一个文件，赶紧关了换按天切</li>
+<li><strong>压测残留</strong>：ab/wrk 压测生成的临时文件，测完就删</li>
+</ul>
+<blockquote>监控磁盘只看 <code>df -h</code> 是不够的，<code>df -i</code> 也加上。两个都告警，才算完整。</blockquote>
+<p>这次最大的收获：<code>No space left on device</code> 不一定是空间满了，先 <code>df -i</code> 看一眼，30 秒就能定位方向。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>

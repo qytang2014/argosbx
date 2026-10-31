@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="{{TAGLINE}}">
+<title>{{SITE_NAME}} - {{AUTHOR}}的技术笔记</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="index.html">首页</a>
+<a href="archive.html">归档</a>
+<a href="about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<div class="profile">
+<div class="avatar">{{AVATAR}}</div>
+<div>
+<h2>{{AUTHOR}}</h2>
+<p>{{BIO}}</p>
+</div>
+</div>
+<ul class="post-list">
+<li class="post-item">
+<h2><a href="posts/post-10.html">Python 虚拟环境管理：venv 还是 conda？</a></h2>
+<div class="post-meta">2026-10-28 · Python</div>
+<div class="post-excerpt">新项目到底用 venv 还是 conda？结合我这几年的使用经验，聊聊两者的适用场景和几个容易踩的坑。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-09.html">Linux 磁盘空间告警：一次 df -h 引发的排查</a></h2>
+<div class="post-meta">2026-10-15 · Linux</div>
+<div class="post-excerpt">半夜收到磁盘告警，df 显示还有空间，服务却写不进文件。记录这次 inode 耗尽的排查过程。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-08.html">用 systemd 管理你的自建服务</a></h2>
+<div class="post-meta">2026-09-30 · Linux</div>
+<div class="post-excerpt">还在用 nohup 跑服务？写一个 systemd unit 文件，开机自启、崩溃重启、日志收集一次搞定。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-07.html">VPS 到手后的安全加固清单</a></h2>
+<div class="post-meta">2026-09-12 · VPS</div>
+<div class="post-excerpt">新开一台 VPS，先别急着装服务。这份清单是我每次开新机器都会过一遍的：SSH、防火墙、自动更新。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-06.html">Python 日志模块 logging 的最佳实践</a></h2>
+<div class="post-meta">2026-08-28 · Python</div>
+<div class="post-excerpt">print 调试一时爽，上线火葬场。从 logging 基础配置到按天切分，这篇是我的常用模板。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-05.html">Nginx 反向代理配置笔记</a></h2>
+<div class="post-meta">2026-08-10 · 运维</div>
+<div class="post-excerpt">proxy_pass 后面加不加斜杠，差别可大了。整理几个常用的反代配置片段和排错思路。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-04.html">Rsync 备份脚本：每天凌晨 3 点的安心</a></h2>
+<div class="post-meta">2026-07-22 · 运维</div>
+<div class="post-excerpt">数据无价。一个 30 行的 rsync 备份脚本 + cron，关键数据每天自动同步到备用机器。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-03.html">Docker 容器日志占满磁盘的解决办法</a></h2>
+<div class="post-meta">2026-07-05 · Docker</div>
+<div class="post-excerpt">容器跑了三个月，宿主机磁盘满了。元凶是没做轮转的 json-file 日志，两种解法记录一下。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-02.html">SSH 免密登录与 config 文件技巧</a></h2>
+<div class="post-meta">2026-06-18 · Linux</div>
+<div class="post-excerpt">管理十几台机器还在一台台输密码？ssh-keygen + config 文件，ssh web1 回车直达。</div>
+</li>
+<li class="post-item">
+<h2><a href="posts/post-01.html">写给自己的 Python 装饰器教程</a></h2>
+<div class="post-meta">2026-05-30 · Python</div>
+<div class="post-excerpt">装饰器看了三遍还是忘，这次换个方式：从一个计时需求开始，一步步写出自己的装饰器。</div>
+</li>
+</ul>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · 由静态页面生成 · <a href="about.html">关于我</a></footer>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="ssh-keygen + SSH config 文件，管理多台服务器不再输密码">
+<title>SSH 免密登录与 config 文件技巧 - {{SITE_NAME}}</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="header">
+<div class="header-inner">
+<div class="site-title"><a href="../index.html">{{SITE_NAME}}</a></div>
+<div class="site-desc">{{TAGLINE}}</div>
+<nav class="nav">
+<a href="../index.html">首页</a>
+<a href="../archive.html">归档</a>
+<a href="../about.html">关于</a>
+</nav>
+</div>
+</header>
+<main class="main">
+<article class="article">
+<h1>SSH 免密登录与 config 文件技巧</h1>
+<div class="post-meta">2026-06-18 · Linux</div>
+<p>手里机器一多，每天 ssh 上去输密码能输到怀疑人生。这篇记录从密码登录切换到密钥登录的全过程，以及 <code>~/.ssh/config</code> 这个被低估的神器。</p>
+<h2>第一步：生成密钥对</h2>
+<p>在本机（你的笔记本）执行：</p>
+<pre><code>ssh-keygen -t ed25519 -C "my-laptop"
+# 一路回车，私钥存 ~/.ssh/id_ed25519，公钥存 ~/.ssh/id_ed25519.pub</code></pre>
+<p>用 ed25519，不用 rsa。短、安全、速度快，是现在的主流选择。passphrase 可以设也可以不设——设了更安全，但每次要用 ssh-agent；不设方便，适合可信的个人电脑。</p>
+<h2>第二步：把公钥传到服务器</h2>
+<pre><code>ssh-copy-id -i ~/.ssh/id_ed25519.pub user@server_ip
+# 输入一次密码，之后就不用了</code></pre>
+<p>这条命令干的事很简单：把你的公钥追加到服务器的 <code>~/.ssh/authorized_keys</code>。如果服务器比较老没有 ssh-copy-id，手动复制粘贴也行，注意文件权限：</p>
+<pre><code>chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys</code></pre>
+<p>权限不对 sshd 会直接拒绝密钥登录，这是最常见的坑，没有之一。</p>
+<h2>第三步（关键）：写 config 文件</h2>
+<p>密钥配好了，但每次还要敲 <code>ssh -i ~/.ssh/id_ed25519 -p 2222 user@192.168.1.100</code>，依然麻烦。<code>~/.ssh/config</code> 登场：</p>
+<pre><code>Host web1
+    HostName 192.168.1.100
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519
+
+Host db1
+    HostName 192.168.1.101
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+
+Host *.internal
+    User admin
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 60</code></pre>
+<p>之后就是 <code>ssh web1</code> 回车直达。<code>Host *.internal</code> 这种通配写法适合一批命名规律的机器。ServerAliveInterval 防止长时间不动被网关掐掉。</p>
+<h2>几个实用技巧</h2>
+<ul>
+<li><strong>跳板机</strong>：<code>ProxyJump bastion</code> 加一行，<code>ssh db1</code> 自动先跳跳板机，不用手动两段跳</li>
+<li><strong>端口转发</strong>：<code>LocalForward 8080 localhost:80</code>，把服务器内网端口映射到本机，调试后台很方便</li>
+<li><strong>禁用密码登录</strong>（服务器端）：密钥调通后，把 <code>/etc/ssh/sshd_config</code> 里的 <code>PasswordAuthentication</code> 设成 <code>no</code>，防暴力破解效果立竿见影</li>
+</ul>
+<blockquote>注意：关密码登录之前，务必先开一个新终端测试密钥能登录！别把自己锁在门外，我吃过这个亏。</blockquote>
+<h2>总结</h2>
+<p>三步：<code>ssh-keygen</code> 生成 → <code>ssh-copy-id</code> 分发 → <code>~/.ssh/config</code> 起别名。配完之后管理十几台机器和串门一样轻松。密钥文件自己备份好，丢了就得一台台重置。</p>
+</article>
+<div class="back"><a href="../index.html">← 返回首页</a></div>
+</main>
+<footer class="footer">© 2026 {{SITE_NAME}} · <a href="../about.html">关于我</a></footer>
+</body>
+</html>
