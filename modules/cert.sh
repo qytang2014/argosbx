@@ -141,7 +141,7 @@ ensure_caddy_download(){
   echo "预编译 Caddy 下载并替换成功"
   return 0
 }
-# 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时内为指向 Caddy 证书存储的软链接，acme 时直接安装到该目录）。
+# 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时由 caddy_fetch_cert 从 Caddy 证书存储同步，acme 时直接安装到该目录）。
 # domain_cert_valid：检查是否已有 $ym 的有效证书（两文件存在非空、可解析、域名匹配、剩余有效期 >7 天）。
 # 有则返回 0，调用方跳过 --issue 直接复用，避免"已有证书还报发证失败"的误导。
 domain_cert_valid(){
@@ -154,11 +154,38 @@ domain_cert_valid(){
   openssl x509 -in "$CERT_CRT" -noout -checkend 604800 >/dev/null 2>&1 || return 1
   return 0
 }
+# caddy_fetch_cert：从 Caddy 证书存储中找到 $ym 的证书并同步到 $CERT_DIR，成功返回 0。
+# 背景：Caddy 模式下证书由 Caddy 自己申请，存在它自己的存储里；代理内核用的是脚本
+# 固定目录，需要一份拷贝。存储位置因 Caddy 运行用户而异，逐个尝试；CA 目录兼容
+# Let's Encrypt 与 ZeroSSL（Caddy 会自动回落）。只同步可解析、域名匹配、剩余有效期
+# >7 天的证书。CADDY_STORAGE_CANDIDATES 可覆盖候选目录（空格分隔，主要给测试用）。
+caddy_fetch_cert(){
+  local _ym="${ym:-$(cat "$HOME/agsbx/ym" 2>/dev/null)}"
+  [ -n "$_ym" ] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+  local dirs="${CADDY_STORAGE_CANDIDATES:-/var/lib/caddy/.local/share/caddy /root/.local/share/caddy $HOME/.local/share/caddy}"
+  local s d f k cert_text
+  for s in $dirs; do
+    for d in acme-v02.api.letsencrypt.org-directory acme.zerossl.com-v2-DV90; do
+      f="$s/certificates/$d/$_ym/$_ym.crt"; k="$s/certificates/$d/$_ym/$_ym.key"
+      [ -s "$f" ] && [ -s "$k" ] || continue
+      cert_text=$(openssl x509 -in "$f" -noout -subject -ext subjectAltName 2>/dev/null || openssl x509 -in "$f" -noout -subject 2>/dev/null) || continue
+      case "$cert_text" in *"$_ym"*) ;; *) continue;; esac
+      openssl x509 -in "$f" -noout -checkend 604800 2>/dev/null || continue
+      mkdir -p "$CERT_DIR" 2>/dev/null || return 1
+      cp -f "$f" "$CERT_CRT" && cp -f "$k" "$CERT_KEY" && chmod 600 "$CERT_KEY" 2>/dev/null || continue
+      return 0
+    done
+  done
+  return 1
+}
 # wait_domain_cert：等待最长 300 秒，每 15 秒检查一次；校验两文件存在且非空、非断链、证书可解析且域名匹配 ym。返回 0=就绪，1=未就绪（调用方超时回落自签）。
 wait_domain_cert(){
   [ -n "$ym" ] || return 1
   local waited=0 cert_text=""
   while [ "$waited" -lt 300 ]; do
+    # Caddy 模式：证书在 Caddy 自己的存储里，先同步到固定目录再检查（acme 模式由 --install-cert 直接写入，无需同步）
+    if [ "${certsrc_selected:-}" = "caddy" ]; then caddy_fetch_cert 2>/dev/null || true; fi
     if [ -s "$CERT_CRT" ] && [ -s "$CERT_KEY" ] && [ -e "$CERT_CRT" ] && [ -e "$CERT_KEY" ]; then
       if command -v openssl >/dev/null 2>&1; then
         cert_text=$(openssl x509 -in "$CERT_CRT" -noout -subject -ext subjectAltName 2>/dev/null || openssl x509 -in "$CERT_CRT" -noout -subject 2>/dev/null)

@@ -263,7 +263,7 @@ def build_index():
     h = replace(h, '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/yonggekkk/argosbx" target="_blank">github.com/yonggekkk/argosbx</a></p>',
                 '<p style="margin-top: 10px;">相关细节说明，请参考ArgoSBX小钢炮脚本项目💣：<a href="https://github.com/qytang2014/argosbx" target="_blank">github.com/qytang2014/argosbx</a></p>', "index-footer-link", 1)
     h = replace(h, 'Acme-yg域名IP证书脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)</a></p>',
-                '        <p>域名证书：由证书来源申请（自动：低内存走 acme，否则走 Caddy；验证方式自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode/certsrc），固定目录 $HOME/agsbx/cert（Caddy 时为软链接指向 Caddy 证书存储，acme 时直接安装到该目录），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
+                '        <p>域名证书：由证书来源申请（自动：低内存走 acme，否则走 Caddy；验证方式自动：未代理用 HTTP，已代理/Argo 用 DNS；可手动选 certmode/certsrc），固定目录 $HOME/agsbx/cert（Caddy 时从 Caddy 证书存储同步，acme 时直接安装到该目录），超时未就绪时回落自签证书。</p>', "index-footer-acme", 1)
     h = replace(h, "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-curl", 1)
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
@@ -344,6 +344,49 @@ def build_index():
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', render);
   });""", "index-egress-listeners", 1)
+    # reym 自动跟随 ym：填了节点域名后，Reality 域名自动填 ym 的内容；
+    # 清空 ym 则恢复默认（reym 留空 = 脚本默认 apple.com）。手动改过
+    # reym 的值不会被覆盖；重置表单、粘贴回填时重新判定。
+    h = replace(h, """  ['egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', render);
+  });""",
+                """  ['egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', render);
+  });
+  // reym 自动跟随 ym：填节点域名后自动同步，清空 ym 则恢复默认；
+  // 手动改过 reym 后不再覆盖（render 由 allInputs 通用监听触发）。
+  const ymInput = document.getElementById('ym');
+  let reymManual = false;
+  function syncReymFromYm() {
+    if (!reymManual) reymInput.value = ymInput.value.trim();
+  }
+  ymInput.addEventListener('input', syncReymFromYm);
+  reymInput.addEventListener('input', () => {
+    const rv = reymInput.value.trim();
+    reymManual = !(rv === '' || rv === ymInput.value.trim());
+  });""", "index-reym-autosync", 1)
+    # 勾选 Reality 协议启用 reym 输入框时，也按 ym 同步一次（ym 可能先填好）
+    h = replace(h, """      reymInput.disabled = !isRealityEnabled;
+      if (!isRealityEnabled) reymInput.value = '';""",
+                """      reymInput.disabled = !isRealityEnabled;
+      if (!isRealityEnabled) reymInput.value = '';
+      else syncReymFromYm();""", "index-reym-autosync-enable", 1)
+    # 重置表单时清除"手动改过 reym"标记
+    h = replace(h, """    document.getElementById('reym').value = '';""",
+                """    document.getElementById('reym').value = '';
+    reymManual = false;""", "index-reym-autosync-reset", 1)
+    # 粘贴命令回填后，按回填的值重新判定是否手动改过
+    h = replace(h, """    isUpdatingFromOutput = false;
+  }
+
+  output.addEventListener('input', parseAndFillOutput);""",
+                """    reymManual = !(reymInput.value.trim() === '' || reymInput.value.trim() === (document.getElementById('ym').value || '').trim());
+    isUpdatingFromOutput = false;
+  }
+
+  output.addEventListener('input', parseAndFillOutput);""", "index-reym-autosync-parse", 1)
     h = replace(h, """    optIds.forEach(id => {
       const el = document.getElementById(id);
       const v = (el.value || '').trim();""",

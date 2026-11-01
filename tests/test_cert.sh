@@ -12,7 +12,7 @@ import re, sys
 t = open(sys.argv[1]).read()
 # cert module functions live in modules/cert.sh in source, but in the
 # built file they are inline; extract by function names.
-for name in ["detect_certsrc", "detect_certmode", "write_caddyfile", "ensure_caddy_download"]:
+for name in ["detect_certsrc", "detect_certmode", "write_caddyfile", "ensure_caddy_download", "caddy_fetch_cert", "wait_domain_cert"]:
     m = re.search(rf"{name}\(\)\{{.*?\n\}}\n", t, re.S)
     assert m, f"{name} not found"
     open(f"{sys.argv[2]}/{name}.sh", "w").write(m.group(0))
@@ -128,4 +128,38 @@ cpu="mips"; ensure_caddy_download >/dev/null 2>&1 && { echo "FAIL: mips should f
 echo "ensure_caddy_download URL/auth/arch OK"
 RUN
 bash "$TMP/run_caddy_dl.sh" "$TMP/caddy_dl_test.sh" "$TMP"
-echo "PASS: cert (certsrc, certmode, write_caddyfile, caddy-download)"
+# caddy_fetch_cert: sync from Caddy storage to fixed dir (valid -> copy, wrong-domain/missing -> fail)
+mkdir -p "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com"
+openssl req -x509 -newkey rsa:2048 -keyout "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com/test.example.com.key" -out "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com/test.example.com.crt" -days 30 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
+mkdir -p "$TMP/fakestore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/other.example.com"
+openssl req -x509 -newkey rsa:2048 -keyout "$TMP/fakestore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/other.example.com/other.example.com.key" -out "$TMP/fakestore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/other.example.com/other.example.com.crt" -days 30 -nodes -subj "/CN=other.example.com" -addext "subjectAltName=DNS:other.example.com" 2>/dev/null
+cat > "$TMP/run_caddy_fetch.sh" << 'RUN'
+#!/bin/bash
+source "$1/certdir/caddy_fetch_cert.sh"
+export CERT_DIR="$2/fetchcert" CERT_CRT="$2/fetchcert/cert.crt" CERT_KEY="$2/fetchcert/private.key"
+export CADDY_STORAGE_CANDIDATES="$2/caddystore/.local/share/caddy"
+ym="test.example.com"
+caddy_fetch_cert || { echo "FAIL: valid caddy cert should sync"; exit 1; }
+[ -s "$CERT_CRT" ] && [ -s "$CERT_KEY" ] || { echo "FAIL: files not copied"; exit 1; }
+openssl x509 -in "$CERT_CRT" -noout -subject 2>/dev/null | grep -q "test.example.com" || { echo "FAIL: copied cert wrong"; exit 1; }
+rm -rf "$2/fetchcert"; export CADDY_STORAGE_CANDIDATES="$2/fakestore/.local/share/caddy"
+caddy_fetch_cert && { echo "FAIL: wrong-domain cert should not sync"; exit 1; }
+[ ! -e "$CERT_CRT" ] || { echo "FAIL: wrong-domain cert was copied"; exit 1; }
+export CADDY_STORAGE_CANDIDATES="$2/nostore"
+caddy_fetch_cert && { echo "FAIL: missing storage should fail"; exit 1; }
+echo "caddy_fetch_cert OK"
+RUN
+bash "$TMP/run_caddy_fetch.sh" "$TMP" "$TMP"
+# wait_domain_cert in caddy mode picks up the cert via fetch on first iteration (no sleep)
+cat > "$TMP/run_wait_caddy.sh" << 'RUN'
+#!/bin/bash
+source "$1/certdir/caddy_fetch_cert.sh"
+source "$1/certdir/wait_domain_cert.sh"
+export CERT_DIR="$2/waitcert" CERT_CRT="$2/waitcert/cert.crt" CERT_KEY="$2/waitcert/private.key"
+export CADDY_STORAGE_CANDIDATES="$2/caddystore/.local/share/caddy"
+ym="test.example.com"; certsrc_selected="caddy"
+wait_domain_cert || { echo "FAIL: wait should succeed via caddy fetch"; exit 1; }
+echo "wait_domain_cert caddy-mode OK"
+RUN
+bash "$TMP/run_wait_caddy.sh" "$TMP" "$TMP"
+echo "PASS: cert (certsrc, certmode, write_caddyfile, caddy-download, caddy-fetch)"

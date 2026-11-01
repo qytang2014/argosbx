@@ -33,6 +33,10 @@ cert_restart(){
   if type sub_https_sync >/dev/null 2>&1; then sub_https_sync; fi
 }
 cert_watch(){
+  # Caddy 模式：先从 Caddy 存储同步证书，续期后 hash 变化才会触发重启
+  if [ "$(cat "$HOME/agsbx/certsrc" 2>/dev/null)" = "caddy" ] && command -v caddy_fetch_cert >/dev/null 2>&1; then
+    caddy_fetch_cert 2>/dev/null || true
+  fi
   [ -s "$CERT_CRT" ] || return 0
   local ym_watch="" cur="" old="" cert_text=""
   ym_watch="${ym:-$(cat "$HOME/agsbx/ym" 2>/dev/null)}"
