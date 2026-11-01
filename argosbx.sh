@@ -1759,9 +1759,9 @@ command -v register_hook >/dev/null 2>&1 && {
 # managers (guarded, so this module alone still works) so that
 # enabling ufw later and running ufwsync opens everything, not just
 # the node ports:
-#   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, nvpt, anpt, arpt, vmpt, vmtls
+#   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
-#   tcp+udp:  sspt, sopt
+#   tcp+udp:  sspt, sopt, nvpt (naive h2=TCP, h3/QUIC=UDP, same port)
 # Why xcpt is tcp only even though its display name says TCP/UDP:
 # the direct inbound uses alpn h2/http/1.1 (TCP); the UDP variants in
 # the display are CDN links, not the direct port. Opening UDP for it
@@ -1822,7 +1822,7 @@ ufw_desired_rules(){
   _ufw_emit "$vwp" vwpt "$port_vw" "$HOME/agsbx/port_vw" "tcp"
   _ufw_emit "$xup" xupt "$port_xu" "$HOME/agsbx/port_xu" "udp"
   _ufw_emit "$xcp" xcpt "$port_xc" "$HOME/agsbx/port_xc" "tcp"
-  _ufw_emit "$nvp" nvpt "$port_nv" "$HOME/agsbx/port_nv" "tcp"
+  _ufw_emit "$nvp" nvpt "$port_nv" "$HOME/agsbx/port_nv" "tcp udp"
   _ufw_emit "$tup" tupt "$port_tu" "$HOME/agsbx/port_tu" "udp"
   _ufw_emit "$anp" anpt "$port_an" "$HOME/agsbx/port_an" "tcp"
   _ufw_emit "$arp" arpt "$port_ar" "$HOME/agsbx/port_ar" "tcp"
@@ -1844,7 +1844,7 @@ ufw_desired_rules(){
   # optional space after the colon because xr/sb.json tag formats
   # differ ("tag":"x" vs "tag": "x").
   local _pfx _protos _tag _cfg _pr
-  for _spec in "port_xh:tcp:xhttp-reality:xr" "port_vx:tcp:vless-xhttp:xr" "port_vw:tcp:vless-ws:xr" "port_xu:udp:xhttp-h3:xr" "port_xc:tcp:xhttp-h23:xr" "port_nv:tcp:naive-sb:sb" "port_tu:udp:tuic5-sb:sb" "port_an:tcp:anytls-sb:sb" "port_ar:tcp:anyreality-sb:sb" "port_ss:tcp udp:ss-2022:sb" "port_hy2:udp:hy2:both" "port_vm_ws:tcp:vmess:both" "port_vm_tls:tcp:vmess-tls:both" "port_so:tcp udp:socks5:both"; do
+  for _spec in "port_xh:tcp:xhttp-reality:xr" "port_vx:tcp:vless-xhttp:xr" "port_vw:tcp:vless-ws:xr" "port_xu:udp:xhttp-h3:xr" "port_xc:tcp:xhttp-h23:xr" "port_nv:tcp udp:naive-sb:sb" "port_tu:udp:tuic5-sb:sb" "port_an:tcp:anytls-sb:sb" "port_ar:tcp:anyreality-sb:sb" "port_ss:tcp udp:ss-2022:sb" "port_hy2:udp:hy2:both" "port_vm_ws:tcp:vmess:both" "port_vm_tls:tcp:vmess-tls:both" "port_so:tcp udp:socks5:both"; do
     _pfx="${_spec%%:*}"; _protos=$(printf '%s' "$_spec" | cut -d: -f2); _tag=$(printf '%s' "$_spec" | cut -d: -f3); _cfg=$(printf '%s' "$_spec" | cut -d: -f4)
     for _f in "$HOME/agsbx"/"$_pfx"[0-9]*; do
       [ -f "$_f" ] || continue
@@ -1861,7 +1861,7 @@ ufw_desired_rules(){
 }
 _ufw_fallback_rules(){
   local spec f protos p pr
-  for spec in "port_vl_re:tcp" "port_vl_re2:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+  for spec in "port_vl_re:tcp" "port_vl_re2:tcp" "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp udp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
     f="${spec%%:*}"; protos="${spec#*:}"
     p=$(_ufw_port "" "$HOME/agsbx/$f")
     if [ -z "$p" ]; then continue; fi
@@ -1877,7 +1877,7 @@ _ufw_fallback_rules(){
   done
   # Other protocols more instances: same scan, with their transport.
   local _pfx2 _protos2 _pr2
-  for _spec2 in "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
+  for _spec2 in "port_xh:tcp" "port_vx:tcp" "port_vw:tcp" "port_xu:udp" "port_xc:tcp" "port_nv:tcp udp" "port_tu:udp" "port_an:tcp" "port_ar:tcp" "port_ss:tcp udp" "port_hy2:udp" "port_vm_ws:tcp" "port_vm_tls:tcp" "port_so:tcp udp"; do
     _pfx2="${_spec2%%:*}"; _protos2="${_spec2#*:}"
     for f in "$HOME/agsbx"/"$_pfx2"[0-9]*; do
       [ -f "$f" ] || continue

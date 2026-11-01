@@ -75,6 +75,19 @@ grep -Fq "ufw allow 10003/udp" "$td/ufw.log" || fail "fresh sync did not allow s
 grep -Fq "ufw allow 10005/udp" "$td/ufw.log" && fail "xcpt must be tcp only, not udp (UDP variants are CDN, not direct)"
 grep -Fq "ufw allow 99999" "$td/ufw.log" && fail "out-of-range port must be skipped"
 
+# 2b. Naive must open both TCP (h2) and UDP (h3/QUIC) on the same port.
+# (backup state/log: later tests depend on the test-2 state)
+cp "$td/home/agsbx/ufw.rules" "$td/rules.bak" 2>/dev/null || true
+cp "$td/ufw.log" "$td/ufw.log.bak" 2>/dev/null || true
+: > "$td/ufw.log"; rm -f "$td/home/agsbx/ufw.rules"
+run_main 'nvp=nvpt; port_nv=10007' ufw_sync
+grep -Fq "ufw allow 10007/tcp" "$td/ufw.log" || fail "naive h2 tcp not allowed"
+grep -Fq "ufw allow 10007/udp" "$td/ufw.log" || fail "naive h3/quic udp not allowed"
+grep -Fq "10007/tcp" "$td/home/agsbx/ufw.rules" || fail "naive tcp missing from state"
+grep -Fq "10007/udp" "$td/home/agsbx/ufw.rules" || fail "naive udp missing from state"
+mv "$td/rules.bak" "$td/home/agsbx/ufw.rules" 2>/dev/null || true
+mv "$td/ufw.log.bak" "$td/ufw.log" 2>/dev/null || true
+
 # 3. Idempotent second sync: no new allow calls.
 n_before=$(grep -c "ufw allow" "$td/ufw.log")
 run_main 'vlp=vlpt; port_vl_re=10001; hyp=hypt; port_hy2=10002; ssp=sspt; port_ss=10003; xup=xupt; port_xu=10004; xcp=xcpt; port_xc=10005; sop=sopt; port_so=10006' ufw_sync
