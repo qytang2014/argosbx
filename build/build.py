@@ -688,7 +688,7 @@ fi
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
     # --- cert-watch module (right after cert module) ---
     t = t.replace(cert, cert + cert_watch, 1)
-    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪、内存大于等于 256M 或订阅 Caddy 已在运行时走 https，否则回退 http）"', "showmode-add-line", 1)
+    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")

@@ -16,6 +16,8 @@ check argosbx.sh "subhttpsync" "built script missing subhttpsync dispatch"
 check argosbx.sh "sub_https_stop" "built script missing sub_https_stop"
 check argosbx.sh "Caddyfile.sub" "built script missing Caddyfile.sub"
 check argosbx.sh "subhttpsync 重新同步" "built script missing showmode subhttpsync line"
+check argosbx.sh "subhttps_merge_system_caddy" "built script missing auto-merge"
+check argosbx.sh "https-merged" "built script missing https-merged mode"
 # Original http-IP display block must be gone (replaced by sync+display);
 # the unquoted outer-if sequence appears only in the old block, while
 # the module display uses the quoted form.
@@ -24,7 +26,7 @@ if grep -q 'if \[ -s \$HOME/agsbx/subport.log \]; then' argosbx.sh; then fail "o
 grep -q "yonggekkk/argosbx/main/argosbx.sh" upstream/argosbx.sh || fail "upstream changed"
 
 # --- isolated HOME + mocks ---
-TESTHOME="$(mktemp -d)"; export HOME="$TESTHOME"
+TESTHOME="$(mktemp -d)"; export TESTHOME; export HOME="$TESTHOME"
 mkdir -p "$HOME/agsbx" "$HOME/websbx/token-123"
 MOCKBIN="$(mktemp -d)"; export PATH="$MOCKBIN:$PATH"
 UFLOG="$TESTHOME/ufw.log"; CRONFILE="$TESTHOME/crontab.txt"; touch "$CRONFILE"
@@ -168,6 +170,91 @@ echo "http-ip" > "$HOME/agsbx/subhttps.mode"
 rm -f "$HOME/agsbx/ym"
 OUT="$(sub_https_display)"
 echo "$OUT" | grep -q "http://1.2.3.4:18080/token-123/clmi.yaml" || fail "display http-ip clmi missing"
+
+# --- auto-merge into system Caddy (443 held by our own cert-flow Caddy) ---
+MERGEBIN="$TESTHOME/merge-bin"; mkdir -p "$MERGEBIN"
+for b in ufw crontab ps; do cp "$MOCKBIN/$b" "$MERGEBIN/$b"; done
+cat > "$MERGEBIN/caddy" <<'EOF'
+#!/bin/bash
+# validate succeeds; run fails (simulates 443 busy: our own Caddy cannot bind)
+if [ "$1" = "validate" ]; then exit 0; fi
+if [ "$1" = "version" ]; then echo "v2.11.7"; exit 0; fi
+exit 1
+EOF
+chmod +x "$MERGEBIN/caddy"
+cat > "$MERGEBIN/systemctl" <<'EOF'
+#!/bin/bash
+echo "systemctl $@" >> "$TESTHOME/systemctl.log"
+if [ "$1" = "is-active" ]; then exit 0; fi
+exit 0
+EOF
+chmod +x "$MERGEBIN/systemctl"
+cat > "$MERGEBIN/curl" <<'EOF'
+#!/bin/bash
+echo "200"
+EOF
+chmod +x "$MERGEBIN/curl"
+export PATH="$MERGEBIN:/usr/bin:/bin"
+mkdir -p "$TESTHOME/fakecaddy"
+export SUBHTTPS_MERGE_SYSFILE="$TESTHOME/fakecaddy/argosbx.caddyfile"
+export SUBHTTPS_MERGE_MAINFILE="$TESTHOME/fakecaddy/Caddyfile"
+printf '{\n\temail test@example.com\n}\nimport argosbx.caddyfile\n' > "$SUBHTTPS_MERGE_MAINFILE"
+printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
+echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
+echo "example.test" > "$HOME/agsbx/ym"
+export SUBHTTPS_MEM_KB=524288
+: > "$TESTHOME/systemctl.log"
+
+subhttps_merge_eligible "example.test" || fail "should be eligible with our own system Caddy"
+sub_https_sync >/dev/null 2>&1 || fail "merge sync failed"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should be https-merged"
+grep -q "handle_path /token-123/" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing subscription block"
+grep -q "# >>> argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing merge markers"
+grep -q 'root \* /var/www/html' "$SUBHTTPS_MERGE_SYSFILE" || fail "blog root should be preserved"
+grep -q "systemctl reload caddy" "$TESTHOME/systemctl.log" || fail "should reload system caddy"
+[ -f "$SUBHTTPS_MERGE_SYSFILE.pre-sub" ] || fail "should keep a pre-merge backup"
+OUT="$(sub_https_display)"
+echo "$OUT" | grep -q "https://example.test/token-123/clmi.yaml" || fail "merged display https clmi missing"
+
+# idempotent: second sync must not duplicate the block
+N1=$(grep -c "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE")
+sub_https_sync >/dev/null 2>&1 || fail "second merge sync failed"
+[ "$(grep -c "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE")" = "$N1" ] || fail "merge should be idempotent"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should stay https-merged"
+
+# guard: user's own Caddy (main config does not import ours) must NOT be touched
+printf '{\n\temail test@example.com\n}\nmyblog.example.com {\n\troot * /srv/www\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_MAINFILE"
+subhttps_merge_eligible "example.test" && fail "user-owned Caddy should not be eligible"
+printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
+BEFORE_SUM=$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')
+sub_https_sync >/dev/null 2>&1
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "user-owned Caddy should fall back to http-domain"
+[ "$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')" = "$BEFORE_SUM" ] || fail "user-owned Caddy config must not be touched"
+
+# downgrade: cert gone -> http-domain, merge block stripped, blog intact
+printf '{\n\temail test@example.com\n}\nimport argosbx.caddyfile\n' > "$SUBHTTPS_MERGE_MAINFILE"
+sub_https_sync >/dev/null 2>&1 || fail "re-merge failed"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "should merge again"
+rm "$HOME/agsbx/cert/cert.crt"
+sub_https_sync >/dev/null 2>&1 || fail "downgrade sync failed"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "cert gone should be http-domain"
+grep -q "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" && fail "downgrade should strip merge block"
+grep -q 'root \* /var/www/html' "$SUBHTTPS_MERGE_SYSFILE" || fail "blog should survive unmerge"
+
+# del stop also unmerges
+openssl req -new -x509 -days 365 -nodes -keyout "$HOME/agsbx/cert/private.key" -out "$HOME/agsbx/cert/cert.crt" -subj "/CN=example.test" -addext "subjectAltName=DNS:example.test" >/dev/null 2>&1 || fail "cert regen failed"
+sub_https_sync >/dev/null 2>&1 || fail "re-merge before stop failed"
+grep -q "# >>> argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" || fail "should be merged before stop"
+sub_https_stop
+grep -q "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" && fail "del stop should unmerge"
+[ ! -f "$HOME/agsbx/subhttps.mode" ] || fail "mode file should be removed on del stop"
+
+# --- restore env for remaining phases ---
+unset SUBHTTPS_MERGE_SYSFILE SUBHTTPS_MERGE_MAINFILE
+rm -f "$HOME/agsbx/caddyfile_path"
+export PATH="$MOCKBIN:/usr/bin:/bin"
+export SUBHTTPS_MEM_KB=524288
+rm -rf "$TESTHOME/merge-bin" "$TESTHOME/fakecaddy" 2>/dev/null || true
 
 # --- cert-restart integration: guarded call runs when defined ---
 export HOME="$TESTHOME"

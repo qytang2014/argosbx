@@ -1137,6 +1137,9 @@ CAMOUFLAGE_TPL_EOF
 #                     $HOME/websbx directly (file_server) with the
 #                     domain cert in $HOME/agsbx/cert, so no separate
 #                     subscription server is needed in this mode.
+#   mode https-merged: https 决议后独立 Caddy 绑不上 443，但 443 正被我们自己的
+#                     证书流程 Caddy（/etc/caddy/argosbx.caddyfile）占用时，把订阅
+#                     handle_path 自动合并进系统 Caddyfile 并 reload，不新增进程。
 #   mode http-domain: ym set, but cert not ready, or memory gate
 #                     fails, or caddy missing / 443 busy. Plain HTTP
 #                     on ym:port/token, via the existing websbx server.
@@ -1149,6 +1152,11 @@ CAMOUFLAGE_TPL_EOF
 # - Never start a second Caddy on 443 if one already binds it: a
 #   failed start falls back to http-domain with a warning, it never
 #   kills an existing Caddy (which may be the user's own service).
+# - Auto-merge: when the 443 holder is provably our own cert-flow Caddy
+#   (/etc/caddy/argosbx.caddyfile, four eligibility checks below), the
+#   subscription handle_path is merged into it automatically and the
+#   service reloaded, instead of asking the user to paste snippets.
+#   A user's own Caddy/Nginx is never touched (falls back to snippets).
 # - Memory gate uses the same detection as detect_certsrc
 #   (/proc/meminfo MemTotal, < 262144 KB = 256MB), with an override
 #   SUBHTTPS_MEM_KB for tests. The exception is only our own
@@ -1227,8 +1235,10 @@ subhttps_decide_mode(){
   if [ -z "$token" ]; then echo "http-ip"; return; fi
   if [ -z "$ym_c" ]; then echo "http-ip"; return; fi
   if ! subhttps_cert_ok "$ym_c"; then echo "http-domain"; return; fi
-  if ! subhttps_mem_ok && ! subhttps_caddy_running; then echo "http-domain"; return; fi
-  if ! command -v caddy >/dev/null 2>&1 && ! subhttps_caddy_running; then echo "http-domain"; return; fi
+  # 自动合并模式不新增进程（系统 Caddy 已在运行）：内存门不拦截，可合并时直接走 https
+  if subhttps_merge_eligible "$ym_c"; then echo "https"; return; fi
+  if ! subhttps_mem_ok && ! subhttps_https_active; then echo "http-domain"; return; fi
+  if ! command -v caddy >/dev/null 2>&1 && ! subhttps_https_active; then echo "http-domain"; return; fi
   echo "https"
 }
 subhttps_write_conf(){
@@ -1253,6 +1263,125 @@ subhttps_write_conf(){
     echo "  file_server"
     echo "}"
   } > "$HOME/agsbx/Caddyfile.sub" 2>/dev/null || return 1
+  return 0
+}
+# --- 自动合并到系统 Caddy ---
+# 场景：证书流程（certsrc=caddy）把博客配到了系统 Caddy（/etc/caddy/argosbx.caddyfile）
+# 并占用 443，订阅的独立 Caddy 绑不上 443。既然占 443 的是我们自己的配置，就把订阅
+# 的 handle_path 自动合并进系统 Caddyfile 并 reload，不再需要手动贴片段。
+# 红线：eligible 的四个条件缺一不可，绝不碰用户自己的 Caddy 配置；任何一步失败都
+# 摘除合并块恢复原文件，并回退到原来的 http-domain + 片段流程。
+# 路径用环境变量覆盖（SUBHTTPS_MERGE_SYSFILE/MAINFILE），主要给测试用。
+subhttps_merge_sysfile(){ echo "${SUBHTTPS_MERGE_SYSFILE:-/etc/caddy/argosbx.caddyfile}"; }
+subhttps_merge_mainfile(){ echo "${SUBHTTPS_MERGE_MAINFILE:-/etc/caddy/Caddyfile}"; }
+subhttps_merge_eligible(){
+  local ym_c="$1" sysfile="" mainfile=""
+  [ -n "$ym_c" ] || return 1
+  sysfile=$(subhttps_merge_sysfile); mainfile=$(subhttps_merge_mainfile)
+  # 1) 证书流程记录过它写了系统 Caddyfile（非 root 回落到 $HOME/agsbx/Caddyfile 时这里就不等）
+  [ "$(subhttps_read "$HOME/agsbx/caddyfile_path")" = "$sysfile" ] || return 1
+  # 2) 文件存在，且主配置 import 了它
+  [ -f "$sysfile" ] || return 1
+  grep -q "argosbx\.caddyfile" "$mainfile" 2>/dev/null || return 1
+  # 3) 文件里确实是我们的站点块（防用户换了内容）
+  grep -qF "$ym_c {" "$sysfile" 2>/dev/null || return 1
+  # 4) 系统 caddy 服务正在运行
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet caddy 2>/dev/null || return 1
+  return 0
+}
+subhttps_merge_active(){
+  # 合并块在位且 token 是当前 token（token 变了算未激活，走重新合并）
+  local ym_c="$1" token="" sysfile=""
+  [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
+  sysfile=$(subhttps_merge_sysfile)
+  grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
+  grep -qF "handle_path /$token/" "$sysfile" 2>/dev/null
+}
+subhttps_merge_serving(){
+  # display 用：块在位且系统 Caddy 在运行
+  subhttps_merge_active "$1" || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet caddy 2>/dev/null
+}
+subhttps_https_active(){
+  # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy（内存门/缺 caddy 二进制时豁免）
+  subhttps_caddy_running && return 0
+  subhttps_merge_active "$(subhttps_read "$HOME/agsbx/ym")"
+}
+subhttps_strip_merge_block(){
+  # 从系统 Caddyfile 里手术摘除合并块（保留用户其他手工修改）；摘掉了返回 0
+  local sysfile="" before="" after=""
+  sysfile=$(subhttps_merge_sysfile)
+  [ -f "$sysfile" ] || return 1
+  grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
+  before=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
+  awk '/# >>> argosbx-subscription/{skip=1} !skip{print} /# <<< argosbx-subscription/{skip=0}' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
+  after=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
+  [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]
+}
+subhttps_merge_insert(){
+  # 摘除旧块后把新订阅块插到站点块首行之后；找不到站点块返回 1（原文件不动）
+  local ym_c="$1" token="$2" sysfile="" websbx="" block_tmp=""
+  [ -n "$ym_c" ] && [ -n "$token" ] || return 1
+  sysfile=$(subhttps_merge_sysfile); websbx="$HOME/websbx"
+  block_tmp=$(mktemp) || return 1
+  {
+    echo "  # >>> argosbx-subscription (argosbx 自动合并，勿手工改) >>>"
+    echo "  handle_path /$token/* {"
+    echo "    root * \"$websbx\""
+    echo "    file_server"
+    echo "  }"
+    echo "  # <<< argosbx-subscription <<<"
+  } > "$block_tmp"
+  subhttps_strip_merge_block >/dev/null 2>&1 || true
+  if awk -v ym="$ym_c" -v bf="$block_tmp" '
+    BEGIN{ while((getline line < bf) > 0){ block = block line "\n" } }
+    !done && index($0, ym " {") == 1 { print; printf "%s", block; done=1; next }
+    { print }
+    END{ if(!done) exit 1 }
+  ' "$sysfile" > "$sysfile.new" 2>/dev/null; then
+    mv -f "$sysfile.new" "$sysfile"; rm -f "$block_tmp"; return 0
+  fi
+  rm -f "$block_tmp" "$sysfile.new"; return 1
+}
+subhttps_merge_reload(){
+  systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1
+}
+subhttps_merge_verify(){
+  # 本机回环验证订阅地址返回 200
+  local ym_c="$1" token="$2" code=""
+  command -v curl >/dev/null 2>&1 || return 1
+  code=$(curl -sk --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+  [ "$code" = "200" ]
+}
+subhttps_merge_system_caddy(){
+  # 编排：已合并（token 一致）直接成功；否则插入→全量校验→reload→回环验证；失败摘除恢复
+  local ym_c="$1" token="" sysfile=""
+  [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
+  subhttps_merge_eligible "$ym_c" || return 1
+  command -v caddy >/dev/null 2>&1 || return 1
+  if subhttps_merge_active "$ym_c"; then return 0; fi
+  sysfile=$(subhttps_merge_sysfile)
+  [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
+  subhttps_merge_insert "$ym_c" "$token" || return 1
+  if ! caddy validate --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1; then
+    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+  fi
+  if ! subhttps_merge_reload; then
+    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+  fi
+  sleep 2
+  if subhttps_merge_verify "$ym_c" "$token"; then return 0; fi
+  subhttps_strip_merge_block >/dev/null 2>&1 || true
+  subhttps_merge_reload >/dev/null 2>&1 || true
+  return 1
+}
+subhttps_unmerge_system_caddy(){
+  # 降级/del 时摘除合并块并 reload；没摘到东西就不 reload
+  if subhttps_strip_merge_block; then subhttps_merge_reload || true; fi
   return 0
 }
 # subhttps_write_snippets: 为用户自有 Nginx/Caddy 生成配置片段（脚本不能绑 443 时手动加）
@@ -1412,6 +1541,8 @@ subhttps_fw_backend_cmd(){
 }
 subhttps_manage_443(){
   local mode="$1" backend="" marker=""
+  # https-merged 与 https 同等对待（443 保持放行）
+  if [ "$mode" = "https-merged" ]; then mode="https"; fi
   if [ "$mode" = "https" ]; then
     if [ -z "$(subhttps_fw_backends)" ]; then
       echo "ufw/firewalld 未运行，https 订阅的 443/tcp 未自动放行，开启后运行 agsbx fwsync 或 subhttpsync 重新同步"
@@ -1437,6 +1568,8 @@ subhttps_manage_443(){
 }
 subhttps_manage_subport(){
   local mode="$1" subport="" desired="" backend="" marker="" old=""
+  # https-merged 与 https 同等对待（websbx 已停，订阅端口保持关闭）
+  if [ "$mode" = "https-merged" ]; then mode="https"; fi
   # HTTPS or no subscription: websbx is stopped (or never started),
   # so any previously opened subscription port must go, not stay
   # open for a server that no longer listens. This branch runs
@@ -1484,6 +1617,16 @@ sub_https_sync(){
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   mode=$(subhttps_decide_mode)
   if [ "$mode" = "https" ]; then
+    # 443 被我们自己的证书流程 Caddy 占用时：自动合并订阅配置进系统 Caddyfile
+    if subhttps_merge_system_caddy "$ym_c"; then
+      subhttps_stop_websbx
+      subhttps_cron_install
+      subhttps_manage_443 "https"
+      subhttps_manage_subport "https"
+      echo "https-merged" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
+      echo "订阅已切换为 https 域名订阅（已自动合并到系统 Caddy）：https://$ym_c/$token/"
+      return 0
+    fi
     if subhttps_start_caddy "$ym_c"; then
       subhttps_stop_websbx
       subhttps_cron_install
@@ -1499,6 +1642,7 @@ sub_https_sync(){
     echo "如需在自有 Web 服务器上启用 https 订阅，请按 $HOME/agsbx/caddy-snippet.txt 或 nginx-snippet.txt 手动配置后重载"
     mode="http-domain"
   fi
+  subhttps_unmerge_system_caddy
   subhttps_stop_caddy
   subhttps_cron_remove
   subhttps_manage_443 "$mode"
@@ -1508,6 +1652,7 @@ sub_https_sync(){
   return 0
 }
 sub_https_stop(){
+  subhttps_unmerge_system_caddy
   subhttps_stop_caddy
   subhttps_cron_remove
   subhttps_manage_443 "http-ip"
@@ -1516,19 +1661,25 @@ sub_https_stop(){
   return 0
 }
 sub_https_display(){
-  local mode="" token="" subport="" subip="" ym_c=""
+  local mode="" token="" subport="" subip="" ym_c="" https_ok=0
   mode=$(subhttps_read "$HOME/agsbx/subhttps.mode")
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
   subport=$(subhttps_read "$HOME/agsbx/subport.log")
   subip=$(subhttps_read "$HOME/agsbx/server_ip.log")
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   if [ -z "$token" ]; then return 0; fi
-  if [ "$mode" = "https" ] && [ -n "$ym_c" ]; then
-    if ! subhttps_caddy_running; then
-      if [ -n "$ym_c" ] && [ -n "$subport" ]; then mode="http-domain"; else mode="http-ip"; fi
+  case "$mode" in https|https-merged) [ -n "$ym_c" ] && https_ok=1;; esac
+  if [ "$https_ok" = "1" ]; then
+    if [ "$mode" = "https" ]; then
+      subhttps_caddy_running || https_ok=0
+    else
+      subhttps_merge_serving "$ym_c" || https_ok=0
+    fi
+    if [ "$https_ok" = "0" ]; then
+      if [ -n "$subport" ]; then mode="http-domain"; else mode="http-ip"; fi
     fi
   fi
-  if [ "$mode" = "https" ] && [ -n "$ym_c" ]; then
+  if [ "$https_ok" = "1" ] && [ -n "$ym_c" ]; then
     echo "**********************************************************"
     echo "Clash/Mihomo https 域名订阅地址：https://$ym_c/$token/clmi.yaml"
     echo "Sing-box https 域名订阅地址：https://$ym_c/$token/sbox.json"
@@ -2408,7 +2559,7 @@ echo "重置变量组命令：自定义各种协议变量组 agsbx rep 【或者
 echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"
 echo "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"
 echo "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"
-echo "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪、内存大于等于 256M 或订阅 Caddy 已在运行时走 https，否则回退 http）"
+echo "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"
 echo "更新Xray或Singbox内核命令：agsbx upx或ups 【或者】 主脚本 upx或ups"
 echo "重启脚本命令：agsbx res 【或者】 主脚本 res"
 echo "卸载脚本命令：agsbx del 【或者】 主脚本 del"
