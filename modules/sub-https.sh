@@ -11,7 +11,7 @@
 #                     subscription server is needed in this mode.
 #   mode https-merged: https 决议后独立 Caddy 绑不上 443，但 443 正被我们自己的
 #                     证书流程 Caddy（/etc/caddy/argosbx.caddyfile）占用时，把订阅
-#                     handle_path 自动合并进系统 Caddyfile 并 reload，不新增进程。
+#                     handle 块自动合并进系统 Caddyfile 并 reload，不新增进程。
 #   mode http-domain: ym set, but cert not ready, or memory gate
 #                     fails, or caddy missing / 443 busy. Plain HTTP
 #                     on ym:port/token, via the existing websbx server.
@@ -24,11 +24,12 @@
 # - Never start a second Caddy on 443 if one already binds it: a
 #   failed start falls back to http-domain with a warning, it never
 #   kills an existing Caddy (which may be the user's own service).
-# - Auto-merge: when the 443 holder is provably our own cert-flow Caddy
-#   (/etc/caddy/argosbx.caddyfile, four eligibility checks below), the
-#   subscription handle_path is merged into it automatically and the
-#   service reloaded, instead of asking the user to paste snippets.
-#   A user's own Caddy/Nginx is never touched (falls back to snippets).
+# - Auto-merge: when the domain cert was obtained via Caddy (the cert flow
+#   wrote /etc/caddy/argosbx.caddyfile), the subscription handle block is
+#   merged into that config automatically and the service reloaded, instead
+#   of asking the user to paste snippets. No probing of who holds 443.
+#   Insert -> caddy validate -> reload -> loopback verify; any failure
+#   strips the block back out and falls back to http-domain + snippets.
 # - Memory gate uses the same detection as detect_certsrc
 #   (/proc/meminfo MemTotal, < 262144 KB = 256MB), with an override
 #   SUBHTTPS_MEM_KB for tests. The exception is only our own
@@ -126,7 +127,9 @@ subhttps_write_conf(){
     echo "https://$ym_c {"
     echo "  tls \"$HOME/agsbx/cert/cert.crt\" \"$HOME/agsbx/cert/private.key\""
     if [ -n "$token" ]; then
-      echo "  handle_path /$token/* {"
+      # 必须用 handle（不剥路径）：handle_path 会剥掉 /$token 前缀，导致 file_server
+      # 去 $HOME/websbx/ 下找文件而 404；文件实际在 $HOME/websbx/$token/ 下
+      echo "  handle /$token/* {"
       echo "    root * \"$HOME/websbx\""
       echo "    file_server"
       echo "  }"
@@ -138,28 +141,23 @@ subhttps_write_conf(){
   return 0
 }
 # --- 自动合并到系统 Caddy ---
-# 场景：证书流程（certsrc=caddy）把博客配到了系统 Caddy（/etc/caddy/argosbx.caddyfile）
-# 并占用 443，订阅的独立 Caddy 绑不上 443。既然占 443 的是我们自己的配置，就把订阅
-# 的 handle_path 自动合并进系统 Caddyfile 并 reload，不再需要手动贴片段。
-# 红线：eligible 的四个条件缺一不可，绝不碰用户自己的 Caddy 配置；任何一步失败都
+# 场景：证书是 Caddy 申请的（certsrc=caddy，证书流程写过系统 Caddyfile
+# /etc/caddy/argosbx.caddyfile）。这个文件就是我们自己的配置，直接把订阅的
+# handle 块合并进去并 reload，不再判断 443 被 Caddy 还是 Nginx 占用。
+# 安全由结果校验兜底：插入→全量 validate→reload→回环验证 200，任何一步失败都
 # 摘除合并块恢复原文件，并回退到原来的 http-domain + 片段流程。
 # 路径用环境变量覆盖（SUBHTTPS_MERGE_SYSFILE/MAINFILE），主要给测试用。
 subhttps_merge_sysfile(){ echo "${SUBHTTPS_MERGE_SYSFILE:-/etc/caddy/argosbx.caddyfile}"; }
 subhttps_merge_mainfile(){ echo "${SUBHTTPS_MERGE_MAINFILE:-/etc/caddy/Caddyfile}"; }
 subhttps_merge_eligible(){
-  local ym_c="$1" sysfile="" mainfile=""
+  # 证书是 Caddy 申请的（证书流程写过系统 Caddyfile）：这个文件就是我们自己的
+  # 配置，直接合，不再探测 443 被 Caddy 还是 Nginx 占用。其他异常由后面的
+  # validate / reload / 回环验证兜底，失败就摘除恢复。
+  local ym_c="$1" sysfile=""
   [ -n "$ym_c" ] || return 1
-  sysfile=$(subhttps_merge_sysfile); mainfile=$(subhttps_merge_mainfile)
-  # 1) 证书流程记录过它写了系统 Caddyfile（非 root 回落到 $HOME/agsbx/Caddyfile 时这里就不等）
+  sysfile=$(subhttps_merge_sysfile)
   [ "$(subhttps_read "$HOME/agsbx/caddyfile_path")" = "$sysfile" ] || return 1
-  # 2) 文件存在，且主配置 import 了它
   [ -f "$sysfile" ] || return 1
-  grep -q "argosbx\.caddyfile" "$mainfile" 2>/dev/null || return 1
-  # 3) 文件里确实是我们的站点块（防用户换了内容）
-  grep -qF "$ym_c {" "$sysfile" 2>/dev/null || return 1
-  # 4) 系统 caddy 服务正在运行
-  command -v systemctl >/dev/null 2>&1 || return 1
-  systemctl is-active --quiet caddy 2>/dev/null || return 1
   return 0
 }
 subhttps_merge_active(){
@@ -169,7 +167,7 @@ subhttps_merge_active(){
   token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
   sysfile=$(subhttps_merge_sysfile)
   grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
-  grep -qF "handle_path /$token/" "$sysfile" 2>/dev/null
+  grep -qF "handle /$token/" "$sysfile" 2>/dev/null
 }
 subhttps_merge_serving(){
   # display 用：块在位且系统 Caddy 在运行
@@ -201,7 +199,8 @@ subhttps_merge_insert(){
   block_tmp=$(mktemp) || return 1
   {
     echo "  # >>> argosbx-subscription (argosbx 自动合并，勿手工改) >>>"
-    echo "  handle_path /$token/* {"
+    # 必须用 handle（不剥路径），见 subhttps_write_conf 的注释
+    echo "  handle /$token/* {"
     echo "    root * \"$websbx\""
     echo "    file_server"
     echo "  }"
@@ -225,28 +224,35 @@ subhttps_merge_verify(){
   # 本机回环验证订阅地址返回 200
   local ym_c="$1" token="$2" code=""
   command -v curl >/dev/null 2>&1 || return 1
-  code=$(curl -sk --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+  code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
   [ "$code" = "200" ]
 }
 subhttps_merge_system_caddy(){
-  # 编排：已合并（token 一致）直接成功；否则插入→全量校验→reload→回环验证；失败摘除恢复
+  # 编排：已合并（token 一致）直接成功；否则插入→全量校验→reload→回环验证；
+  # 失败摘除恢复并说明原因（调用方据此决定是继续试独立 Caddy 还是回退）
   local ym_c="$1" token="" sysfile=""
   [ -n "$ym_c" ] || return 1
   token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
   subhttps_merge_eligible "$ym_c" || return 1
-  command -v caddy >/dev/null 2>&1 || return 1
+  command -v caddy >/dev/null 2>&1 || { echo "合并失败：未找到 caddy 命令，无法校验配置"; return 1; }
   if subhttps_merge_active "$ym_c"; then return 0; fi
   sysfile=$(subhttps_merge_sysfile)
   [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
-  subhttps_merge_insert "$ym_c" "$token" || return 1
+  if ! subhttps_merge_insert "$ym_c" "$token"; then
+    echo "合并失败：写入系统 Caddyfile 失败（找不到 $ym_c 站点块）"
+    return 1
+  fi
   if ! caddy validate --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1; then
+    echo "合并失败：Caddy 配置校验未通过，已恢复原文件"
     subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
   fi
   if ! subhttps_merge_reload; then
+    echo "合并失败：系统 Caddy 重载失败，已恢复原文件"
     subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
   fi
   sleep 2
   if subhttps_merge_verify "$ym_c" "$token"; then return 0; fi
+  echo "合并失败：订阅地址验证未通过（非 200），已恢复原文件"
   subhttps_strip_merge_block >/dev/null 2>&1 || true
   subhttps_merge_reload >/dev/null 2>&1 || true
   return 1
@@ -266,8 +272,9 @@ subhttps_write_snippets(){
   # Caddy 片段
   {
     echo "# 加到你现有 Caddyfile 的 $ym_c 站点块内（handle 顺序：订阅优先，博客兜底）"
+    echo "# 注意必须用 handle（不剥路径）：handle_path 会剥掉 /$token 前缀导致 404"
     if [ -n "$token" ]; then
-      echo "handle_path /$token/* {"
+      echo "handle /$token/* {"
       echo "  root * \"$HOME/websbx\""
       echo "  file_server"
       echo "}"
@@ -282,8 +289,9 @@ subhttps_write_snippets(){
     echo "# 注意：location 顺序 matters，订阅路径优先"
     if [ -n "$token" ]; then
       echo "location ^~ /$token/ {"
-      echo "  alias $HOME/websbx/;"
-      echo "  # 订阅文件：$token/clmi.yaml 等"
+      # 必须用 root（拼接完整 URI）：alias 会把 /$token/ 替换掉导致 404；
+      # 文件实际在 $HOME/websbx/$token/ 下
+      echo "  root $HOME/websbx;"
       echo "}"
     fi
     echo "# 博客根目录（已部署到 $_webroot）："
@@ -489,15 +497,19 @@ sub_https_sync(){
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   mode=$(subhttps_decide_mode)
   if [ "$mode" = "https" ]; then
-    # 443 被我们自己的证书流程 Caddy 占用时：自动合并订阅配置进系统 Caddyfile
-    if subhttps_merge_system_caddy "$ym_c"; then
-      subhttps_stop_websbx
-      subhttps_cron_install
-      subhttps_manage_443 "https"
-      subhttps_manage_subport "https"
-      echo "https-merged" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
-      echo "订阅已切换为 https 域名订阅（已自动合并到系统 Caddy）：https://$ym_c/$token/"
-      return 0
+    # certsrc=caddy（证书流程写过系统 Caddyfile）：直接把订阅配置合并进去，
+    # 不再判断 443 被 Caddy 还是 Nginx 占用
+    if subhttps_merge_eligible "$ym_c"; then
+      if subhttps_merge_system_caddy "$ym_c"; then
+        subhttps_stop_websbx
+        subhttps_cron_install
+        subhttps_manage_443 "https"
+        subhttps_manage_subport "https"
+        echo "https-merged" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
+        echo "订阅已切换为 https 域名订阅（已自动合并到系统 Caddy）：https://$ym_c/$token/"
+        return 0
+      fi
+      echo "自动合并到系统 Caddy 失败，尝试启动独立订阅 Caddy"
     fi
     if subhttps_start_caddy "$ym_c"; then
       subhttps_stop_websbx

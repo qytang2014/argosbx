@@ -89,6 +89,8 @@ check "$HOME/agsbx/Caddyfile.sub" "https://example.test" "Caddyfile missing site
 check "$HOME/agsbx/Caddyfile.sub" "admin off" "Caddyfile missing admin off"
 check "$HOME/agsbx/Caddyfile.sub" "file_server" "Caddyfile missing file_server"
 check "$HOME/agsbx/Caddyfile.sub" "agsbx/cert/cert.crt" "Caddyfile missing cert path"
+grep -q "handle /token-123/" "$HOME/agsbx/Caddyfile.sub" || fail "Caddyfile.sub should use handle (not handle_path)"
+grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/Caddyfile.sub" && fail "Caddyfile.sub must not use handle_path (strips token, 404)"
 subhttps_caddy_running || fail "Caddy should be running after https sync"
 PID1="$(cat "$HOME/agsbx/subhttps.pid")"
 grep -q "argosbx-subhttps" "$CRONFILE" || fail "subhttps cron missing"
@@ -208,7 +210,8 @@ export SUBHTTPS_MEM_KB=524288
 subhttps_merge_eligible "example.test" || fail "should be eligible with our own system Caddy"
 sub_https_sync >/dev/null 2>&1 || fail "merge sync failed"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should be https-merged"
-grep -q "handle_path /token-123/" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing subscription block"
+grep -q "handle /token-123/" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing subscription block"
+grep -Eq "^[[:space:]]*handle_path /" "$SUBHTTPS_MERGE_SYSFILE" && fail "sysfile must not use handle_path (strips token, 404)"
 grep -q "# >>> argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing merge markers"
 grep -q 'root \* /var/www/html' "$SUBHTTPS_MERGE_SYSFILE" || fail "blog root should be preserved"
 grep -q "systemctl reload caddy" "$TESTHOME/systemctl.log" || fail "should reload system caddy"
@@ -222,17 +225,20 @@ sub_https_sync >/dev/null 2>&1 || fail "second merge sync failed"
 [ "$(grep -c "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE")" = "$N1" ] || fail "merge should be idempotent"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should stay https-merged"
 
-# guard: user's own Caddy (main config does not import ours) must NOT be touched
-printf '{\n\temail test@example.com\n}\nmyblog.example.com {\n\troot * /srv/www\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_MAINFILE"
-subhttps_merge_eligible "example.test" && fail "user-owned Caddy should not be eligible"
+# guard: 证书不是 Caddy 申请的（caddyfile_path 未指向系统 Caddyfile）→ 不合并，直接回退
+rm -f "$HOME/agsbx/caddyfile_path"
 printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
 BEFORE_SUM=$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')
+subhttps_merge_eligible "example.test" && fail "should not be eligible without caddyfile_path"
 sub_https_sync >/dev/null 2>&1
-[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "user-owned Caddy should fall back to http-domain"
-[ "$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')" = "$BEFORE_SUM" ] || fail "user-owned Caddy config must not be touched"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "should fall back to http-domain"
+[ "$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')" = "$BEFORE_SUM" ] || fail "sysfile must not be touched"
+grep -q "handle /token-123/" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should use handle"
+grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/caddy-snippet.txt" && fail "caddy snippet must not use handle_path"
+grep -q "root $HOME/websbx;" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should use root"
 
 # downgrade: cert gone -> http-domain, merge block stripped, blog intact
-printf '{\n\temail test@example.com\n}\nimport argosbx.caddyfile\n' > "$SUBHTTPS_MERGE_MAINFILE"
+echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
 sub_https_sync >/dev/null 2>&1 || fail "re-merge failed"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "should merge again"
 rm "$HOME/agsbx/cert/cert.crt"
