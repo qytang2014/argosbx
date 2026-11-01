@@ -284,6 +284,9 @@ subhttps_unmerge_system_caddy(){
 subhttps_write_snippets(){
   local ym_c="$1" token="" _webroot=""
   [ -n "$ym_c" ] || return 1
+  # 片段是给用户自有 Nginx/Caddy 手动贴的，它们的 worker 用户（www-data/nginx/
+  # caddy）同样读不到 700 的 $HOME，先放开权限，和自动合并保持一致
+  subhttps_ensure_websbx_readable
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
   _webroot="${webroot:-/var/www/html}"
   mkdir -p "$HOME/agsbx" 2>/dev/null || true
@@ -291,6 +294,7 @@ subhttps_write_snippets(){
   {
     echo "# 加到你现有 Caddyfile 的 $ym_c 站点块内（handle 顺序：订阅优先，博客兜底）"
     echo "# 注意必须用 handle（不剥路径）：handle_path 会剥掉 /$token 前缀导致 404"
+    echo "# 权限：Caddy worker 用户需能读 $HOME/websbx，脚本已自动放开（/root→711）；若仍 403 请检查 SELinux/AppArmor"
     if [ -n "$token" ]; then
       echo "handle /$token/* {"
       echo "  root * \"$HOME/websbx\""
@@ -305,6 +309,7 @@ subhttps_write_snippets(){
   {
     echo "# 加到你现有 nginx 的 server { listen 443 ssl; server_name $ym_c; } 块内"
     echo "# 注意：location 顺序 matters，订阅路径优先"
+    echo "# 权限：nginx worker 用户（www-data/nginx）需能读 $HOME/websbx，脚本已自动放开（/root→711）；若仍 403 请检查 SELinux"
     if [ -n "$token" ]; then
       echo "location ^~ /$token/ {"
       # 必须用 root（拼接完整 URI）：alias 会把 /$token/ 替换掉导致 404；

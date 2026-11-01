@@ -236,6 +236,8 @@ sub_https_sync >/dev/null 2>&1
 grep -q "handle /token-123/" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should use handle"
 grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/caddy-snippet.txt" && fail "caddy snippet must not use handle_path"
 grep -q "root $HOME/websbx;" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should use root"
+grep -q "711" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should mention 711 permission"
+grep -q "711" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should mention 711 permission"
 
 # downgrade: cert gone -> http-domain, merge block stripped, blog intact
 echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
