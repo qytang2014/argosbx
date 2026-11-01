@@ -110,33 +110,26 @@ ensure_acme(){
   echo "acme.sh 已自动安装：$HOME/.acme.sh/acme.sh"
   return 0
 }
-# ensure_caddy_download：Caddy 不存在时下载用户预编译版（Coraza + Cloudflare），非交互、带备份与校验，失败返回 1 不中断主脚本。
-# 配置来源（优先级）：密码文件 /etc/caddy/.files_auth_pass（已确认路径，600 权限），否则环境变量 CADDY_DOWNLOAD_PASS；URL 默认 https://files.quinn.de5.net/，可用 CADDY_DOWNLOAD_URL 覆盖；用户名默认 tom，可用 CADDY_DOWNLOAD_USER 覆盖。
-# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（版本 + Cloudflare + Coraza 模块）才替换，验不过用备份恢复。
+# ensure_caddy_download：Caddy 不存在时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
+# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.7），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.7，升级 Caddy 时传新 release 并改这个默认值即可。
+# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza 模块）才替换，验不过用备份恢复。
 ensure_caddy_download(){
   [ "$(id -u 2>/dev/null)" = "0" ] || { echo "下载 Caddy 需要 root 权限（写 /usr/bin 与 /etc/caddy）"; return 1; }
-  local base_url="${CADDY_DOWNLOAD_URL:-https://files.quinn.de5.net/}"
-  local web_user="${CADDY_DOWNLOAD_USER:-tom}"
-  local pass_file="/etc/caddy/.files_auth_pass"
-  local web_pass=""
-  mkdir -p /etc/caddy 2>/dev/null || true
-  if [ -s "$pass_file" ]; then web_pass=$(cat "$pass_file"); elif [ -n "$CADDY_DOWNLOAD_PASS" ]; then web_pass="$CADDY_DOWNLOAD_PASS"; else echo "Caddy 预编译下载缺少密码：请先将密码写入 $pass_file（600 权限）或设置 CADDY_DOWNLOAD_PASS"; return 1; fi
+  local caddy_ver="${CADDY_VER:-caddy-v2.11.7}"
+  local base_url="${CADDY_DOWNLOAD_URL:-https://github.com/qytang2014/software/releases/download/${caddy_ver}}"
   local caddy_bin=""
-  case "$cpu" in amd64) caddy_bin="caddy_x86_64";; arm64) caddy_bin="caddy_arm";; *) echo "不支持的架构：$cpu"; return 1;; esac
+  case "$cpu" in amd64) caddy_bin="caddy-linux-amd64";; arm64) caddy_bin="caddy-linux-arm64";; *) echo "不支持的架构：$cpu"; return 1;; esac
   [[ "$base_url" != */ ]] && base_url="${base_url}/"
-  local final_url="${base_url}caddy/${caddy_bin}"
-  local tmpdir="" netrc=""
+  local final_url="${base_url}${caddy_bin}"
+  local tmpdir=""
   tmpdir=$(mktemp -d 2>/dev/null) || return 1
-  netrc="$tmpdir/netrc"
-  printf "machine %s\nlogin %s\npassword %s\n" "$(printf "%s" "$final_url" | awk -F/ '{print $3}')" "$web_user" "$web_pass" > "$netrc"
-  chmod 600 "$netrc"
   echo "正在拉取预编译 Caddy：$final_url"
-  if ! curl --netrc-file "$netrc" -fL --retry 3 --connect-timeout 15 -o "$tmpdir/caddy" "$final_url" 2>/dev/null; then rm -rf "$tmpdir"; echo "Caddy 下载失败，请检查 URL、用户名、密码或网络"; return 1; fi
-  rm -f "$netrc"
+  if ! curl -fL --retry 3 --connect-timeout 15 -o "$tmpdir/caddy" "$final_url" 2>/dev/null; then rm -rf "$tmpdir"; echo "Caddy 下载失败，请检查 URL 或网络"; return 1; fi
   chmod +x "$tmpdir/caddy"
   if ! "$tmpdir/caddy" version >/dev/null 2>&1; then rm -rf "$tmpdir"; echo "下载的 Caddy 无法运行（架构或文件损坏）"; return 1; fi
   if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "cloudflare"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Cloudflare 模块，拒绝替换"; return 1; fi
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "coraza"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza 模块，拒绝替换"; return 1; fi
+  # coraza-caddy v2 注册的模块名为 http.handlers.waf（模块 ID 里不带 coraza 字样）
+  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "http.handlers.waf"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza WAF 模块，拒绝替换"; return 1; fi
   if command -v systemctl >/dev/null 2>&1; then systemctl stop caddy 2>/dev/null || true; fi
   if [ -f /usr/bin/caddy ]; then cp /usr/bin/caddy /usr/bin/caddy.bak 2>/dev/null || true; fi
   if ! mv -f "$tmpdir/caddy" /usr/bin/caddy; then rm -rf "$tmpdir"; echo "替换 /usr/bin/caddy 失败"; return 1; fi

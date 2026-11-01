@@ -12,7 +12,7 @@ import re, sys
 t = open(sys.argv[1]).read()
 # cert module functions live in modules/cert.sh in source, but in the
 # built file they are inline; extract by function names.
-for name in ["detect_certsrc", "detect_certmode", "write_caddyfile"]:
+for name in ["detect_certsrc", "detect_certmode", "write_caddyfile", "ensure_caddy_download"]:
     m = re.search(rf"{name}\(\)\{{.*?\n\}}\n", t, re.S)
     assert m, f"{name} not found"
     open(f"{sys.argv[2]}/{name}.sh", "w").write(m.group(0))
@@ -95,4 +95,37 @@ domain_cert_valid && { echo "FAIL: missing files should fail"; exit 1; }
 echo "domain_cert_valid OK"
 RUN
 bash "$TMP/run_valid.sh" "$TMP"
-echo "PASS: cert (certsrc, certmode, write_caddyfile)"
+# ensure_caddy_download: GitHub Release direct download (generic releases repo), no private-server auth
+grep -q 'https://github.com/qytang2014/software/releases/download/${caddy_ver}' "$ROOT/argosbx.sh" || { echo "FAIL: caddy download URL"; exit 1; }
+grep -q 'caddy_ver="${CADDY_VER:-caddy-v2.11.7}"' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_VER default"; exit 1; }
+grep -q '缺少 Coraza WAF 模块，拒绝替换' "$ROOT/argosbx.sh" || { echo "FAIL: coraza waf hard check should be back"; exit 1; }
+grep -q 'http.handlers.waf' "$ROOT/argosbx.sh" || { echo "FAIL: waf module id check missing"; exit 1; }
+! grep -q 'files.quinn.de5.net' "$ROOT/argosbx.sh" || { echo "FAIL: old caddy server should be gone"; exit 1; }
+! grep -q 'CADDY_DOWNLOAD_PASS' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_DOWNLOAD_PASS should be gone"; exit 1; }
+! grep -q 'netrc-file' "$ROOT/argosbx.sh" || { echo "FAIL: netrc should be gone"; exit 1; }
+! grep -q 'caddy_x86_64' "$ROOT/argosbx.sh" || { echo "FAIL: old caddy_x86_64 name should be gone"; exit 1; }
+echo "ensure_caddy_download static checks OK"
+# ensure_caddy_download: URL construction per arch, override respected, no auth (curl stubbed to fail after recording args)
+sed -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/ensure_caddy_download.sh" > "$TMP/caddy_dl_test.sh"
+cat > "$TMP/run_caddy_dl.sh" << 'RUN'
+#!/bin/bash
+source "$1"
+CURL_ARGS="$2/curl_args"
+curl() { printf '%s\n' "$@" > "$CURL_ARGS"; return 1; }
+check_url() {
+  cpu="$1"; rm -f "$CURL_ARGS"
+  unset CADDY_DOWNLOAD_URL
+  ensure_caddy_download >/dev/null 2>&1
+  grep -q "https://github.com/qytang2014/software/releases/download/caddy-v2.11.7/$2" "$CURL_ARGS" || { echo "FAIL: $3 got: $(cat "$CURL_ARGS" 2>/dev/null)"; exit 1; }
+  ! grep -q "netrc" "$CURL_ARGS" || { echo "FAIL: $3 should not use netrc"; exit 1; }
+}
+check_url amd64 "caddy-linux-amd64" "amd64 url"
+check_url arm64 "caddy-linux-arm64" "arm64 url"
+cpu="amd64"; CADDY_DOWNLOAD_URL="https://example.com/mirror"; rm -f "$CURL_ARGS"
+ensure_caddy_download >/dev/null 2>&1
+grep -q "https://example.com/mirror/caddy-linux-amd64" "$CURL_ARGS" || { echo "FAIL: CADDY_DOWNLOAD_URL override"; exit 1; }
+cpu="mips"; ensure_caddy_download >/dev/null 2>&1 && { echo "FAIL: mips should fail"; exit 1; }
+echo "ensure_caddy_download URL/auth/arch OK"
+RUN
+bash "$TMP/run_caddy_dl.sh" "$TMP/caddy_dl_test.sh" "$TMP"
+echo "PASS: cert (certsrc, certmode, write_caddyfile, caddy-download)"
