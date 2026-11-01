@@ -310,6 +310,24 @@ sub_https_stop
 [ ! -f "$HOME/agsbx/subhttps.subport" ] || fail "subport marker should be removed on del stop"
 grep -q "delete allow 18080/tcp" "$UFLOG" || fail "ufw subport delete missing on del stop"
 
+# --- websbx readable: caddy user (not root) must traverse into $HOME/websbx ---
+# Regression: merge verify got 403 (not 200) on machines where HOME=/root
+# is 700 and system Caddy runs as User=caddy.
+mkdir -p "$HOME/websbx/token-abc"
+echo "x" > "$HOME/websbx/token-abc/clmi.yaml"
+chmod 700 "$HOME" "$HOME/websbx" "$HOME/websbx/token-abc"
+chmod 600 "$HOME/websbx/token-abc/clmi.yaml"
+subhttps_ensure_websbx_readable
+[ "$(( $(stat -c '%a' "$HOME/websbx") ))" = "755" ] || fail "websbx dir should be 755"
+[ "$(( $(stat -c '%a' "$HOME/websbx/token-abc") ))" = "755" ] || fail "token dir should be 755"
+[ "$(( $(stat -c '%a' "$HOME/websbx/token-abc/clmi.yaml") ))" = "644" ] || fail "sub file should be 644"
+# HOME itself must be traversable by others (o+x bit set); temp HOME is not /root
+perm=$(stat -c '%a' "$HOME"); [ "$(( 0$perm & 1 ))" = "1" ] || fail "HOME should be traversable (o+x)"
+# missing websbx dir is a no-op, not a failure
+rm -rf "$HOME/websbx"
+subhttps_ensure_websbx_readable || fail "ensure should no-op when websbx missing"
+mkdir -p "$HOME/websbx/token-123"
+
 # cleanup: kill any leftover mock caddy (exec sleep) from earlier phases
 pkill -f "sleep 1000" 2>/dev/null || true
 rm -rf "$TESTHOME" "$MOCKBIN" "$TESTHOME/no-caddy-bin" "$TESTHOME/fail-caddy-bin" 2>/dev/null || true

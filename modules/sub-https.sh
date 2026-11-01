@@ -149,6 +149,22 @@ subhttps_write_conf(){
 # 路径用环境变量覆盖（SUBHTTPS_MERGE_SYSFILE/MAINFILE），主要给测试用。
 subhttps_merge_sysfile(){ echo "${SUBHTTPS_MERGE_SYSFILE:-/etc/caddy/argosbx.caddyfile}"; }
 subhttps_merge_mainfile(){ echo "${SUBHTTPS_MERGE_MAINFILE:-/etc/caddy/Caddyfile}"; }
+subhttps_ensure_websbx_readable(){
+  # 系统 Caddy 以 caddy 用户运行（官方包默认 User=caddy），而 HOME=/root
+  # 默认 700，caddy 用户无法进入 $HOME/websbx，订阅地址会 403。
+  # 放开到可遍历即可：/root 给 711（可 cd 不可 ls），websbx 下目录 755 文件 644。
+  # 新文件默认 umask 022 本来就是 644，主要是修 /root 和已存在的目录。
+  local websbx="$HOME/websbx"
+  [ -d "$websbx" ] || return 0
+  if [ "$HOME" = "/root" ]; then
+    chmod 711 /root 2>/dev/null || true
+  else
+    chmod o+x "$HOME" 2>/dev/null || true
+  fi
+  find "$websbx" -type d -exec chmod 755 {} + 2>/dev/null || true
+  find "$websbx" -type f -exec chmod 644 {} + 2>/dev/null || true
+  return 0
+}
 subhttps_merge_eligible(){
   # 证书是 Caddy 申请的（证书流程写过系统 Caddyfile）：这个文件就是我们自己的
   # 配置，直接合，不再探测 443 被 Caddy 还是 Nginx 占用。其他异常由后面的
@@ -236,6 +252,8 @@ subhttps_merge_system_caddy(){
   subhttps_merge_eligible "$ym_c" || return 1
   command -v caddy >/dev/null 2>&1 || { echo "合并失败：未找到 caddy 命令，无法校验配置"; return 1; }
   if subhttps_merge_active "$ym_c"; then return 0; fi
+  # caddy 用户需能读取 $HOME/websbx，否则验证 403
+  subhttps_ensure_websbx_readable
   sysfile=$(subhttps_merge_sysfile)
   [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
   if ! subhttps_merge_insert "$ym_c" "$token"; then
