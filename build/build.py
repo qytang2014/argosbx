@@ -269,7 +269,9 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email'];", "index-optids", 1)
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname'];", "index-optids", 1)
+    h = replace(h, '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>',
+                '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>\n        <div class="row"><label>节点名称后缀 <span class="pill">hostname</span></label><input id="hostname" type="text" placeholder="留空则用系统 hostname"/></div>', "index-hostname-field", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
                 "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('camouflage').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
     # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
@@ -1043,6 +1045,9 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     _rfb_old = 'export ym_vl_re=${reym:-' + chr(39)*2 + '}' + chr(10)
     _rfb_new = 'export ym_vl_re=${reym:-$ym}' + chr(10) + 'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi' + chr(10) + 'if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
     t = replace(t, _rfb_old, _rfb_new, "reality-fb-var", 1)
+    # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
+    t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
+                "hostname=${hostname:-$(uname -a | awk '{print $2}')}", "hostname-override", 1)
     t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
     t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
     t = replace(t, '"server": "${ym_vl_re}"', '"server": "${ym_vl_fb:-$ym_vl_re}"', "reality-fb-handshake", 4)
