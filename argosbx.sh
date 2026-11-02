@@ -3551,7 +3551,37 @@ ensure_caddy_download(){
   setcap cap_net_bind_service=+ep /usr/bin/caddy 2>/dev/null || true
   if ! /usr/bin/caddy version >/dev/null 2>&1; then [ -f /usr/bin/caddy.bak ] && mv -f /usr/bin/caddy.bak /usr/bin/caddy; rm -rf "$tmpdir"; echo "新 Caddy 校验失败，已恢复备份"; return 1; fi
   rm -rf "$tmpdir"
-  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files caddy.service >/dev/null 2>&1; then systemctl start caddy 2>/dev/null || echo "Caddy 服务启动失败，请手动检查 systemctl status caddy"; fi
+  # 确保有 systemd service（下载版没有 apt 自带的 service 文件）
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
+      echo "创建 Caddy systemd 服务..."
+      cat > /etc/systemd/system/caddy.service << 'EOF'
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      systemctl daemon-reload 2>/dev/null || true
+      systemctl enable caddy 2>/dev/null || true
+    fi
+    systemctl start caddy 2>/dev/null || echo "Caddy 服务启动失败，请手动检查 systemctl status caddy"
+  fi
   echo "预编译 Caddy 下载并替换成功"
   return 0
 }
