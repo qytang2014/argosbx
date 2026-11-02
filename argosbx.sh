@@ -2408,10 +2408,13 @@ subhttps_merge_active(){
   grep -qF "handle /$token/" "$sysfile" 2>/dev/null
 }
 subhttps_merge_serving(){
-  # display 用：块在位且系统 Caddy 在运行
+  # display 用：块在位且系统 Caddy 在运行（systemd 或 caddy 进程）
   subhttps_merge_active "$1" || return 1
-  command -v systemctl >/dev/null 2>&1 || return 1
-  systemctl is-active --quiet caddy 2>/dev/null
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet caddy 2>/dev/null && return 0
+  fi
+  # 非 systemd（如下载版 Caddy）：检查 caddy 进程
+  pgrep -x caddy >/dev/null 2>&1 || pgrep -f "caddy run" >/dev/null 2>&1 || pgrep -f "caddy start" >/dev/null 2>&1
 }
 subhttps_https_active(){
   # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy（内存门/缺 caddy 二进制时豁免）
@@ -3477,7 +3480,7 @@ write_caddyfile(){
           printf "\nimport argosbx.caddyfile\n" >> /etc/caddy/Caddyfile
         fi
       else
-        printf "import argosbx.caddyfile\n" > /etc/caddy/Caddyfile
+        printf "# argosbx: main Caddyfile (auto-generated)\n# Site config is in argosbx.caddyfile\nimport argosbx.caddyfile\n" > /etc/caddy/Caddyfile
       fi
     fi
   fi

@@ -72,7 +72,7 @@ write_caddyfile(){
           printf "\nimport argosbx.caddyfile\n" >> /etc/caddy/Caddyfile
         fi
       else
-        printf "import argosbx.caddyfile\n" > /etc/caddy/Caddyfile
+        printf "# argosbx: main Caddyfile (auto-generated)\n# Site config is in argosbx.caddyfile\nimport argosbx.caddyfile\n" > /etc/caddy/Caddyfile
       fi
     fi
   fi
