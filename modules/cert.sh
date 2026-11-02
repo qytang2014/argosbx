@@ -29,16 +29,16 @@ cert_migrate_paths(){
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
-# 自动逻辑：显式选择优先；否则总内存小于 256MB 时优先 acme（低内存机器不常驻 Caddy）；否则有 caddy 命令时用 Caddy，否则用 acme。
+# 自动逻辑：显式选择优先；否则总内存小于 256MB 时用 acme（低内存机器不常驻 Caddy）；否则用 Caddy（未安装时自动下载）。
 # acme 分支不自动安装 acme.sh，需预先安装在 $HOME/.acme.sh/acme.sh，否则等待超时后回落自签。
 detect_certsrc(){
   if [ "$certsrc" = "caddy" ]; then echo "caddy"; return; fi
   if [ "$certsrc" = "acme" ]; then echo "acme"; return; fi
   local mem_kb=""
   mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
+  # 低内存（<256MB）走 acme.sh；其他情况走 Caddy（未安装时后面会自动下载）
   if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then echo "acme"; return; fi
-  if command -v caddy >/dev/null 2>&1; then echo "caddy"; return; fi
-  echo "acme"
+  echo "caddy"
 }
 # certmode：证书验证方式，空=自动，http=强制 HTTP，dns=强制 DNS。
 # 自动逻辑：显式选择优先；否则 Argo 开启时按已代理处理；否则查 ym 的 DNS，若解析 IP 已知且不等于本机 IP 则按已代理处理，否则 HTTP。
