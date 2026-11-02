@@ -430,6 +430,7 @@ def main():
     audit_mod = read("modules/audit.sh")
     repinherit_mod = read("modules/rep-inherit.sh")
     ports_mod = read("modules/ports.sh")
+    webserver_mod = read("modules/web-server.sh")
     hook_mod = read("modules/hook.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
@@ -503,6 +504,9 @@ def main():
     # --- ports module (consolidated ports.env) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      ports_mod, "ports-module-anchor")
+    # --- web-server module ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     webserver_mod, "webserver-module-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
@@ -1036,9 +1040,9 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # --- Reality own-domain fallback (after all modules inserted) ---
     # When reym == ym, the SNI is the user's own domain: probes fall back to
     # the local web server (127.0.0.1:443) instead of the external domain.
-    t = replace(t, 'export ym_vl_re=${reym:-\'\'}\n',
-                'export ym_vl_re=${reym:-$ym}\nif [ -n \"${ym_vl_re}\" ] && [ \"${ym_vl_re}\" = \"${ym}\" ]; then export ym_vl_fb=\"127.0.0.1\"; else export ym_vl_fb=\"\"; fi\n',
-                "reality-fb-var", 1)
+    _rfb_old = 'export ym_vl_re=${reym:-' + chr(39)*2 + '}' + chr(10)
+    _rfb_new = 'export ym_vl_re=${reym:-$ym}' + chr(10) + 'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi' + chr(10) + 'if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
+    t = replace(t, _rfb_old, _rfb_new, "reality-fb-var", 1)
     t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
     t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
     t = replace(t, '"server": "${ym_vl_re}"', '"server": "${ym_vl_fb:-$ym_vl_re}"', "reality-fb-handshake", 4)
