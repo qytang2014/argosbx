@@ -1,4 +1,11 @@
 # Other protocols more instances on Xray (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # Inserted into installxray() after the vlpt-more block, before it ends.
 # Each *_more list installs instances 2, 3, ... in order, sharing the
 # first instance's uuid, keys, SNI, flow and encryption seed, with
@@ -15,10 +22,10 @@ if [ -n "${xhpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xh$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xh$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xh$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xhpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xhpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xh$_pm_idx"
+    port_set "xh$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-reality-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -69,10 +76,10 @@ if [ -n "${vxpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vx$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vx$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vx$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vxpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vxpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vx$_pm_idx"
+    port_set "vx$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -113,10 +120,10 @@ if [ -n "${vwpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vw$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vw$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vw$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vwpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vwpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vw$_pm_idx"
+    port_set "vw$_pm_idx" "$_pm_p"
     echo "Vless-ws-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -155,10 +162,10 @@ if [ -n "${xupt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xu$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xu$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xu$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xu$_pm_idx"
+    port_set "xu$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-tls-UDP${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
 {
@@ -210,10 +217,10 @@ if [ -n "${xcpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xc$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xc$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xc$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xcpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xcpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xc$_pm_idx"
+    port_set "xc$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-tls-TCP/UDP${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
 {

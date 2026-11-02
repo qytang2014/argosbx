@@ -74,6 +74,10 @@ extract_fn() { # $1=file $2=fnname $3=out
   awk -v fn="$2" '$0 ~ "^"fn"\\(\\)\\{"{f=1} f{print} f && /^}$/{exit}' "$1" > "$3"
 }
 extract_fn "$F" "xrsbvmtls" "$TD/vmtls_fn.sh"
+# stub port_resolve for isolated function test (real script defines it via ports.sh)
+cat >> "$TD/vmtls_fn.sh" << 'STUBEOF'
+port_resolve(){ local key="$1" val="$2"; if [ -n "$val" ]; then echo "$val"; else v=$(cat "$HOME/agsbx/port_$key" 2>/dev/null); if [ -z "$v" ]; then v=$(shuf -i 10000-65535 -n 1); echo "$v" > "$HOME/agsbx/port_$key"; fi; echo "$v"; fi; }
+STUBEOF
 TD2=$(mktemp -d); mkdir -p "$TD2/agsbx"
 HOME="$TD2" uuid="11111111-2222-3333-4444-555555555555" port_vm_tls="" certificateHTA="/tmp/cert.crt" keyHTA="/tmp/private.key" vmt=1 bash -c 'source "$0"; xrsbvmtls' "$TD/vmtls_fn.sh" >/dev/null 2>&1 || true
 # The function writes to xr.json when it exists, else sb.json; force xr first

@@ -47,11 +47,34 @@ check_kernels(){
   return 0
 }
 
-# check_ports: 每个 port_* 文件的端口是否有监听
+# check_ports: 每个 ports.env 中的端口是否有监听（兼容旧的 port_* 文件）
 check_ports(){
-  local f="" p="" proto="" missing=0 total=0
+  local f="" p="" proto="" missing=0 total=0 line=""
+  # 新系统：ports.env
+  if [ -f "$HOME/agsbx/ports.env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in ''|\#*) continue;; esac
+      proto="${line%%=*}"; p="${line#*=}"
+      case "$p" in ''|*[!0-9]*) continue;; esac
+      total=$((total+1))
+      if command -v ss >/dev/null 2>&1; then
+        if ss -tlnp 2>/dev/null | grep -q ":$p " || ss -ulnp 2>/dev/null | grep -q ":$p "; then
+          : # 有监听
+        else
+          _check_fail "端口 $p ($proto) 无监听"
+          missing=$((missing+1))
+        fi
+      else
+        _check_warn "无 ss 命令，跳过端口监听检查"
+        return 0
+      fi
+    done < "$HOME/agsbx/ports.env"
+  fi
+  # 旧系统兼容：port_* 文件
   for f in "$HOME"/agsbx/port_*; do
     [ -f "$f" ] || continue
+    # 跳过 ports.env 本身
+    [ "$f" = "$HOME/agsbx/ports.env" ] && continue
     p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
     case "$p" in ''|*[!0-9]*) continue;; esac
     total=$((total+1))
@@ -69,7 +92,7 @@ check_ports(){
     fi
   done
   if [ "$total" = "0" ]; then
-    _check_warn "无 port_* 文件"
+    _check_warn "无 port 记录"
   elif [ "$missing" = "0" ]; then
     _check_ok "全部 $total 个端口有监听"
   fi

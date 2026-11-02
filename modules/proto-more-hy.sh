@@ -1,4 +1,11 @@
 # hypt more instances (private module, loop). Inserted into xrsbhy2()
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # after the first instance. Same rule as the first instance: writes to
 # xr.json when Xray is installed, otherwise to sb.json. Shares uuid
 # and the TLS certificate pair, own port and tag hy2-xr-N / hy2-sb-N.
@@ -8,10 +15,10 @@ if [ -n "${hypt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_hy2$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "hy2$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "hypt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "hypt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_hy2$_pm_idx"
+    port_set "hy2$_pm_idx" "$_pm_p"
     echo "Hysteria2${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF

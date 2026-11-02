@@ -1144,6 +1144,76 @@ CAMOUFLAGE_TPL_EOF
   find "$webroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
   echo "伪装博客已部署到 $webroot"
 }
+# ports.sh: consolidated port storage in $HOME/agsbx/ports.env
+# Replaces the old per-protocol port_* files (port_vl_re, port_xh, ...).
+# Format: KEY=VALUE per line, e.g. vl_re=12345
+# Migration: on first use, imports old port_* files then deletes them.
+
+_ports_file="$HOME/agsbx/ports.env"
+
+ports_migrate(){
+  local f="$HOME/agsbx/ports.env" old key val
+  [ -f "$f" ] && return 0
+  : > "$f" 2>/dev/null || return 1
+  for old in "$HOME"/agsbx/port_*; do
+    [ -f "$old" ] || continue
+    key="${old##*/port_}"
+    # skip non-port files that happen to match (e.g. port_file, port_var temp names)
+    case "$key" in *[!a-z0-9_]*|'') continue;; esac
+    val=$(tr -d ' \t\r\n' < "$old" 2>/dev/null)
+    case "$val" in ''|*[!0-9]*) continue;; esac
+    printf '%s=%s\n' "$key" "$val" >> "$f"
+    rm -f "$old"
+  done
+  chmod 600 "$f" 2>/dev/null || true
+}
+
+port_get(){
+  local key="$1" f="$HOME/agsbx/ports.env" line
+  ports_migrate
+  [ -f "$f" ] || return 1
+  line=$(grep -E "^${key}=" "$f" 2>/dev/null | tail -1)
+  [ -n "$line" ] || return 1
+  printf '%s' "${line#*=}"
+}
+
+port_set(){
+  local key="$1" val="$2" f="$HOME/agsbx/ports.env" tmp
+  ports_migrate
+  tmp="$f.tmp.$$"
+  grep -vE "^${key}=" "$f" 2>/dev/null > "$tmp" || : > "$tmp"
+  printf '%s=%s\n' "$key" "$val" >> "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$f" 2>/dev/null || return 1
+}
+
+# port_resolve KEY VAL: returns the effective port.
+# - If VAL non-empty: use it, save to ports.env, return it.
+# - Elif KEY in ports.env: return saved value.
+# - Else: generate random, save, return it.
+port_resolve(){
+  local key="$1" val="$2" saved
+  case "$val" in ''|*[!0-9]*)
+    if [ -n "$val" ]; then
+      echo "端口格式错误，已跳过：$val" >&2
+      return 1
+    fi
+    ;;
+  esac
+  if [ -n "$val" ]; then
+    port_set "$key" "$val"
+    printf '%s' "$val"
+    return 0
+  fi
+  saved=$(port_get "$key" 2>/dev/null)
+  if [ -n "$saved" ]; then
+    printf '%s' "$saved"
+    return 0
+  fi
+  val=$(shuf -i 10000-65535 -n 1)
+  port_set "$key" "$val"
+  printf '%s' "$val"
+}
 # rep-inherit.sh: rep 未带协议变量时，从 vars.env 继承当前协议
 # 场景：用户只想更新脚本或改非协议变量（如 ym），不想重输所有协议。
 # 显式传入了任一协议变量时不触发（保持 rep 的重置语义）。
@@ -1253,8 +1323,8 @@ audit_cert(){
 audit_exposed(){
   command -v ss >/dev/null 2>&1 || { _audit_warn "无 ss 命令，跳过端口暴露检查"; return 0; }
   local listening="" p="" known="" unexpected=""
-  # 已知端口：从 port_* 文件收集
-  known=$(for f in "$HOME"/agsbx/port_*; do [ -f "$f" ] && tr -d ' \t\r\n' < "$f" 2>/dev/null; echo; done | grep -E "^[0-9]+$" | sort -un | tr '\n' ' ')
+  # 已知端口：从 ports.env 收集（兼容旧的 port_* 文件）
+  known=$(if [ -f "$HOME/agsbx/ports.env" ]; then cut -d= -f2 "$HOME/agsbx/ports.env" 2>/dev/null; fi; for f in "$HOME"/agsbx/port_*; do [ -f "$f" ] && tr -d ' \t\r\n' < "$f" 2>/dev/null; echo; done | grep -E "^[0-9]+$" | sort -un | tr '\n' ' ')
   # 订阅端口
   if [ -f "$HOME/agsbx/subport.log" ]; then
     known="$known $(tr -d ' \t\r\n' < "$HOME/agsbx/subport.log" 2>/dev/null)"
@@ -1416,11 +1486,34 @@ check_kernels(){
   return 0
 }
 
-# check_ports: 每个 port_* 文件的端口是否有监听
+# check_ports: 每个 ports.env 中的端口是否有监听（兼容旧的 port_* 文件）
 check_ports(){
-  local f="" p="" proto="" missing=0 total=0
+  local f="" p="" proto="" missing=0 total=0 line=""
+  # 新系统：ports.env
+  if [ -f "$HOME/agsbx/ports.env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in ''|\#*) continue;; esac
+      proto="${line%%=*}"; p="${line#*=}"
+      case "$p" in ''|*[!0-9]*) continue;; esac
+      total=$((total+1))
+      if command -v ss >/dev/null 2>&1; then
+        if ss -tlnp 2>/dev/null | grep -q ":$p " || ss -ulnp 2>/dev/null | grep -q ":$p "; then
+          : # 有监听
+        else
+          _check_fail "端口 $p ($proto) 无监听"
+          missing=$((missing+1))
+        fi
+      else
+        _check_warn "无 ss 命令，跳过端口监听检查"
+        return 0
+      fi
+    done < "$HOME/agsbx/ports.env"
+  fi
+  # 旧系统兼容：port_* 文件
   for f in "$HOME"/agsbx/port_*; do
     [ -f "$f" ] || continue
+    # 跳过 ports.env 本身
+    [ "$f" = "$HOME/agsbx/ports.env" ] && continue
     p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
     case "$p" in ''|*[!0-9]*) continue;; esac
     total=$((total+1))
@@ -1438,7 +1531,7 @@ check_ports(){
     fi
   done
   if [ "$total" = "0" ]; then
-    _check_warn "无 port_* 文件"
+    _check_warn "无 port 记录"
   elif [ "$missing" = "0" ]; then
     _check_ok "全部 $total 个端口有监听"
   fi
@@ -2650,12 +2743,21 @@ ufw_is_active(){
   ufw status 2>/dev/null | grep -q "Status: active"
 }
 _ufw_port(){
-  local v="$1" f="$2" p
+  local v="$1" f="$2" p key
   p="$v"
   case "$p" in ''|*[!0-9]*) p="";; esac
-  if [ -z "$p" ] && [ -n "$f" ] && [ -f "$f" ]; then
-    p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
-    case "$p" in ''|*[!0-9]*) p="";; esac
+  if [ -z "$p" ] && [ -n "$f" ]; then
+    # 新系统：从 ports.env 读取（f 是文件路径，从中提取 key）
+    key="${f##*/port_}"
+    if [ "$key" != "$f" ] && command -v port_get >/dev/null 2>&1; then
+      p=$(port_get "$key" 2>/dev/null)
+      case "$p" in ''|*[!0-9]*) p="";; esac
+    fi
+    # 旧系统兼容：直接读文件
+    if [ -z "$p" ] && [ -f "$f" ]; then
+      p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
+      case "$p" in ''|*[!0-9]*) p="";; esac
+    fi
   fi
   if [ -n "$p" ] && [ "$p" -ge 1 ] 2>/dev/null && [ "$p" -le 65535 ] 2>/dev/null; then
     echo "$p"
@@ -3649,13 +3751,7 @@ fi
 
 if [ -n "$xhp" ]; then
 xhp=xhpt
-if [ -z "$port_xh" ] && [ ! -e "$HOME/agsbx/port_xh" ]; then
-port_xh=$(shuf -i 10000-65535 -n 1)
-echo "$port_xh" > "$HOME/agsbx/port_xh"
-elif [ -n "$port_xh" ]; then
-echo "$port_xh" > "$HOME/agsbx/port_xh"
-fi
-port_xh=$(cat "$HOME/agsbx/port_xh")
+port_xh=$(port_resolve "xh" "$port_xh")
 echo "Vless-xhttp-reality-enc端口：$port_xh"
 cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -3702,13 +3798,7 @@ xhp=xhptargo
 fi
 if [ -n "$vxp" ]; then
 vxp=vxpt
-if [ -z "$port_vx" ] && [ ! -e "$HOME/agsbx/port_vx" ]; then
-port_vx=$(shuf -i 10000-65535 -n 1)
-echo "$port_vx" > "$HOME/agsbx/port_vx"
-elif [ -n "$port_vx" ]; then
-echo "$port_vx" > "$HOME/agsbx/port_vx"
-fi
-port_vx=$(cat "$HOME/agsbx/port_vx")
+port_vx=$(port_resolve "vx" "$port_vx")
 echo "Vless-xhttp-enc端口：$port_vx"
 if [ -n "$cdnym" ]; then
 echo "$cdnym" > "$HOME/agsbx/cdnym"
@@ -3749,13 +3839,7 @@ vxp=vxptargo
 fi
 if [ -n "$xup" ]; then
 xup=xupt
-if [ -z "$port_xu" ] && [ ! -e "$HOME/agsbx/port_xu" ]; then
-port_xu=$(shuf -i 10000-65535 -n 1)
-echo "$port_xu" > "$HOME/agsbx/port_xu"
-elif [ -n "$port_xu" ]; then
-echo "$port_xu" > "$HOME/agsbx/port_xu"
-fi
-port_xu=$(cat "$HOME/agsbx/port_xu")
+port_xu=$(port_resolve "xu" "$port_xu")
 echo "Vless-xhttp-tls-UDP端口：$port_xu"
 cat >> "$HOME/agsbx/xr.json" <<EOF
 {
@@ -3804,13 +3888,7 @@ fi
 
 if [ -n "$xcp" ]; then
 xcp=xcpt
-if [ -z "$port_xc" ] && [ ! -e "$HOME/agsbx/port_xc" ]; then
-port_xc=$(shuf -i 10000-65535 -n 1)
-echo "$port_xc" > "$HOME/agsbx/port_xc"
-elif [ -n "$port_xc" ]; then
-echo "$port_xc" > "$HOME/agsbx/port_xc"
-fi
-port_xc=$(cat "$HOME/agsbx/port_xc")
+port_xc=$(port_resolve "xc" "$port_xc")
 echo "Vless-xhttp-tls-TCP/UDP端口：$port_xc"
 cat >> "$HOME/agsbx/xr.json" <<EOF
 {
@@ -3859,13 +3937,7 @@ fi
 
 if [ -n "$vwp" ]; then
 vwp=vwpt
-if [ -z "$port_vw" ] && [ ! -e "$HOME/agsbx/port_vw" ]; then
-port_vw=$(shuf -i 10000-65535 -n 1)
-echo "$port_vw" > "$HOME/agsbx/port_vw"
-elif [ -n "$port_vw" ]; then
-echo "$port_vw" > "$HOME/agsbx/port_vw"
-fi
-port_vw=$(cat "$HOME/agsbx/port_vw")
+port_vw=$(port_resolve "vw" "$port_vw")
 echo "Vless-ws-enc端口：$port_vw"
 if [ -n "$cdnym" ]; then
 echo "$cdnym" > "$HOME/agsbx/cdnym"
@@ -3904,13 +3976,7 @@ vwp=vwptargo
 fi
 if [ -n "$vlp" ] && [ "$vlpt_on" = "xray" ]; then
 vlp=vlpt
-if [ -z "$port_vl_re" ] && [ ! -e "$HOME/agsbx/port_vl_re" ]; then
-port_vl_re=$(shuf -i 10000-65535 -n 1)
-echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
-elif [ -n "$port_vl_re" ]; then
-echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
-fi
-port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
+port_vl_re=$(port_resolve "vl_re" "$port_vl_re")
 echo "Vless-tcp-reality-v端口：$port_vl_re"
 cat >> "$HOME/agsbx/xr.json" <<EOF
         {
@@ -3951,6 +4017,13 @@ else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
 # vlpt more instances on Xray (private module, loop, not per-instance copies).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # vlpt_more="10002,10003" installs instances 2, 3, ... in order, sharing
 # vlpt's uuid, Reality keypair (xrk), SNI and flow, with their own port
 # and inbound tag reality-vision-2, reality-vision-3, ... Only runs when
@@ -3971,11 +4044,11 @@ while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|random)
-    if [ -s "$HOME/agsbx/port_vl_re$_vlpt_more_idx" ]; then _vlpt_more_p=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_idx"); else _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
+    _vlpt_more_p=$(port_get "vl_re$_vlpt_more_idx" 2>/dev/null); if [ -z "$_vlpt_more_p" ]; then _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
     case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例随机端口失败，已跳过第 $_vlpt_more_idx 个实例"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
     ;;
   *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
-  echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
+  port_set "vl_re$_vlpt_more_idx" "$_vlpt_more_p"
   echo "Vless-tcp-reality-v${_vlpt_more_idx}端口：$_vlpt_more_p"
   cat >> "$HOME/agsbx/xr.json" <<EOF
         {
@@ -4018,6 +4091,13 @@ done
 fi
 
 # Other protocols more instances on Xray (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # Inserted into installxray() after the vlpt-more block, before it ends.
 # Each *_more list installs instances 2, 3, ... in order, sharing the
 # first instance's uuid, keys, SNI, flow and encryption seed, with
@@ -4034,10 +4114,10 @@ if [ -n "${xhpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xh$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xh$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xh$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xhpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xhpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xh$_pm_idx"
+    port_set "xh$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-reality-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -4088,10 +4168,10 @@ if [ -n "${vxpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vx$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vx$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vx$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vxpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vxpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vx$_pm_idx"
+    port_set "vx$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -4132,10 +4212,10 @@ if [ -n "${vwpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vw$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vw$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vw$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vwpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vwpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vw$_pm_idx"
+    port_set "vw$_pm_idx" "$_pm_p"
     echo "Vless-ws-enc${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
     {
@@ -4174,10 +4254,10 @@ if [ -n "${xupt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xu$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xu$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xu$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xu$_pm_idx"
+    port_set "xu$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-tls-UDP${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
 {
@@ -4229,10 +4309,10 @@ if [ -n "${xcpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_xc$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_xc$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "xc$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "xcpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "xcpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_xc$_pm_idx"
+    port_set "xc$_pm_idx" "$_pm_p"
     echo "Vless-xhttp-tls-TCP/UDP${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/xr.json" <<EOF
 {
@@ -4298,13 +4378,7 @@ EOF
 insuuid
 if [ "$domain_cert_ready" = "1" ] && [ -n "$nvp" ]; then
 nvp=nvpt
-if [ -z "$port_nv" ] && [ ! -e "$HOME/agsbx/port_nv" ]; then
-port_nv=$(shuf -i 10000-65535 -n 1)
-echo "$port_nv" > "$HOME/agsbx/port_nv"
-elif [ -n "$port_nv" ]; then
-echo "$port_nv" > "$HOME/agsbx/port_nv"
-fi
-port_nv=$(cat "$HOME/agsbx/port_nv")
+port_nv=$(port_resolve "nv" "$port_nv")
 echo "Naiveproxy端口：$port_nv"
 cat >> "$HOME/agsbx/sb.json" <<EOF
     {
@@ -4331,13 +4405,7 @@ fi
 
 if [ -n "$tup" ]; then
 tup=tupt
-if [ -z "$port_tu" ] && [ ! -e "$HOME/agsbx/port_tu" ]; then
-port_tu=$(shuf -i 10000-65535 -n 1)
-echo "$port_tu" > "$HOME/agsbx/port_tu"
-elif [ -n "$port_tu" ]; then
-echo "$port_tu" > "$HOME/agsbx/port_tu"
-fi
-port_tu=$(cat "$HOME/agsbx/port_tu")
+port_tu=$(port_resolve "tu" "$port_tu")
 echo "Tuic端口：$port_tu"
 cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4367,13 +4435,7 @@ tup=tuptargo
 fi
 if [ -n "$anp" ]; then
 anp=anpt
-if [ -z "$port_an" ] && [ ! -e "$HOME/agsbx/port_an" ]; then
-port_an=$(shuf -i 10000-65535 -n 1)
-echo "$port_an" > "$HOME/agsbx/port_an"
-elif [ -n "$port_an" ]; then
-echo "$port_an" > "$HOME/agsbx/port_an"
-fi
-port_an=$(cat "$HOME/agsbx/port_an")
+port_an=$(port_resolve "an" "$port_an")
 echo "Anytls端口：$port_an"
 cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4417,13 +4479,7 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-if [ -z "$port_ar" ] && [ ! -e "$HOME/agsbx/port_ar" ]; then
-port_ar=$(shuf -i 10000-65535 -n 1)
-echo "$port_ar" > "$HOME/agsbx/port_ar"
-elif [ -n "$port_ar" ]; then
-echo "$port_ar" > "$HOME/agsbx/port_ar"
-fi
-port_ar=$(cat "$HOME/agsbx/port_ar")
+port_ar=$(port_resolve "ar" "$port_ar")
 echo "Any-Reality端口：$port_ar"
 cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4483,13 +4539,7 @@ fi
 private_key_s=$(cat "$HOME/agsbx/sbk/private_key")
 public_key_s=$(cat "$HOME/agsbx/sbk/public_key")
 short_id_s=$(cat "$HOME/agsbx/sbk/short_id")
-if [ -z "$port_vl_re" ] && [ ! -e "$HOME/agsbx/port_vl_re" ]; then
-port_vl_re=$(shuf -i 10000-65535 -n 1)
-echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
-elif [ -n "$port_vl_re" ]; then
-echo "$port_vl_re" > "$HOME/agsbx/port_vl_re"
-fi
-port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
+port_vl_re=$(port_resolve "vl_re" "$port_vl_re")
 echo "Vless-tcp-reality-v端口（Sing-box）：$port_vl_re"
 cat >> "$HOME/agsbx/sb.json" <<EOF
     {
@@ -4522,6 +4572,13 @@ else
 [ -n "$vlp" ] || vlp=vlptargo
 fi
 # vlpt more instances on Sing-box (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # Same vlpt_more list as the Xray block, instances 2, 3, ... in order
 # (always starting at 2; vlpt2 is gone), sharing vlpt's
 # uuid and Sing-box Reality keypair (sbk), with their own port and
@@ -4550,11 +4607,11 @@ while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|random)
-    if [ -s "$HOME/agsbx/port_vl_re$_vlpt_more_idx" ]; then _vlpt_more_p=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_idx"); else _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
+    _vlpt_more_p=$(port_get "vl_re$_vlpt_more_idx" 2>/dev/null); if [ -z "$_vlpt_more_p" ]; then _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
     case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例随机端口失败，已跳过第 $_vlpt_more_idx 个实例"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
     ;;
   *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
-  echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
+  port_set "vl_re$_vlpt_more_idx" "$_vlpt_more_p"
   echo "Vless-tcp-reality-v${_vlpt_more_idx}端口（Sing-box）：$_vlpt_more_p"
   cat >> "$HOME/agsbx/sb.json" <<EOF
     {
@@ -4594,14 +4651,8 @@ if [ ! -e "$HOME/agsbx/sskey" ]; then
 sskey=$("$HOME/agsbx/sing-box" generate rand 16 --base64)
 echo "$sskey" > "$HOME/agsbx/sskey"
 fi
-if [ -z "$port_ss" ] && [ ! -e "$HOME/agsbx/port_ss" ]; then
-port_ss=$(shuf -i 10000-65535 -n 1)
-echo "$port_ss" > "$HOME/agsbx/port_ss"
-elif [ -n "$port_ss" ]; then
-echo "$port_ss" > "$HOME/agsbx/port_ss"
-fi
 sskey=$(cat "$HOME/agsbx/sskey")
-port_ss=$(cat "$HOME/agsbx/port_ss")
+port_ss=$(port_resolve "ss" "$port_ss")
 echo "Shadowsocks-2022端口：$port_ss"
 cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4617,6 +4668,13 @@ else
 ssp=ssptargo
 fi
 # Other protocols more instances on Sing-box (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # Inserted into installsb() after the vlpt-more block, before sspt is
 # not applicable here: sspt itself is looped below, so this module is
 # inserted at the end of installsb(), after the sspt block.
@@ -4634,10 +4692,10 @@ if [ -n "${nvpt_more:-}" ] && [ "${domain_cert_ready:-}" = "1" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_nv$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_nv$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "nv$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "nvpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "nvpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_nv$_pm_idx"
+    port_set "nv$_pm_idx" "$_pm_p"
     echo "Naiveproxy${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
     {
@@ -4667,10 +4725,10 @@ if [ -n "${tupt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_tu$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_tu$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "tu$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "tupt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "tupt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_tu$_pm_idx"
+    port_set "tu$_pm_idx" "$_pm_p"
     echo "Tuic${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4704,10 +4762,10 @@ if [ -n "${anpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_an$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_an$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "an$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "anpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "anpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_an$_pm_idx"
+    port_set "an$_pm_idx" "$_pm_p"
     echo "Anytls${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4751,10 +4809,10 @@ if [ -n "${arpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_ar$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_ar$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "ar$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "arpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "arpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_ar$_pm_idx"
+    port_set "ar$_pm_idx" "$_pm_p"
     echo "Any-Reality${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4797,10 +4855,10 @@ if [ -n "${sspt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_ss$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_ss$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "ss$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "sspt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "sspt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_ss$_pm_idx"
+    port_set "ss$_pm_idx" "$_pm_p"
     echo "Shadowsocks-2022-${_pm_idx}端口：$_pm_p"
     cat >> "$HOME/agsbx/sb.json" <<EOF
         {
@@ -4820,13 +4878,7 @@ fi
 xrsbhy2(){
 if [ -n "$hyp" ]; then
 hyp=hypt
-if [ -z "$port_hy2" ] && [ ! -e "$HOME/agsbx/port_hy2" ]; then
-port_hy2=$(shuf -i 10000-65535 -n 1)
-echo "$port_hy2" > "$HOME/agsbx/port_hy2"
-elif [ -n "$port_hy2" ]; then
-echo "$port_hy2" > "$HOME/agsbx/port_hy2"
-fi
-port_hy2=$(cat "$HOME/agsbx/port_hy2")
+port_hy2=$(port_resolve "hy2" "$port_hy2")
 echo "Hysteria2端口：$port_hy2"
 if [ -e "$HOME/agsbx/xr.json" ]; then
 cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -4892,6 +4944,13 @@ else
 hyp=hyptargo
 fi
 # hypt more instances (private module, loop). Inserted into xrsbhy2()
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # after the first instance. Same rule as the first instance: writes to
 # xr.json when Xray is installed, otherwise to sb.json. Shares uuid
 # and the TLS certificate pair, own port and tag hy2-xr-N / hy2-sb-N.
@@ -4901,10 +4960,10 @@ if [ -n "${hypt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_hy2$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "hy2$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "hypt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "hypt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_hy2$_pm_idx"
+    port_set "hy2$_pm_idx" "$_pm_p"
     echo "Hysteria2${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -4974,13 +5033,7 @@ fi
 xrsbvm(){
 if [ -n "$vmp" ]; then
 vmp=vmpt
-if [ -z "$port_vm_ws" ] && [ ! -e "$HOME/agsbx/port_vm_ws" ]; then
-port_vm_ws=$(shuf -i 10000-65535 -n 1)
-echo "$port_vm_ws" > "$HOME/agsbx/port_vm_ws"
-elif [ -n "$port_vm_ws" ]; then
-echo "$port_vm_ws" > "$HOME/agsbx/port_vm_ws"
-fi
-port_vm_ws=$(cat "$HOME/agsbx/port_vm_ws")
+port_vm_ws=$(port_resolve "vm_ws" "$port_vm_ws")
 echo "Vmess-ws端口：$port_vm_ws"
 if [ -n "$cdnym" ]; then
 echo "$cdnym" > "$HOME/agsbx/cdnym"
@@ -5040,6 +5093,13 @@ else
 vmp=vmptargo
 fi
 # vmpt more instances (private module, loop). Inserted into xrsbvm()
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # after the first instance. Same rule as the first instance: xr.json
 # when Xray is installed, otherwise sb.json. Shares uuid and the
 # ws path ${uuid}-vm, own port and tag vmess-xr-N / vmess-sb-N.
@@ -5049,10 +5109,10 @@ if [ -n "${vmpt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vm_ws$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vm_ws$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vmpt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vmpt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vm_ws$_pm_idx"
+    port_set "vm_ws$_pm_idx" "$_pm_p"
     echo "Vmess-ws${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -5126,13 +5186,7 @@ fi
 xrsbvmtls(){
 if [ -n "$vmt" ]; then
 vmt=vmtls
-if [ -z "$port_vm_tls" ] && [ ! -e "$HOME/agsbx/port_vm_tls" ]; then
-port_vm_tls=$(shuf -i 10000-65535 -n 1)
-echo "$port_vm_tls" > "$HOME/agsbx/port_vm_tls"
-elif [ -n "$port_vm_tls" ]; then
-echo "$port_vm_tls" > "$HOME/agsbx/port_vm_tls"
-fi
-port_vm_tls=$(cat "$HOME/agsbx/port_vm_tls")
+port_vm_tls=$(port_resolve "vm_tls" "$port_vm_tls")
 echo "Vmess-ws-tls端口：$port_vm_tls"
 if [ -e "$HOME/agsbx/xr.json" ]; then
 cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -5201,6 +5255,13 @@ else
 vmt=vmtlsargo
 fi
 # vmtls more instances (private module, loop). Inserted into
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # xrsbvmtls() after the first instance. Same rule as the first
 # instance: xr.json when Xray is installed, otherwise sb.json.
 # Shares uuid, the TLS certificate pair and the ws path
@@ -5211,10 +5272,10 @@ if [ -n "${vmtls_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_vm_tls$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "vm_tls$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "vmtls 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "vmtls 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_vm_tls$_pm_idx"
+    port_set "vm_tls$_pm_idx" "$_pm_p"
     echo "Vmess-ws-tls${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -5286,13 +5347,7 @@ fi
 xrsbso(){
 if [ -n "$sop" ]; then
 sop=sopt
-if [ -z "$port_so" ] && [ ! -e "$HOME/agsbx/port_so" ]; then
-port_so=$(shuf -i 10000-65535 -n 1)
-echo "$port_so" > "$HOME/agsbx/port_so"
-elif [ -n "$port_so" ]; then
-echo "$port_so" > "$HOME/agsbx/port_so"
-fi
-port_so=$(cat "$HOME/agsbx/port_so")
+port_so=$(port_resolve "so" "$port_so")
 echo "Socks5端口：$port_so"
 if [ -e "$HOME/agsbx/xr.json" ]; then
 cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -5338,6 +5393,13 @@ else
 sop=soptargo
 fi
 # sopt more instances (private module, loop). Inserted into xrsbso()
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # after the first instance. Same rule as the first instance: xr.json
 # when Xray is installed, otherwise sb.json. Shares uuid as both
 # username and password, own port and tag socks5-xr-N / socks5-sb-N.
@@ -5347,10 +5409,10 @@ if [ -n "${sopt_more:-}" ]; then
     case "$_pm_rest" in *,*) _pm_p="${_pm_rest%%,*}"; _pm_rest="${_pm_rest#*,}";; *) _pm_p="$_pm_rest"; _pm_rest="__DONE__";; esac
     _pm_p=$(printf '%s' "$_pm_p" | xargs 2>/dev/null || printf '%s' "$_pm_p")
     case "$_pm_p" in ''|random)
-      if [ -s "$HOME/agsbx/port_so$_pm_idx" ]; then _pm_p=$(cat "$HOME/agsbx/port_so$_pm_idx"); else _pm_p=$(shuf -i 10000-65535 -n 1); fi
+      _pm_p=$(port_get "so$_pm_idx" 2>/dev/null); if [ -z "$_pm_p" ]; then _pm_p=$(shuf -i 10000-65535 -n 1); fi
       case "$_pm_p" in ''|*[!0-9]*) echo "sopt 更多实例随机端口失败，已跳过第 $_pm_idx 个实例"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac ;;
     *[!0-9]*) echo "sopt 更多实例端口格式错误，已跳过：$_pm_p"; _pm_idx=$((_pm_idx + 1)); [ "$_pm_rest" = "__DONE__" ] && break || continue;; esac
-    echo "$_pm_p" > "$HOME/agsbx/port_so$_pm_idx"
+    port_set "so$_pm_idx" "$_pm_p"
     echo "Socks5${_pm_idx}端口：$_pm_p"
     if [ -e "$HOME/agsbx/xr.json" ]; then
       cat >> "$HOME/agsbx/xr.json" <<EOF
@@ -6180,7 +6242,7 @@ echo "下载Cloudflared-argo最新正式版内核：$argocore"
 url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu"; out="$HOME/agsbx/cloudflared"; (command -v curl>/dev/null 2>&1 && curl -Lo "$out" -# --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -O "$out" --tries=2 "$url")
 chmod +x "$HOME/agsbx/cloudflared"
 fi
-if [ "$argo" = "vmpt" ]; then argoport=$(cat "$HOME/agsbx/port_vm_ws" 2>/dev/null); echo "Vmess" > "$HOME/agsbx/vlvm"; elif [ "$argo" = "vwpt" ]; then argoport=$(cat "$HOME/agsbx/port_vw" 2>/dev/null); echo "Vless" > "$HOME/agsbx/vlvm"; fi; echo "$argoport" > "$HOME/agsbx/argoport.log"
+if [ "$argo" = "vmpt" ]; then argoport=$(port_get "vm_ws" 2>/dev/null); echo "Vmess" > "$HOME/agsbx/vlvm"; elif [ "$argo" = "vwpt" ]; then argoport=$(port_get "vw" 2>/dev/null); echo "Vless" > "$HOME/agsbx/vlvm"; fi; echo "$argoport" > "$HOME/agsbx/argoport.log"
 if [ -n "${ARGO_DOMAIN}" ] && [ -n "${ARGO_AUTH}" ]; then
 argoname='固定'
 if pidof systemd >/dev/null 2>&1 && [ "$EUID" -eq 0 ]; then
@@ -6463,7 +6525,7 @@ fi
 if grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi
 if grep xhttp-reality "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-reality-enc 】支持ENC加密，节点信息如下："
-port_xh=$(cat "$HOME/agsbx/port_xh")
+port_xh=$(port_get "xh" 2>/dev/null)
 vl_xh_link="vless://$uuid@$reality_addr:$port_xh?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=xhttp&path=$uuid-xh&mode=auto#${sxname}vl-xhttp-reality-enc-$hostname"
 echo "$vl_xh_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_xh_link"
@@ -6471,7 +6533,7 @@ echo
 fi
 if grep vless-xhttp "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-enc 】支持ENC加密，节点信息如下："
-port_vx=$(cat "$HOME/agsbx/port_vx")
+port_vx=$(port_get "vx" 2>/dev/null)
 vl_vx_link="vless://$uuid@$domain_addr:$port_vx?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-$hostname"
 echo "$vl_vx_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vx_link"
@@ -6487,7 +6549,7 @@ fi
 fi
 if grep vless-ws "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-ws-enc 】支持ENC加密，节点信息如下："
-port_vw=$(cat "$HOME/agsbx/port_vw")
+port_vw=$(port_get "vw" 2>/dev/null)
 vl_vw_link="vless://$uuid@$domain_addr:$port_vw?encryption=$enkey&flow=xtls-rprx-vision&type=ws&path=$uuid-vw#${sxname}vl-ws-enc-$hostname"
 echo "$vl_vw_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vw_link"
@@ -6503,7 +6565,7 @@ fi
 fi
 
 if grep xhttp-h23 "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
-port_xc=$(cat "$HOME/agsbx/port_xc")
+port_xc=$(port_get "xc" 2>/dev/null)
 xhttpclmh(){
 clxcpt(){
 cat <<EOF
@@ -6614,7 +6676,7 @@ fi
 
 if grep xhttp-h3 "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-tls-UDP 】节点信息如下："
-port_xu=$(cat "$HOME/agsbx/port_xu")
+port_xu=$(port_get "xu" 2>/dev/null)
 if ! grep -A 26 'xhttp-h3' "$HOME/agsbx/xr.json" | grep -q 'agsbx/cert' >/dev/null 2>&1; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
@@ -6649,7 +6711,7 @@ echo "- ${sxname}Xhttp-UDP-$hostname"
 fi
 if grep -q '"tag":"reality-vision"' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q '"tag": "vl-reality-sb"' "$HOME/agsbx/sb.json" 2>/dev/null; then
 echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
-port_vl_re=$(cat "$HOME/agsbx/port_vl_re")
+port_vl_re=$(port_get "vl_re" 2>/dev/null)
 vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
 echo "$vl_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_link"
@@ -6705,6 +6767,17 @@ echo "- ${sxname}vless-reality-vision-$hostname"
 }
 fi
 # vlpt more instances display (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
+# fallback: 如果 port_get 未定义（孤立测试时），用 cat
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
 # Instance numbers come from the inbound tags actually present in
 # xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 2), never
 # from port files alone, so a stale port file from a removed instance
@@ -6717,7 +6790,7 @@ vlpt_more_idx_list(){
 }
 for _vlpt_more_i in $(vlpt_more_idx_list); do
 if grep -q "\"tag\": \"vl-reality-sb-$_vlpt_more_i\"" "$HOME/agsbx/sb.json" 2>/dev/null; then _vlpt_more_pbk="$public_key_s"; _vlpt_more_sid="$short_id_s"; else _vlpt_more_pbk="$public_key_x"; _vlpt_more_sid="$short_id_x"; fi
-_vlpt_more_port=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_i" 2>/dev/null)
+_vlpt_more_port=$(port_get "vl_re$_vlpt_more_i" 2>/dev/null)
 [ -n "$_vlpt_more_port" ] || continue
 echo "💣节点信息如下："
 _vlpt_more_link="vless://$uuid@$reality_addr:$_vlpt_more_port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$_vlpt_more_pbk&sid=$_vlpt_more_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$_vlpt_more_i-$hostname"
@@ -6728,7 +6801,7 @@ done
 sbvlpt_more(){
 for _vlpt_more_i in $(vlpt_more_idx_list); do
 if grep -q "\"tag\": \"vl-reality-sb-$_vlpt_more_i\"" "$HOME/agsbx/sb.json" 2>/dev/null; then _vlpt_more_pbk="$public_key_s"; _vlpt_more_sid="$short_id_s"; else _vlpt_more_pbk="$public_key_x"; _vlpt_more_sid="$short_id_x"; fi
-_vlpt_more_port=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_i" 2>/dev/null)
+_vlpt_more_port=$(port_get "vl_re$_vlpt_more_i" 2>/dev/null)
 [ -n "$_vlpt_more_port" ] || continue
 cat <<EOF
 {
@@ -6763,7 +6836,7 @@ done
 clvlpt_more(){
 for _vlpt_more_i in $(vlpt_more_idx_list); do
 if grep -q "\"tag\": \"vl-reality-sb-$_vlpt_more_i\"" "$HOME/agsbx/sb.json" 2>/dev/null; then _vlpt_more_pbk="$public_key_s"; _vlpt_more_sid="$short_id_s"; else _vlpt_more_pbk="$public_key_x"; _vlpt_more_sid="$short_id_x"; fi
-_vlpt_more_port=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_i" 2>/dev/null)
+_vlpt_more_port=$(port_get "vl_re$_vlpt_more_i" 2>/dev/null)
 [ -n "$_vlpt_more_port" ] || continue
 cat <<EOF
 - name: ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname
@@ -6789,6 +6862,17 @@ echo "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"
 done
 }
 # Other protocols more instances display (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
+# fallback: 如果 port_get 未定义（孤立测试时），用 cat
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
 # Instance numbers come from the inbound tags actually present in
 # xr.json / sb.json (base-N, N >= 2), never from port files alone,
 # so a stale port file from a removed instance cannot resurrect a
@@ -6806,28 +6890,28 @@ grep -o "\"tag\"[^,]*\"$_pm_base-[0-9][0-9]*\"" "$_pm_file" 2>/dev/null | sed -E
 }
 # xhpt
 for _pm_i in $(_pm_idx_list "xhttp-reality" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_xh$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "xh$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣支持ENC加密，节点信息如下："
 _pm_link="vless://$uuid@$reality_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=xhttp&path=$uuid-xh&mode=auto#${sxname}vl-xhttp-reality-enc-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 # vxpt
 for _pm_i in $(_pm_idx_list "vless-xhttp" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_vx$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vx$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣支持ENC加密，节点信息如下："
 _pm_link="vless://$uuid@$domain_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 # vwpt
 for _pm_i in $(_pm_idx_list "vless-ws" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_vw$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vw$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣支持ENC加密，节点信息如下："
 _pm_link="vless://$uuid@$domain_addr:$_pm_p?encryption=$enkey&flow=xtls-rprx-vision&type=ws&path=$uuid-vw#${sxname}vl-ws-enc-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 # xupt
 for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 if [ "$pin_on" = "1" ]; then _pm_sha=$(cat "$HOME/agsbx/SHA256.txt" 2>/dev/null); else _pm_sha=""; fi
 _pm_link="vless://$uuid@$add:$_pm_p?encryption=none&security=tls&sni=$sni&alpn=h3&insecure=0&allowInsecure=0&hpkp=$_pm_sha&pcs=$_pm_sha&type=xhttp&path=$uuid-xu&mode=auto#${sxname}Vless-xhttp-tls-UDP-$_pm_i-$hostname"
@@ -6835,7 +6919,7 @@ echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 clxupt_more() {
 for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "xu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}Xhttp-UDP-$_pm_i-$hostname
 type: vless
@@ -6862,14 +6946,14 @@ for _pm_i in $(_pm_idx_list "xhttp-h3" "$HOME/agsbx/xr.json"); do echo "- ${sxna
 }
 # xcpt
 for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="vless://$uuid@$add:$_pm_p?encryption=none&security=tls&sni=$sni&insecure=0&allowInsecure=0&type=xhttp&path=$uuid-xc&mode=auto#${sxname}Vless-xhttp-tls-TCP-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 clxcpt_more() {
 for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "xc$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}Xhttp-TCP-$_pm_i-$hostname
 type: vless
@@ -6894,14 +6978,14 @@ for _pm_i in $(_pm_idx_list "xhttp-h23" "$HOME/agsbx/xr.json"); do echo "- ${sxn
 }
 # sspt
 for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$_pm_p" | base64 -w0)#${sxname}Shadowsocks-2022-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbsspt_more() {
 for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "type": "shadowsocks",
@@ -6919,7 +7003,7 @@ for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do echo "\"${sxnam
 }
 clsspt_more() {
 for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "ss$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: "${sxname}Shadowsocks-2022-$_pm_i-$hostname"
 type: ss
@@ -6936,7 +7020,7 @@ for _pm_i in $(_pm_idx_list "ss-2022" "$HOME/agsbx/sb.json"); do echo "- ${sxnam
 }
 # nvpt
 for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 _pm_ym=$(cat "$HOME/agsbx/ym" 2>/dev/null)
 echo "💣节点信息如下："
 _pm_link="naive+https://$uuid:$uuid@$_pm_ym:$_pm_p?security=tls&sni=$_pm_ym&insecure=0&allowInsecure=0#${sxname}naive-h2-$_pm_i-$hostname"
@@ -6946,7 +7030,7 @@ echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbnvpt_more() {
 for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "nv$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 _pm_ym=$(cat "$HOME/agsbx/ym" 2>/dev/null)
 cat <<EOF
 {
@@ -6988,14 +7072,14 @@ for _pm_i in $(_pm_idx_list "naive-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxna
 }
 # tupt
 for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="tuic://$uuid:$uuid@$add:$_pm_p?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$sni&insecure=$jhins&allowInsecure=$jhins&allow_insecure=$jhins#${sxname}tuic-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbtupt_more() {
 for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "type":"tuic",
@@ -7026,7 +7110,7 @@ for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxna
 }
 cltupt_more() {
 for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "tu$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}tuic5-$_pm_i-$hostname
 server: $add
@@ -7050,14 +7134,14 @@ for _pm_i in $(_pm_idx_list "tuic5-sb" "$HOME/agsbx/sb.json"); do echo "- ${sxna
 }
 # anpt
 for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="anytls://$uuid@$add:$_pm_p?sni=$sni&insecure=$jhins&allowInsecure=$jhins#${sxname}anytls-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbanpt_more() {
 for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "type": "anytls",
@@ -7082,7 +7166,7 @@ for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do echo "\"${sxn
 }
 clanpt_more() {
 for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "an$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}anytls-$_pm_i-$hostname
 type: anytls
@@ -7104,14 +7188,14 @@ for _pm_i in $(_pm_idx_list "anytls-sb" "$HOME/agsbx/sb.json"); do echo "- ${sxn
 }
 # arpt
 for _pm_i in $(_pm_idx_list "anyreality-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="anytls://$uuid@$reality_addr:$_pm_p?security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_s&sid=$short_id_s&type=tcp&headerType=none#${sxname}any-reality-$_pm_i-$hostname"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbarpt_more() {
 for _pm_i in $(_pm_idx_list "anyreality-sb" "$HOME/agsbx/sb.json"); do
-_pm_p=$(cat "$HOME/agsbx/port_ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "ar$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "type": "anytls",
@@ -7144,7 +7228,7 @@ _pm_hy_idx() {
 { grep -o '"tag": "hy2-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "hy2-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
 }
 for _pm_i in $(_pm_hy_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 if [ "$pin_on" = "1" ]; then _pm_hyps="&pinSHA256=$pin_sha"; else _pm_hyps=""; fi
 echo "💣节点信息如下："
 _pm_link="hysteria2://$uuid@$add:$_pm_p?security=tls&alpn=h3&insecure=0&allowInsecure=0$_pm_hyps&sni=$sni#${sxname}hy2-$_pm_i-$hostname"
@@ -7152,7 +7236,7 @@ echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbhypt_more() {
 for _pm_i in $(_pm_hy_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "type": "hysteria2",
@@ -7177,7 +7261,7 @@ for _pm_i in $(_pm_hy_idx); do echo "\"${sxname}hy2-$_pm_i-$hostname\","; done
 }
 clhypt_more() {
 for _pm_i in $(_pm_hy_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "hy2$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}hysteria2-$_pm_i-$hostname
 type: hysteria2
@@ -7201,14 +7285,14 @@ _pm_vm_idx() {
 { grep -o '"tag": "vmess-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "vmess-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
 }
 for _pm_i in $(_pm_vm_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣节点信息如下："
 _pm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-$_pm_i-$hostname\", \"add\": \"$domain_addr\", \"port\": \"$_pm_p\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"www.bing.com\", \"path\": \"/$uuid-vm\", \"tls\": \"\"}" | base64 -w0)"
 echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbvmpt_more() {
 for _pm_i in $(_pm_vm_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "server": "$domain_addr",
@@ -7244,7 +7328,7 @@ for _pm_i in $(_pm_vm_idx); do echo "\"${sxname}vmess-$_pm_i-$hostname\","; done
 }
 clvmpt_more() {
 for _pm_i in $(_pm_vm_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_ws$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}vmess-ws-$_pm_i-$hostname
 type: vmess
@@ -7272,7 +7356,7 @@ _pm_vmtls_idx() {
 { grep -o '"tag": "vmess-tls-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "vmess-tls-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
 }
 for _pm_i in $(_pm_vmtls_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 if [ "$pin_on" = "1" ]; then _pm_hpkp=", \"hpkp\": \"$pin_sha\""; else _pm_hpkp=""; fi
 echo "💣节点信息如下："
 _pm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-tls-$_pm_i-$hostname\", \"add\": \"$add\", \"port\": \"$_pm_p\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$sni\", \"path\": \"/$uuid-vmtls\", \"tls\": \"tls\", \"sni\": \"$sni\", \"alpn\": \"\", \"fp\": \"chrome\"$_pm_hpkp}" | base64 -w0)"
@@ -7280,7 +7364,7 @@ echo "$_pm_link" >> "$HOME/agsbx/jhsub.txt"; echo "$_pm_link"; echo
 done
 sbvmtlspt_more() {
 for _pm_i in $(_pm_vmtls_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 {
 "server": "$add",
@@ -7316,7 +7400,7 @@ for _pm_i in $(_pm_vmtls_idx); do echo "\"${sxname}vmess-ws-tls-$_pm_i-$hostname
 }
 clvmtlspt_more() {
 for _pm_i in $(_pm_vmtls_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "vm_tls$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 cat <<EOF
 - name: ${sxname}vmess-ws-tls-$_pm_i-$hostname
 type: vmess
@@ -7347,7 +7431,7 @@ _pm_so_idx() {
 { grep -o '"tag": "socks5-sb-[0-9][0-9]*"' "$HOME/agsbx/sb.json" 2>/dev/null; grep -o '"tag": "socks5-xr-[0-9][0-9]*"' "$HOME/agsbx/xr.json" 2>/dev/null;} | sed -E 's/.*-([0-9]+)"/\1/' | sort -nu
 }
 for _pm_i in $(_pm_so_idx); do
-_pm_p=$(cat "$HOME/agsbx/port_so$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
+_pm_p=$(port_get "so$_pm_i" 2>/dev/null); [ -n "$_pm_p" ] || continue
 echo "💣客户端信息如下："
 echo "请配合其他应用内置代理使用，勿做节点直接使用"
 echo "客户端地址：$server_ip"
@@ -7358,7 +7442,7 @@ echo
 done
 if grep ss-2022 "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Shadowsocks-2022 】节点信息如下："
-port_ss=$(cat "$HOME/agsbx/port_ss")
+port_ss=$(port_get "ss" 2>/dev/null)
 ss_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$port_ss" | base64 -w0)#${sxname}Shadowsocks-2022-$hostname"
 echo "$ss_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ss_link"
@@ -7401,7 +7485,7 @@ echo "- ${sxname}Shadowsocks-2022-$hostname"
 fi
 if grep vmess-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Vmess-ws 】节点信息如下："
-port_vm_ws=$(cat "$HOME/agsbx/port_vm_ws")
+port_vm_ws=$(port_get "vm_ws" 2>/dev/null)
 vm_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-$hostname\", \"add\": \"$domain_addr\", \"port\": \"$port_vm_ws\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"www.bing.com\", \"path\": \"/$uuid-vm\", \"tls\": \"\"}" | base64 -w0)"
 echo "$vm_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vm_link"
@@ -7472,7 +7556,7 @@ fi
 fi
 if grep vmess-tls-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-tls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Vmess-ws-tls 】节点信息如下："
-port_vm_tls=$(cat "$HOME/agsbx/port_vm_tls")
+port_vm_tls=$(port_get "vm_tls" 2>/dev/null)
 if [ "$pin_on" = "1" ]; then vmtls_hpkp=", \"hpkp\": \"$pin_sha\""; else vmtls_hpkp=""; fi
 vmtls_link="vmess://$(echo "{ \"v\": \"2\", \"ps\": \"${sxname}vm-ws-tls-$hostname\", \"add\": \"$add\", \"port\": \"$port_vm_tls\", \"id\": \"$uuid\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"$sni\", \"path\": \"/$uuid-vmtls\", \"tls\": \"tls\", \"sni\": \"$sni\", \"alpn\": \"\", \"fp\": \"chrome\"$vmtls_hpkp}" | base64 -w0)"
 echo "$vmtls_link" >> "$HOME/agsbx/jhsub.txt"
@@ -7539,7 +7623,7 @@ echo "- ${sxname}vmess-ws-tls-$hostname"
 fi
 if grep naive-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Naiveproxy 】节点信息如下："
-port_nv=$(cat "$HOME/agsbx/port_nv")
+port_nv=$(port_get "nv" 2>/dev/null)
 nv1_link="naive+https://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h2-$hostname"
 nv2_link="naive+quic://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?congestion_control=bbr&security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0#${sxname}naive-h3-$hostname"
 nv3_link="http2://$uuid:$uuid@$(cat "$HOME/agsbx/ym" 2>/dev/null):$port_nv?security=tls&sni=$(cat "$HOME/agsbx/ym" 2>/dev/null)&insecure=0&allowInsecure=0&padding=1&tfo=1#${sxname}naive-h2-$hostname"
@@ -7598,7 +7682,7 @@ echo "\"${sxname}naive-h2-$hostname\","
 fi
 if grep anytls-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 AnyTLS 】节点信息如下："
-port_an=$(cat "$HOME/agsbx/port_an")
+port_an=$(port_get "an" 2>/dev/null)
 an_link="anytls://$uuid@$add:$port_an?sni=$sni&insecure=$jhins&allowInsecure=$jhins#${sxname}anytls-$hostname"
 echo "$an_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$an_link"
@@ -7647,7 +7731,7 @@ echo "- ${sxname}anytls-$hostname"
 fi
 if grep anyreality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Any-Reality 】节点信息如下："
-port_ar=$(cat "$HOME/agsbx/port_ar")
+port_ar=$(port_get "ar" 2>/dev/null)
 ar_link="anytls://$uuid@$reality_addr:$port_ar?security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_s&sid=$short_id_s&type=tcp&headerType=none#${sxname}any-reality-$hostname"
 echo "$ar_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ar_link"
@@ -7688,7 +7772,7 @@ echo "💣【 Hysteria2 】节点信息如下："
 if { [ -f "$HOME/agsbx/sb.json" ] && grep -q 'hy2-sb' "$HOME/agsbx/sb.json" && ! grep -A 14 'hy2-sb' "$HOME/agsbx/sb.json" | grep -q 'agsbx/cert'; } || { [ -f "$HOME/agsbx/xr.json" ] && grep -q 'hy2-xr' "$HOME/agsbx/xr.json" && ! grep -A 20 'hy2-xr' "$HOME/agsbx/xr.json" | grep -q 'agsbx/cert'; }; then
 sha=$(cat "$HOME/agsbx/SHA256.txt")
 fi
-port_hy2=$(cat "$HOME/agsbx/port_hy2")
+port_hy2=$(port_get "hy2" 2>/dev/null)
 hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep -w "$port_hy2" | awk '{print $8}' | sed 's/dpts://; s/dpt://' | tr '\n' ',' | sed 's/,$//')
 if [ -n "$hy2_ports" ] || [ -n "$hyjpt" ]; then
 echo "Hysteria2跳跃端口已开启：$hy2_ports"
@@ -7753,7 +7837,7 @@ echo "- ${sxname}hysteria2-$hostname"
 fi
 if grep tuic5-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Tuic 】节点信息如下："
-port_tu=$(cat "$HOME/agsbx/port_tu")
+port_tu=$(port_get "tu" 2>/dev/null)
 tuic5_link="tuic://$uuid:$uuid@$add:$port_tu?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$sni&insecure=$jhins&allowInsecure=$jhins&allow_insecure=$jhins#${sxname}tuic-$hostname"
 echo "$tuic5_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$tuic5_link"
@@ -7810,7 +7894,7 @@ echo "- ${sxname}tuic5-$hostname"
 fi
 if grep socks5-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep socks5-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
 echo "💣【 Socks5 】客户端信息如下："
-port_so=$(cat "$HOME/agsbx/port_so")
+port_so=$(port_get "so" 2>/dev/null)
 echo "请配合其他应用内置代理使用，勿做节点直接使用"
 echo "客户端地址：$server_ip"
 echo "客户端端口：$port_so"
@@ -8599,7 +8683,7 @@ echo
 echo "设置Hysteria2协议的跳跃端口：$hyjpt"
 iptables -t nat -F PREROUTING >/dev/null 2>&1
 ip6tables -t nat -F PREROUTING >/dev/null 2>&1
-hyport=$(cat "$HOME/agsbx/port_hy2")
+hyport=$(port_get "hy2" 2>/dev/null)
 for port in $hyjpt; do
 iptables -t nat -A PREROUTING -p udp --dport "$port" -j DNAT --to-destination :$hyport
 ip6tables -t nat -A PREROUTING -p udp --dport "$port" -j DNAT --to-destination :$hyport

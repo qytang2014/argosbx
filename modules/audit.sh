@@ -83,8 +83,8 @@ audit_cert(){
 audit_exposed(){
   command -v ss >/dev/null 2>&1 || { _audit_warn "无 ss 命令，跳过端口暴露检查"; return 0; }
   local listening="" p="" known="" unexpected=""
-  # 已知端口：从 port_* 文件收集
-  known=$(for f in "$HOME"/agsbx/port_*; do [ -f "$f" ] && tr -d ' \t\r\n' < "$f" 2>/dev/null; echo; done | grep -E "^[0-9]+$" | sort -un | tr '\n' ' ')
+  # 已知端口：从 ports.env 收集（兼容旧的 port_* 文件）
+  known=$(if [ -f "$HOME/agsbx/ports.env" ]; then cut -d= -f2 "$HOME/agsbx/ports.env" 2>/dev/null; fi; for f in "$HOME"/agsbx/port_*; do [ -f "$f" ] && tr -d ' \t\r\n' < "$f" 2>/dev/null; echo; done | grep -E "^[0-9]+$" | sort -un | tr '\n' ' ')
   # 订阅端口
   if [ -f "$HOME/agsbx/subport.log" ]; then
     known="$known $(tr -d ' \t\r\n' < "$HOME/agsbx/subport.log" 2>/dev/null)"

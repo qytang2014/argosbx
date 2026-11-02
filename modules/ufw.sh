@@ -33,12 +33,21 @@ ufw_is_active(){
   ufw status 2>/dev/null | grep -q "Status: active"
 }
 _ufw_port(){
-  local v="$1" f="$2" p
+  local v="$1" f="$2" p key
   p="$v"
   case "$p" in ''|*[!0-9]*) p="";; esac
-  if [ -z "$p" ] && [ -n "$f" ] && [ -f "$f" ]; then
-    p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
-    case "$p" in ''|*[!0-9]*) p="";; esac
+  if [ -z "$p" ] && [ -n "$f" ]; then
+    # 新系统：从 ports.env 读取（f 是文件路径，从中提取 key）
+    key="${f##*/port_}"
+    if [ "$key" != "$f" ] && command -v port_get >/dev/null 2>&1; then
+      p=$(port_get "$key" 2>/dev/null)
+      case "$p" in ''|*[!0-9]*) p="";; esac
+    fi
+    # 旧系统兼容：直接读文件
+    if [ -z "$p" ] && [ -f "$f" ]; then
+      p=$(tr -d ' \t\r\n' < "$f" 2>/dev/null)
+      case "$p" in ''|*[!0-9]*) p="";; esac
+    fi
   fi
   if [ -n "$p" ] && [ "$p" -ge 1 ] 2>/dev/null && [ "$p" -le 65535 ] 2>/dev/null; then
     echo "$p"

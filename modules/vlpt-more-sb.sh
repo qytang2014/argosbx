@@ -1,4 +1,11 @@
 # vlpt more instances on Sing-box (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
 # Same vlpt_more list as the Xray block, instances 2, 3, ... in order
 # (always starting at 2; vlpt2 is gone), sharing vlpt's
 # uuid and Sing-box Reality keypair (sbk), with their own port and
@@ -27,11 +34,11 @@ while :; do
   case "$_vlpt_more_rest" in *,*) _vlpt_more_p="${_vlpt_more_rest%%,*}"; _vlpt_more_rest="${_vlpt_more_rest#*,}";; *) _vlpt_more_p="$_vlpt_more_rest"; _vlpt_more_rest="__DONE__";; esac
   _vlpt_more_p=$(printf '%s' "$_vlpt_more_p" | xargs 2>/dev/null || printf '%s' "$_vlpt_more_p")
   case "$_vlpt_more_p" in ''|random)
-    if [ -s "$HOME/agsbx/port_vl_re$_vlpt_more_idx" ]; then _vlpt_more_p=$(cat "$HOME/agsbx/port_vl_re$_vlpt_more_idx"); else _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
+    _vlpt_more_p=$(port_get "vl_re$_vlpt_more_idx" 2>/dev/null); if [ -z "$_vlpt_more_p" ]; then _vlpt_more_p=$(shuf -i 10000-65535 -n 1); fi
     case "$_vlpt_more_p" in ''|*[!0-9]*) echo "vlpt 更多实例随机端口失败，已跳过第 $_vlpt_more_idx 个实例"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
     ;;
   *[!0-9]*) echo "vlpt 更多实例端口格式错误，已跳过：$_vlpt_more_p"; _vlpt_more_idx=$((_vlpt_more_idx + 1)); [ "$_vlpt_more_rest" = "__DONE__" ] && break || continue;; esac
-  echo "$_vlpt_more_p" > "$HOME/agsbx/port_vl_re$_vlpt_more_idx"
+  port_set "vl_re$_vlpt_more_idx" "$_vlpt_more_p"
   echo "Vless-tcp-reality-v${_vlpt_more_idx}端口（Sing-box）：$_vlpt_more_p"
   cat >> "$HOME/agsbx/sb.json" <<EOF
     {

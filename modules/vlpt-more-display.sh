@@ -1,4 +1,15 @@
 # vlpt more instances display (private module, loop).
+# fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
+if ! command -v port_set >/dev/null 2>&1; then
+port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
+fi
+# fallback: 如果 port_get 未定义（孤立测试时），用 cat
+if ! command -v port_get >/dev/null 2>&1; then
+port_get(){ local key="$1"; cat "$HOME/agsbx/port_$key" 2>/dev/null; }
+fi
 # Instance numbers come from the inbound tags actually present in
 # xr.json / sb.json (reality-vision-N, vl-reality-sb-N, N >= 2), never
 # from port files alone, so a stale port file from a removed instance
