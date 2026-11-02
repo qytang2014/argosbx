@@ -6,11 +6,13 @@
 # the vhost to serve the camouflage blog.
 
 # ensure_web_server: called when ym is non-empty and camouflage is active.
+# Web server choice follows detect_certsrc(): caddy path -> ensure Caddy,
+# acme path (low memory) -> install nginx.
 # Returns 0 if 443 has a listener (or was successfully set up), 1 otherwise.
 ensure_web_server(){
-  local ym_c="$1"
+  local ym_c="$1" src=""
   [ -n "$ym_c" ] || return 0
-  # 443 已有监听？（Caddy、nginx 或其他）
+  # 443 已有监听？（Caddy、nginx 或其他）直接返回
   if command -v ss >/dev/null 2>&1; then
     if ss -tlnp 2>/dev/null | grep -qE ':443\s'; then
       return 0
@@ -20,12 +22,35 @@ ensure_web_server(){
       return 0
     fi
   fi
-  # Caddy 可用？（用户可能手动装了）
-  if command -v caddy >/dev/null 2>&1; then
-    # Caddy 已安装但未监听 443，尝试启动（write_caddyfile 已写好配置）
+  # 按内存决策装哪个（跟 certsrc 的 auto 逻辑一致：低内存->acme->nginx，否则->caddy）
+  # 注意：不用 detect_certsrc，因为它在 Caddy 未安装时会被误判为 acme
+  local mem_kb=""
+  mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
+  # 显式指定 certsrc 时优先
+  if [ "${certsrc:-}" = "caddy" ]; then
+    src="caddy"
+  elif [ "${certsrc:-}" = "acme" ]; then
+    src="acme"
+  elif [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then
+    src="acme"
+  else
+    src="caddy"
+  fi
+  if [ "$src" = "caddy" ]; then
+    # Caddy 路径：确保 Caddy 可用（证书阶段会写 Caddyfile 并启动）
+    if ! command -v caddy >/dev/null 2>&1; then
+      echo "证书来源为 Caddy，但未安装，正在下载..."
+      if command -v ensure_caddy_download >/dev/null 2>&1; then
+        ensure_caddy_download || { echo "Caddy 下载失败"; return 1; }
+      else
+        echo "ensure_caddy_download 不可用，跳过"
+        return 1
+      fi
+    fi
     return 0
   fi
-  # nginx 可用？若已安装但未监听，尝试配置并启动
+  # acme 路径（低内存）：用 nginx
+  # nginx 已安装？写 vhost 并返回
   if command -v nginx >/dev/null 2>&1; then
     _webserver_write_nginx_conf "$ym_c" || true
     return 0
