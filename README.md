@@ -40,6 +40,10 @@
 
 **逗号多实例**：任一协议端口支持逗号列表，如 `vlpt="10001,10002,"` 表示实例1用10001、实例2随机。空项=随机端口。
 
+**自有域名 Reality 伪装**：`ym=你的域名` 自动让 Reality SNI 跟随，探测回落到本机 443 的伪装博客（16 个人设随机，8 篇实写中文技术文章）。`certmode=webroot` 支持 nginx 占 80 端口时申请证书。
+
+**HTTPS 订阅**：`sub=1` + `ym` 域名，订阅走 `https://域名/<token>/clmi.yaml`，自动合并到系统 Caddy（不抢 443）。
+
 **备份恢复**：`agsbx backup --webdav` 加密备份到 WebDAV，`agsbx restore --webdav` 恢复（uuid/密钥/证书重生成）。详见 `agsbx backup --help`。
 
 **自检与审计**：`agsbx check` 检查进程/端口/证书/DNS/订阅/防火墙；`agsbx audit` 检查 SSH/防火墙/证书有效期/端口暴露。

@@ -28,7 +28,8 @@ for old, name in dups:
         continue
     assert old not in t, f"duplicate direct call: {name}"
 # after ins: post_start + on_complete, then straight to the sub block
-assert 'ins\nrun_hook post_start\nrun_hook on_complete\nif [ -n "$sub" ]; then' in t, \
+# (ym also triggers sub block since 2026-11-01: ym auto-enables subscription)
+assert 'ins\nrun_hook post_start\nrun_hook on_complete\nif [ -n "$sub" ] || [ -n "$ym" ]; then' in t, \
     "post-ins hook sequence wrong"
 # del branch: on_uninstall, then cleandel directly
 assert 'run_hook on_uninstall\ncleandel\n' in t, "del hook sequence wrong"

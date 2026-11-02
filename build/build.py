@@ -734,6 +734,12 @@ fi
     # exit before ins and are unaffected) ---
     t = replace(t, 'ins\nvars_save\nif [ -n "$sub" ]; then',
                 'ins\nrun_hook post_start\nrun_hook on_complete\nif [ -n "$sub" ]; then', "ufw-sync-call", 1)
+    # --- ym auto-enables subscription (https by default, no need for sub=1) ---
+    t = replace(t, 'if [ -n "$sub" ]; then\nsubtokenipsub(){',
+                'if [ -n "$sub" ] || [ -n "$ym" ]; then\nsubtokenipsub(){', "ym-autosub", 1)
+    # --- nodes.txt symlink (single-node links alias) ---
+    t = replace(t, '$HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/jhsub.txt',
+                '$HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/jhsub.txt\nln -sf $HOME/agsbx/jhsub.txt $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/nodes.txt', "nodes-symlink", 1)
     t = replace(t, 'if [ ! -f "$HOME/agsbx/SHA256.txt" ]; then',
                 'cert_migrate_paths\nif [ ! -f "$HOME/agsbx/SHA256.txt" ]; then', "selfsigned-migrate-call", 1)
     t = replace(t, 'command -v openssl >/dev/null 2>&1 && openssl ecparam -genkey -name prime256v1 -out "$HOME/agsbx/private.key"',
