@@ -18,6 +18,7 @@
 # generator already converts egress textareas to ';' separated lines),
 # and are written with %q so special characters survive a round trip.
 vars_merge(){
+  local line _vn
   case "$1" in add|rep) ;; *) return 0;; esac
   if [ ! -s "$HOME/agsbx/vars.env" ]; then
     if [ "$1" = "add" ]; then
@@ -28,17 +29,17 @@ vars_merge(){
   fi
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue;; esac
-    name="${line%%=*}"
-    case "$name" in *[!A-Za-z0-9_]*|'') continue;; esac
+    _vn="${line%%=*}"
+    case "$_vn" in *[!A-Za-z0-9_]*|'') continue;; esac
     # vlpt2 / vlpt_more removed: an old vars.env that still lists them
     # must not resurrect them into a merge (they are cleared anyway in
     # vlpt-comma.sh, but skipping here keeps add from re-saving them).
-    case "$name" in vlpt2|vlpt_more) continue;; esac
+    case "$_vn" in vlpt2|vlpt_more) continue;; esac
     # rep: 只继承非协议变量，协议变量保持重置语义（显式写了哪些就装哪些）
     if [ "$1" = "rep" ]; then
-      case "$name" in vlpt|vmpt|vmtls|vwpt|hypt|tupt|xhpt|vxpt|anpt|arpt|sspt|sopt|nvpt|xupt|xcpt|*_more) continue;; esac
+      case "$_vn" in vlpt|vmpt|vmtls|vwpt|hypt|tupt|xhpt|vxpt|anpt|arpt|sspt|sopt|nvpt|xupt|xcpt|*_more) continue;; esac
     fi
-    if [ -z "${!name+x}" ]; then eval "$line"; fi
+    if [ -z "${!_vn+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
   if [ "$1" = "rep" ]; then return 0; fi
   for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do

@@ -23,13 +23,14 @@
 # merged egress_nodes, so the next start without egress_add keeps the
 # appended nodes exactly once.
 container_vars_merge(){
+  local line _vn
   [ -n "$BASH_VERSION" ] || return 0
   [ -s "$HOME/agsbx/container_vars.env" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue;; esac
-    name="${line%%=*}"
-    case "$name" in *[!A-Za-z0-9_]*|'') continue;; esac
-    if [ -z "${!name+x}" ]; then eval "$line"; fi
+    _vn="${line%%=*}"
+    case "$_vn" in *[!A-Za-z0-9_]*|'') continue;; esac
+    if [ -z "${!_vn+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/container_vars.env"
 }
 container_vars_save(){
