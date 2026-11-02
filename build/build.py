@@ -426,6 +426,8 @@ def main():
     subhttps_mod = read("modules/sub-https.sh")
     backup_mod = read("modules/backup.sh")
     check_mod = read("modules/check.sh")
+    help_mod = read("modules/help.sh")
+    audit_mod = read("modules/audit.sh")
     hook_mod = read("modules/hook.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
@@ -487,6 +489,12 @@ def main():
     # --- check module (top level, functions only; subcommand) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      check_mod, "check-module-anchor")
+    # --- help module (top level, functions only; subcommand) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     help_mod, "help-module-anchor")
+    # --- audit module (top level, functions only; subcommand) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     audit_mod, "audit-module-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
@@ -787,6 +795,12 @@ fi
     # restore: on AGSBX_RESTORE_READY=1 clear args and fall through to install flow.
     t = replace(t, 'if [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then',
                 'if [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "check" ]; then\nagsbx_check\nexit\nfi\nif [ "$1" = "backup" ]; then\nshift\nagsbx_backup "$@"\nexit\nfi\nif [ "$1" = "restore" ]; then\nAGSBX_RESTORE_READY=0\nshift\nagsbx_restore "$@"\nrc=$?\nif [ "$rc" -ne 0 ] || [ "$AGSBX_RESTORE_READY" != "1" ]; then exit $rc; fi\nset --\nfi\nif [ "$1" = "del" ]; then', "backup-check-dispatch", 1)
+    # --- help subcommand ---
+    t = replace(t, 'agsbx_check\nexit\nfi',
+                'agsbx_check\nexit\nfi\nif [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then\nagsbx_help\nexit\nfi', "help-dispatch", 1)
+    # --- audit subcommand ---
+    t = replace(t, 'agsbx_help\nexit\nfi',
+                'agsbx_help\nexit\nfi\nif [ "$1" = "audit" ]; then\nagsbx_audit\nexit\nfi', "audit-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
                 'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$xcp\" = yes ]',
@@ -1032,11 +1046,14 @@ def build_container():
     container_cert = read("modules/container-cert.sh")
     container_vars = read("modules/container-vars.sh")
     container_ufw = read("modules/container-ufw.sh")
+    container_comma = read("modules/container-comma.sh")
     domain_addr = read("modules/reality-addr.sh")
     c = replace(c, "export LANG=en_US.UTF-8\n", "export LANG=en_US.UTF-8\n" + container_vars + "container_vars_merge\n", "container-vars-module", 1)
     # --- container host-ufw prompt (function only; called after
     # container_vars_save in ins, when all node ports are known) ---
     c = insert_after(c, "container_vars_merge\n", container_ufw, "container-ufw-module")
+    # --- container comma multi-instance parsing ---
+    c = insert_after(c, "container_vars_merge\n", container_comma, "container-comma-module")
     c = replace(c, 'echo "甬哥Github项目 ：github.com/yonggekkk"\necho "甬哥Blogger博客 ：ygkkk.blogspot.com"\necho "甬哥YouTube频道 ：www.youtube.com/@ygkkk"', 'echo "项目地址：github.com/qytang2014/argosbx"', "container-banner-project-url", 1)
     c = replace(c, 'echo "Argosbx脚本项目地址：https://github.com/yonggekkk/argosbx"',
                 'echo "Argosbx脚本项目地址：https://github.com/qytang2014/argosbx"', "container-project-link", 1)

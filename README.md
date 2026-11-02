@@ -33,3 +33,19 @@
 苹果IOS客户端：小火箭Shadowrocket、Onexray、Sing-bos MT、Clash mi
 
 注：个别协议仅支持某些客户端
+
+#### 9、vincent 修改版新增功能
+
+**动态出口（egress）**：`egress_nodes` 配置落地节点（socks/vless/trojan/hy2/tuic/anytls/naive，`;` 分隔），`egress_rules` 按域名/IP/geo 分流，`egress_bind` 绑定出口 IP。Xray 与 sing-box 双内核自动适配。
+
+**逗号多实例**：任一协议端口支持逗号列表，如 `vlpt="10001,10002,"` 表示实例1用10001、实例2随机。空项=随机端口。
+
+**自有域名 Reality 伪装**：`ym=你的域名` 自动让 Reality SNI 跟随，探测回落到本机 443 的伪装博客（16 个人设随机，8 篇实写中文技术文章）。`certmode=webroot` 支持 nginx 占 80 端口时申请证书。
+
+**HTTPS 订阅**：`sub=1` + `ym` 域名，订阅走 `https://域名/<token>/clmi.yaml`，自动合并到系统 Caddy（不抢 443）。
+
+**备份恢复**：`agsbx backup --webdav` 加密备份到 WebDAV，`agsbx restore --webdav` 恢复（uuid/密钥/证书重生成）。详见 `agsbx backup --help`。
+
+**自检与审计**：`agsbx check` 检查进程/端口/证书/DNS/订阅/防火墙；`agsbx audit` 检查 SSH/防火墙/证书有效期/端口暴露。
+
+**防火墙**：支持 ufw/firewalld 自动放行代理端口，从不开关你的防火墙。`agsbx fwsync` 手动同步，`agsbx fwstatus` 查看状态。
