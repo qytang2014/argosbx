@@ -1148,7 +1148,8 @@ CAMOUFLAGE_TPL_EOF
 # Background: ym enables Reality camouflage with fallback to 127.0.0.1:443.
 # If neither Caddy nor nginx listens on 443, the camouflage is broken.
 # This module auto-installs nginx (lightweight, suitable for low-memory
-# machines where the user chose acme.sh to avoid Caddy).
+# machines where the user chose acme.sh to avoid Caddy) AND configures
+# the vhost to serve the camouflage blog.
 
 # ensure_web_server: called when ym is non-empty and camouflage is active.
 # Returns 0 if 443 has a listener (or was successfully set up), 1 otherwise.
@@ -1170,8 +1171,9 @@ ensure_web_server(){
     # Caddy 已安装但未监听 443，尝试启动（write_caddyfile 已写好配置）
     return 0
   fi
-  # nginx 可用？
+  # nginx 可用？若已安装但未监听，尝试配置并启动
   if command -v nginx >/dev/null 2>&1; then
+    _webserver_write_nginx_conf "$ym_c" || true
     return 0
   fi
   # 都没有，尝试自动安装 nginx（轻量）
@@ -1187,12 +1189,67 @@ ensure_web_server(){
     return 1
   fi
   if command -v nginx >/dev/null 2>&1; then
-    echo "nginx 安装成功"
+    echo "nginx 安装成功，正在配置 vhost..."
+    _webserver_write_nginx_conf "$ym_c" || true
     return 0
   else
     echo "nginx 自动安装失败。请手动安装 nginx 或 Caddy，否则 443 伪装不生效。"
     return 1
   fi
+}
+
+# _webserver_write_nginx_conf <ym>: 写 nginx vhost，root 指向 webroot（伪装博客目录）
+_webserver_write_nginx_conf(){
+  local ym_c="$1" _webroot="" _conf="" _cert="" _key=""
+  [ -n "$ym_c" ] || return 1
+  _webroot="${webroot:-/var/www/html}"
+  _cert="$HOME/agsbx/cert/cert.crt"
+  _key="$HOME/agsbx/cert/private.key"
+  # 证书不存在？用自签占位（nginx 需要 cert 才能起 443）
+  if [ ! -s "$_cert" ] || [ ! -s "$_key" ]; then
+    echo "警告：$ym_c 的证书尚未就绪，nginx 443 暂用自签占位，证书就绪后需重载"
+    _cert="$HOME/agsbx/selfsigned/cert.crt"
+    _key="$HOME/agsbx/selfsigned/private.key"
+    [ -s "$_cert" ] || return 1
+  fi
+  # 确定 conf 位置
+  if [ -d /etc/nginx/conf.d ]; then
+    _conf="/etc/nginx/conf.d/argosbx.conf"
+  elif [ -d /etc/nginx/sites-enabled ]; then
+    _conf="/etc/nginx/sites-enabled/argosbx"
+  else
+    echo "未找到 nginx conf 目录，跳过自动配置"
+    return 1
+  fi
+  {
+    echo "# argosbx auto-generated for $ym_c (camouflage blog)"
+    echo "server {"
+    echo "  listen 80;"
+    echo "  server_name $ym_c;"
+    echo "  location ^~ /.well-known/acme-challenge/ { root $_webroot; }"
+    echo "  location / { return 301 https://\$host\$request_uri; }"
+    echo "}"
+    echo "server {"
+    echo "  listen 443 ssl;"
+    echo "  server_name $ym_c;"
+    echo "  ssl_certificate $_cert;"
+    echo "  ssl_certificate_key $_key;"
+    echo "  root $_webroot;"
+    echo "  index index.html;"
+    # 订阅路径（https-manual 模式用）
+    if [ -n "${token:-}" ]; then
+      echo "  location ^~ /$token/ { root $HOME/websbx; }"
+    fi
+    echo "}"
+  } > "$_conf" 2>/dev/null || { echo "写 nginx 配置失败：$_conf"; return 1; }
+  nginx -t 2>/dev/null || { echo "nginx 配置测试失败，请检查 $_conf"; return 1; }
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
+  else
+    nginx -s reload 2>/dev/null || nginx 2>/dev/null || true
+  fi
+  echo "nginx vhost 已配置：$_conf（root=$_webroot）"
+  return 0
 }
 # ports.sh: consolidated port storage in $HOME/agsbx/ports.env
 # Replaces the old per-protocol port_* files (port_vl_re, port_xh, ...).
