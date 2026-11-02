@@ -1183,16 +1183,8 @@ ensure_web_server(){
     src="caddy"
   fi
   if [ "$src" = "caddy" ]; then
-    # Caddy 路径：确保 Caddy 可用（证书阶段会写 Caddyfile 并启动）
-    if ! command -v caddy >/dev/null 2>&1; then
-      echo "证书来源为 Caddy，但未安装，正在下载..."
-      if command -v ensure_caddy_download >/dev/null 2>&1; then
-        ensure_caddy_download || { echo "Caddy 下载失败"; return 1; }
-      else
-        echo "ensure_caddy_download 不可用，跳过"
-        return 1
-      fi
-    fi
+    # Caddy 路径：证书阶段会调用 ensure_caddy_download 并写 Caddyfile，
+    # 这里只需确认走 Caddy 路径，不提前下载（避免函数定义顺序问题）
     return 0
   fi
   # acme 路径（低内存）：用 nginx
