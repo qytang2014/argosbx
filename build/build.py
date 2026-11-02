@@ -428,6 +428,7 @@ def main():
     check_mod = read("modules/check.sh")
     help_mod = read("modules/help.sh")
     audit_mod = read("modules/audit.sh")
+    repinherit_mod = read("modules/rep-inherit.sh")
     hook_mod = read("modules/hook.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
@@ -495,6 +496,9 @@ def main():
     # --- audit module (top level, functions only; subcommand) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      audit_mod, "audit-module-anchor")
+    # --- rep-inherit module (rep without protocols inherits from vars.env) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     repinherit_mod, "rep-inherit-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
