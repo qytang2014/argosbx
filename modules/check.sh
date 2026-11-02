@@ -178,7 +178,7 @@ check_subscription(){
   mode=$(tr -d ' \t\r\n' < "$HOME/agsbx/subhttps.mode" 2>/dev/null)
   [ -n "$mode" ] || { _check_warn "未启用订阅"; return 0; }
   case "$mode" in
-    https|https-merged)
+    https|https-merged|https-manual)
       ym_c=$(tr -d ' \t\r\n' < "$HOME/agsbx/ym" 2>/dev/null)
       token=$(tr -d ' \t\r\n' < "$HOME/agsbx/subtoken.log" 2>/dev/null)
       if [ -z "$ym_c" ] || [ -z "$token" ]; then

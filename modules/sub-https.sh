@@ -102,14 +102,21 @@ subhttps_caddy_running(){
   return 0
 }
 subhttps_decide_mode(){
-  local token="" ym_c=""
+  local token="" ym_c="" code="" oldmode=""
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   if [ -z "$token" ]; then echo "http-ip"; return; fi
   if [ -z "$ym_c" ]; then echo "http-ip"; return; fi
   if ! subhttps_cert_ok "$ym_c"; then echo "http-domain"; return; fi
-  # 自动合并模式不新增进程（系统 Caddy 已在运行）：内存门不拦截，可合并时直接走 https
+  # 自动合并模式优先（系统 Caddy 已在运行）：内存门不拦截，可合并时直接走 https
   if subhttps_merge_eligible "$ym_c"; then echo "https"; return; fi
+  # 用户已手动在自有 Web 服务器上配好 https 订阅：仅当上次已是 http-domain（自动方式已试过失败）
+  # 时才做回环检测，避免干扰正常的自动流程和测试 mock
+  oldmode=$(subhttps_read "$HOME/agsbx/subhttps.mode")
+  if [ "$oldmode" = "http-domain" ]; then
+    code=$(curl -sk --noproxy '*' --max-time 8 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+    if [ "$code" = "200" ]; then echo "https-manual"; return; fi
+  fi
   if ! subhttps_mem_ok && ! subhttps_https_active; then echo "http-domain"; return; fi
   if ! command -v caddy >/dev/null 2>&1 && ! subhttps_https_active; then echo "http-domain"; return; fi
   echo "https"
@@ -519,6 +526,14 @@ sub_https_sync(){
   if [ -z "$token" ]; then return 0; fi
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   mode=$(subhttps_decide_mode)
+  if [ "$mode" = "https-manual" ]; then
+    # 用户已在自有 Web 服务器（nginx/Caddy）上手动配好 https 订阅，回环验证通过
+    subhttps_stop_websbx
+    subhttps_cron_install
+    echo "https-manual" > "$HOME/agsbx/subhttps.mode" 2>/dev/null || true
+    echo "订阅已切换为 https 域名订阅（自有 Web 服务器手动配置）：https://$ym_c/$token/"
+    return 0
+  fi
   if [ "$mode" = "https" ]; then
     # certsrc=caddy（证书流程写过系统 Caddyfile）：直接把订阅配置合并进去，
     # 不再判断 443 被 Caddy 还是 Nginx 占用
@@ -575,10 +590,14 @@ sub_https_display(){
   subip=$(subhttps_read "$HOME/agsbx/server_ip.log")
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   if [ -z "$token" ]; then return 0; fi
-  case "$mode" in https|https-merged) [ -n "$ym_c" ] && https_ok=1;; esac
+  case "$mode" in https|https-merged|https-manual) [ -n "$ym_c" ] && https_ok=1;; esac
   if [ "$https_ok" = "1" ]; then
     if [ "$mode" = "https" ]; then
       subhttps_caddy_running || https_ok=0
+    elif [ "$mode" = "https-manual" ]; then
+      # 手动模式：回环验证一次，不通过则降级
+      _code=$(curl -sk --noproxy '*' --max-time 8 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+      [ "$_code" = "200" ] || https_ok=0
     else
       subhttps_merge_serving "$ym_c" || https_ok=0
     fi
