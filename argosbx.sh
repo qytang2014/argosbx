@@ -3806,6 +3806,9 @@ fi
 if [ -n "$name" ]; then
 sxname=$name-
 echo "$sxname" > "$HOME/agsbx/name"
+else
+rm -f "$HOME/agsbx/name" 2>/dev/null || true
+sxname=""
 echo
 echo "所有节点名称前缀：$name"
 fi

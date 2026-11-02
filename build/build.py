@@ -1048,6 +1048,10 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
                 "hostname=${hostname:-$(uname -a | awk '{print $2}')}", "hostname-override", 1)
+    # name 为空时清理残留的 ~/agsbx/name，避免旧前缀残留
+    _name_old = 'if [ -n "$name" ]; then' + chr(10) + 'sxname=$name-' + chr(10) + 'echo "$sxname" > "$HOME/agsbx/name"'
+    _name_new = _name_old + chr(10) + 'else' + chr(10) + 'rm -f "$HOME/agsbx/name" 2>/dev/null || true' + chr(10) + 'sxname=""'
+    t = replace(t, _name_old, _name_new, "name-stale-cleanup", 1)
     t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
     t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
     t = replace(t, '"server": "${ym_vl_re}"', '"server": "${ym_vl_fb:-$ym_vl_re}"', "reality-fb-handshake", 4)
