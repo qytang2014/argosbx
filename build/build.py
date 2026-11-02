@@ -424,6 +424,8 @@ def main():
     vars_mod = read("modules/vars.sh")
     ufw_mod = read("modules/ufw.sh")
     subhttps_mod = read("modules/sub-https.sh")
+    backup_mod = read("modules/backup.sh")
+    check_mod = read("modules/check.sh")
     hook_mod = read("modules/hook.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
@@ -479,6 +481,12 @@ def main():
     # so first installs get the right mode, not the previous one) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      subhttps_mod, "subhttps-module-anchor")
+    # --- backup/restore module (top level, functions only; subcommands) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     backup_mod, "backup-module-anchor")
+    # --- check module (top level, functions only; subcommand) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     check_mod, "check-module-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
@@ -764,7 +772,7 @@ fi
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
     # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
     t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
-                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync) ;; *)', "top-case-exclusion", 1)
+                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore) ;; *)', "top-case-exclusion", 1)
     # --- certwatch/certrestart subcommands + del cleanup ---
     t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
                 'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
@@ -772,11 +780,17 @@ fi
     # the state file and port files still exist when cleanup runs) ---
     t = replace(t, 'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
                 'if [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "ufwsync-dispatch", 1)
-    # --- subhttpsync subcommand (reboot cron) + del cleanup ---
     t = replace(t, 'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel',
                 'if [ "$1" = "ufwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwsync" ]; then\nfw_apply_saved\nexit\nfi\nif [ "$1" = "fwstatus" ]; then\nfw_status\nexit\nfi\nif [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "subhttpsync-dispatch", 1)
+    # --- backup/restore/check subcommands ---
+    # backup/restore take extra args: shift $1 off so "$@" is the subcommand args.
+    # restore: on AGSBX_RESTORE_READY=1 clear args and fall through to install flow.
+    t = replace(t, 'if [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "del" ]; then',
+                'if [ "$1" = "subhttpsync" ]; then\nsub_https_sync\nexit\nfi\nif [ "$1" = "check" ]; then\nagsbx_check\nexit\nfi\nif [ "$1" = "backup" ]; then\nshift\nagsbx_backup "$@"\nexit\nfi\nif [ "$1" = "restore" ]; then\nAGSBX_RESTORE_READY=0\nshift\nagsbx_restore "$@"\nrc=$?\nif [ "$rc" -ne 0 ] || [ "$AGSBX_RESTORE_READY" != "1" ]; then exit $rc; fi\nset --\nfi\nif [ "$1" = "del" ]; then', "backup-check-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
                 'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
+    t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$xcp\" = yes ]',
+                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\nrun_hook pre_xrsbout\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',

@@ -46,5 +46,7 @@ bash tests/test_pin_vmtls.sh
 bash tests/test_ufw.sh
 bash tests/test_firewall.sh
 bash tests/test_sub_https.sh
+bash tests/test_backup.sh
+bash tests/test_check.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"
