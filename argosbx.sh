@@ -33,25 +33,30 @@ run_hook(){
 # Incremental update state (private module).
 # vars.env records the full variable set of the last successful install/rep,
 # one shell-escaped assignment per line, chmod 600. It is NOT a substitute
-# for sh.txt (which is display only); it is the merge source for `add`.
-# vars_merge: only for `add`, called at the very top of the script, before
+# for sh.txt (which is display only); it is the merge source for `add` and `rep`.
+# vars_merge: for `add` and `rep`, called at the very top of the script, before
 # the sh.txt save loop and before protocol selection, so the merged set is
 # what gets saved and what gets installed. It loads vars.env only for
 # variables NOT already set on the command line, so explicit values win
-# and unset values inherit. It fails (exit 1) if vars.env is missing or
-# the merged set selects no protocol, because proceeding would silently
-# drop the old installation. Deleting a protocol is NOT done via `add`
-# (unset means inherit); use `rep` for a full reset, as before.
+# and unset values inherit. For `add` it inherits everything (protocol +
+# non-protocol); for `rep` it inherits only non-protocol variables, keeping
+# the reset semantics for protocols (explicitly listed protocols are the new
+# set). To clear a non-protocol variable on rep, set it empty explicitly
+# (e.g. egress_rules=); unset means inherit. Deleting a protocol is done
+# via `rep` by simply not listing it, as before.
 # vars_save: called after ins() in the main install flow only, so a failed
 # install never overwrites the last good state, and list/upx/ups/res/del
 # (which exit before ins) never touch it. Values are single-line (the
 # generator already converts egress textareas to ';' separated lines),
 # and are written with %q so special characters survive a round trip.
 vars_merge(){
-  if [ "$1" != "add" ]; then return 0; fi
+  case "$1" in add|rep) ;; *) return 0;; esac
   if [ ! -s "$HOME/agsbx/vars.env" ]; then
-    echo "增量更新失败：未找到上次安装的变量记录 $HOME/agsbx/vars.env，请先用完整命令安装，或用 rep 全量重置"
-    exit 1
+    if [ "$1" = "add" ]; then
+      echo "增量更新失败：未找到上次安装的变量记录 $HOME/agsbx/vars.env，请先用完整命令安装，或用 rep 全量重置"
+      exit 1
+    fi
+    return 0
   fi
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue;; esac
@@ -61,8 +66,13 @@ vars_merge(){
     # must not resurrect them into a merge (they are cleared anyway in
     # vlpt-comma.sh, but skipping here keeps add from re-saving them).
     case "$name" in vlpt2|vlpt_more) continue;; esac
+    # rep: 只继承非协议变量，协议变量保持重置语义（显式写了哪些就装哪些）
+    if [ "$1" = "rep" ]; then
+      case "$name" in vlpt|vmpt|vmtls|vwpt|hypt|tupt|xhpt|vxpt|anpt|arpt|sspt|sopt|nvpt|xupt|xcpt|*_more) continue;; esac
+    fi
     if [ -z "${!name+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
+  if [ "$1" = "rep" ]; then return 0; fi
   for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
   done
