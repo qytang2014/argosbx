@@ -2555,7 +2555,6 @@ sub_https_display(){
     echo "Clash/Mihomo https 域名订阅地址：https://$ym_c/$token/clmi.yaml"
     echo "Sing-box https 域名订阅地址：https://$ym_c/$token/sbox.json"
     echo "聚合协议 https 域名订阅地址：https://$ym_c/$token/jhsub.txt"
-    echo "单节点链接 https 地址：https://$ym_c/$token/nodes.txt"
     echo "**********************************************************"
     return 0
   fi
@@ -8538,7 +8537,6 @@ mkdir -p $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"
 ln -sf $HOME/agsbx/clmi.yaml $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/clmi.yaml
 ln -sf $HOME/agsbx/sbox.json $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/sbox.json
 ln -sf $HOME/agsbx/jhsub.txt $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/jhsub.txt
-ln -sf $HOME/agsbx/jhsub.txt $HOME/websbx/"$(cat $HOME/agsbx/subtoken.log 2>/dev/null)"/nodes.txt
 if command -v apk >/dev/null 2>&1; then
 busybox-extras httpd -f -p "$(cat $HOME/agsbx/subport.log 2>/dev/null)" -h $HOME/websbx > /dev/null 2>&1 &
 else

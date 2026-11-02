@@ -591,7 +591,6 @@ sub_https_display(){
     echo "Clash/Mihomo https 域名订阅地址：https://$ym_c/$token/clmi.yaml"
     echo "Sing-box https 域名订阅地址：https://$ym_c/$token/sbox.json"
     echo "聚合协议 https 域名订阅地址：https://$ym_c/$token/jhsub.txt"
-    echo "单节点链接 https 地址：https://$ym_c/$token/nodes.txt"
     echo "**********************************************************"
     return 0
   fi
