@@ -45,9 +45,15 @@ if [ -n "$ym" ]; then
     fi
     if command -v caddy >/dev/null 2>&1; then
       if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
-        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用系统服务启动 Caddy，脚本仍会继续等待证书"
+        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+          echo "Caddy 未在运行，尝试启动..."
+          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
+        }
       else
-        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用 $caddyfile_path 启动 Caddy，脚本仍会继续等待证书"
+        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+          echo "Caddy 未在运行，尝试启动..."
+          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
+        }
       fi
     else
       echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"

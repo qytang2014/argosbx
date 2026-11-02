@@ -3492,10 +3492,16 @@ write_caddyfile(){
       deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
     fi
   fi
-  if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
+  # ACME email (set via caddy_email; optional, only for expiry notices)
+  if [ -n "${caddy_email:-}" ]; then
+    printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
   else
-    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
+    : > "$conf_file"
+  fi
+  if [ "$certmode_selected" = "dns" ]; then
+    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
+  else
+    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
   fi
   chmod 644 "$conf_file" 2>/dev/null || true
   caddyfile_path="$conf_file"
@@ -8738,9 +8744,15 @@ if [ -n "$ym" ]; then
     fi
     if command -v caddy >/dev/null 2>&1; then
       if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
-        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用系统服务启动 Caddy，脚本仍会继续等待证书"
+        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+          echo "Caddy 未在运行，尝试启动..."
+          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
+        }
       else
-        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 未在运行或重载失败，请用 $caddyfile_path 启动 Caddy，脚本仍会继续等待证书"
+        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+          echo "Caddy 未在运行，尝试启动..."
+          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
+        }
       fi
     else
       echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"

@@ -87,10 +87,16 @@ write_caddyfile(){
       deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
     fi
   fi
-  if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
+  # ACME email (set via caddy_email; optional, only for expiry notices)
+  if [ -n "${caddy_email:-}" ]; then
+    printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
   else
-    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" > "$conf_file"
+    : > "$conf_file"
+  fi
+  if [ "$certmode_selected" = "dns" ]; then
+    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
+  else
+    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
   fi
   chmod 644 "$conf_file" 2>/dev/null || true
   caddyfile_path="$conf_file"
