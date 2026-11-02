@@ -543,6 +543,7 @@ sub_https_sync(){
     if subhttps_merge_eligible "$ym_c"; then
       if subhttps_merge_system_caddy "$ym_c"; then
         subhttps_stop_websbx
+        subhttps_stop_caddy
         subhttps_cron_install
         subhttps_manage_443 "https"
         subhttps_manage_subport "https"
