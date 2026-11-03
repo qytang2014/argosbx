@@ -1048,6 +1048,11 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
                 "hostname=${hostname:-$(uname -a | awk '{print $2}')}", "hostname-override", 1)
+    # 移除 iptables-persistent：它与 ufw 冲突会导致 ufw 被卸载，且脚本并不依赖它
+    # （持久化走 ~/agsbx/ufw.rules + fwsync，netfilter-persistent save 只是清理时的 best-effort）
+    t = replace(t, "printf 'iptables-persistent iptables-persistent/autosave_v4 boolean true\\niptables-persistent iptables-persistent/autosave_v6 boolean true\\n' | debconf-set-selections\n", "", "no-iptables-persistent-debconf", 1)
+    t = replace(t, "apt install -y busybox coreutils util-linux iptables iptables-persistent cron openssl",
+                "apt install -y busybox coreutils util-linux iptables cron openssl", "no-iptables-persistent", 1)
     # name 为空时清理残留的 ~/agsbx/name，避免旧前缀残留
     _name_old = 'if [ -n "$name" ]; then' + chr(10) + 'sxname=$name-' + chr(10) + 'echo "$sxname" > "$HOME/agsbx/name"'
     _name_new = _name_old + chr(10) + 'else' + chr(10) + 'rm -f "$HOME/agsbx/name" 2>/dev/null || true' + chr(10) + 'sxname=""'
