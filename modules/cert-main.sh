@@ -30,8 +30,12 @@ if [ -n "$ym" ]; then
     fi
   else
     if [ "$certmode_selected" = "dns" ] && [ -z "$CLOUDFLARE_API_TOKEN" ] && [ -z "$CF_API_TOKEN" ]; then
+      # 尝试交互提示输入（非交互则跳过）
+      prompt_cf_token 2>/dev/null || true
+    fi
+    if [ "$certmode_selected" = "dns" ] && [ -z "$CLOUDFLARE_API_TOKEN" ] && [ -z "$CF_API_TOKEN" ]; then
       if [ "$certmode" = "dns" ]; then
-        echo "已选 DNS 验证但未检测到 CLOUDFLARE_API_TOKEN 环境变量，仍按 DNS 写配置，Caddy 启动前请先设置该变量，否则等待超时后回落自签"
+        echo "已选 DNS 验证但未检测到 CLOUDFLARE_API_TOKEN（已尝试提示输入），仍按 DNS 写配置，Caddy 启动前请先设置该变量，否则等待超时后回落自签"
       else
         echo "自动判断为已代理、应走 DNS 验证，但未检测到 CLOUDFLARE_API_TOKEN 环境变量，回落 HTTP 验证试一次"
         certmode_selected="http"

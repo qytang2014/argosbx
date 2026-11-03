@@ -59,6 +59,38 @@ detect_certmode(){
 }
 # write_caddyfile：按验证方式写 Caddyfile。优先写系统位置 /etc/caddy/argosbx.caddyfile，并让主配置 import 它（先备份主配置，已有 import 行则不重复加）；无 root / /etc/caddy 不可写时回落到 $HOME/agsbx/Caddyfile（单个文件，不另建目录）。
 # 本函数只写配置，不安装 Caddy；是否启动/重载由调用方尽力尝试，失败不中断后续等待与回落。生成路径保存在全局变量 caddyfile_path 和 $HOME/agsbx/caddyfile_path。
+# prompt_cf_token：DNS 验证需要 Cloudflare API Token。已设置则直接用；
+# 未设置且是交互终端则提示输入（不回显），存到 $HOME/agsbx/cf_token.env（600）并 export。
+# 返回 0 表示有 token 可用，1 表示没有。
+prompt_cf_token(){
+  if [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]; then return 0; fi
+  # 尝试从保存的文件恢复
+  if [ -f "$HOME/agsbx/cf_token.env" ]; then
+    # shellcheck disable=SC1090
+    . "$HOME/agsbx/cf_token.env" 2>/dev/null
+    if [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]; then return 0; fi
+  fi
+  # 非交互终端无法提示
+  if [ ! -t 0 ] && [ ! -r /dev/tty ]; then return 1; fi
+  printf "请输入 Cloudflare API Token（输入时不显示，DNS 验证需要）: " > /dev/tty 2>/dev/null || printf "请输入 Cloudflare API Token（输入时不显示，DNS 验证需要）: "
+  local _cft=""
+  if [ -r /dev/tty ]; then
+    read -s _cft < /dev/tty
+    echo > /dev/tty 2>/dev/null || echo
+  else
+    read -s _cft
+    echo
+  fi
+  if [ -n "$_cft" ]; then
+    export CLOUDFLARE_API_TOKEN="$_cft"
+    mkdir -p "$HOME/agsbx" 2>/dev/null || true
+    printf 'export CLOUDFLARE_API_TOKEN=%q\n' "$_cft" > "$HOME/agsbx/cf_token.env" 2>/dev/null || true
+    chmod 600 "$HOME/agsbx/cf_token.env" 2>/dev/null || true
+  fi
+  unset _cft
+  [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]
+}
+
 write_caddyfile(){
   local conf_file=""
   caddyfile_path=""
@@ -147,7 +179,7 @@ ensure_caddy_download(){
   if command -v systemctl >/dev/null 2>&1; then
     if ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
       echo "创建 Caddy systemd 服务..."
-      cat > /etc/systemd/system/caddy.service << 'EOF'
+      cat > /etc/systemd/system/caddy.service << EOF
 [Unit]
 Description=Caddy
 Documentation=https://caddyserver.com/docs/
@@ -157,6 +189,7 @@ Requires=network-online.target
 [Service]
 Type=notify
 User=root
+EnvironmentFile=-$HOME/agsbx/cf_token.env
 Group=root
 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
