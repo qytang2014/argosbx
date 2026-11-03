@@ -6501,6 +6501,8 @@ echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | x
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
+if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi
+if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 "source ~/.bashrc" 或重新登录后再试"; fi
 grep -qxF 'source ~/.bashrc' ~/.bash_profile 2>/dev/null || echo 'source ~/.bashrc' >> ~/.bash_profile
 . ~/.bashrc 2>/dev/null
 crontab -l > /tmp/crontab.tmp 2>/dev/null
@@ -8531,6 +8533,7 @@ sed -i '/websbx/d' /tmp/crontab.tmp
 crontab /tmp/crontab.tmp >/dev/null 2>&1
 rm /tmp/crontab.tmp
 rm -rf  "$HOME/bin/agsbx"
+rm -f /usr/local/bin/agsbx 2>/dev/null || true
 if pidof systemd >/dev/null 2>&1; then
 for svc in xr sb argo; do
 systemctl stop "$svc" >/dev/null 2>&1

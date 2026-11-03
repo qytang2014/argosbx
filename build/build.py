@@ -1048,6 +1048,18 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
                 "hostname=${hostname:-$(uname -a | awk '{print $2}')}", "hostname-override", 1)
+    # 卸载时删除 /usr/local/bin/agsbx 软链
+    t = replace(t, 'rm -rf  "$HOME/bin/agsbx"',
+                'rm -rf  "$HOME/bin/agsbx"\nrm -f /usr/local/bin/agsbx 2>/dev/null || true', "del-symlink", 1)
+    # agsbx 立即可用：root 时建 /usr/local/bin 软链
+    t = insert_after(t, 'echo \'export PATH="$HOME/bin:$PATH"\' >> "$HOME/.bashrc"\n',
+                     'if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi\n',
+                     "agsbx-symlink")
+    # 安装后提示：如果 agsbx 不在 PATH，提示 source
+    t = insert_after(t, 'if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi\n',
+                     'if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 \"source ~/.bashrc\" 或重新登录后再试"; fi\n',
+                     "agsbx-path-hint")
+
     # 移除 iptables-persistent：它与 ufw 冲突会导致 ufw 被卸载，且脚本并不依赖它
     # （持久化走 ~/agsbx/ufw.rules + fwsync，netfilter-persistent save 只是清理时的 best-effort）
     t = replace(t, "printf 'iptables-persistent iptables-persistent/autosave_v4 boolean true\\niptables-persistent iptables-persistent/autosave_v6 boolean true\\n' | debconf-set-selections\n", "", "no-iptables-persistent-debconf", 1)
