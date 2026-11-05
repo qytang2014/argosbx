@@ -270,6 +270,9 @@ def build_index():
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
                 "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname'];", "index-optids", 1)
+    # warp 修复（2026-11-04）：生成器"默认本地IP"选项 value 从 "" 改 "no"，否则空值进 WARP 分支
+    h = replace(h, '<option value="">默认 服务器本地IP出站</option>',
+                '<option value="no">默认 服务器本地IP出站</option>', "warp-default-no", 1)
     h = replace(h, '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>',
                 '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>\n        <div class="row"><label>节点名称后缀 <span class="pill">hostname</span></label><input id="hostname" type="text" placeholder="留空则用系统 hostname"/></div>', "index-hostname-field", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
@@ -469,6 +472,13 @@ def main():
     # recovery line, and vars_save list all gain vmtls, following vmpt.
     t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
                 "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do", "vmtls-top-list", 1)
+    # warp 逻辑修复（2026-11-04）：空值不再走 WARP；加显式 off/no/direct；WARP 检测改 WireGuard
+    t = replace(t, '""|sx|xs) s1outtag=warp-out;',
+                'sx|xs) s1outtag=warp-out;', "warp-no-empty", 1)
+    t = replace(t, "xs6|s6x) s1outtag=warp-out; s2outtag=direct; x1outtag=warp-out; x2outtag=warp-out; xip='\"::/0\", \"0.0.0.0/0\"'; sip='\"::/0\"'; wap=warp ;;\n* ) s1outtag=direct;",
+                "xs6|s6x) s1outtag=warp-out; s2outtag=direct; x1outtag=warp-out; x2outtag=warp-out; xip='\"::/0\", \"0.0.0.0/0\"'; sip='\"::/0\"'; wap=warp ;;\noff|no|direct) s1outtag=direct; s2outtag=direct; x1outtag=direct; x2outtag=direct; xip='\"::/0\", \"0.0.0.0/0\"'; sip='\"::/0\", \"0.0.0.0/0\"'; wap=warpargo ;;\n* ) s1outtag=direct;", "warp-off-branch", 1)
+    t = replace(t, "if echo \"$v6\" | grep -q '^2a09' || echo \"$v4\" | grep -q '^104.28'; then",
+                "if (command -v wg >/dev/null 2>&1 && wg show interfaces 2>/dev/null | grep -qi warp) || [ -f /etc/wireguard/warp.conf ] || ip link show 2>/dev/null | grep -qi warp; then", "warp-detect-wg", 1)
     t = replace(t, '[ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }',
                 '[ -z "${vmpt+x}" ] || { vmp=yes; vmag=yes; }\n[ -z "${vmtls+x}" ] || vmt=yes', "vmtls-flag", 1)
     t = replace(t, '[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]',
