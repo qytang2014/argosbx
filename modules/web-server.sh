@@ -41,7 +41,39 @@ ensure_web_server(){
     # 这里只需确认走 Caddy 路径，不提前下载（避免函数定义顺序问题）
     return 0
   fi
-  # acme 路径（低内存）：用 nginx
+  # acme 路径（低内存）：优先调用 nginx_proxy.sh 进行环境初始化与站点/反代发布
+  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
+  ensure_proxy_script "nginx_proxy.sh" || true
+  if [ -x "$nginx_proxy_bin" ]; then
+    local force_flag=""
+    force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
+    "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+
+    _webroot="${webroot:-/var/www/html}"
+    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+      if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+        deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+      fi
+    fi
+
+    # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
+    local proxy_target="${web_proxy:-}"
+
+    if [ -n "$proxy_target" ]; then
+      "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
+    else
+      "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
+    fi
+
+    if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
+      mkdir -p "$CERT_DIR" 2>/dev/null || true
+      cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
+      cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
+      chmod 600 "$CERT_KEY" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
   # nginx 已安装？写 vhost 并返回
   if command -v nginx >/dev/null 2>&1; then
     _webserver_write_nginx_conf "$ym_c" || true

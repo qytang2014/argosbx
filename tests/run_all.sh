@@ -19,6 +19,7 @@ bash tests/test_hook_once.sh
 bash tests/test_egress.sh
 bash tests/test_egress_v2.sh
 bash tests/test_cert.sh
+bash tests/test_proxy_scripts.sh
 bash tests/test_cert_migrate.sh
 bash tests/test_vars.sh
 bash tests/test_sap.sh

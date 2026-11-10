@@ -84,7 +84,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc caddy_email vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz hostname sub subid subpt; do
+  for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc caddy_email web_proxy vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz hostname sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -1188,7 +1188,39 @@ ensure_web_server(){
     # 这里只需确认走 Caddy 路径，不提前下载（避免函数定义顺序问题）
     return 0
   fi
-  # acme 路径（低内存）：用 nginx
+  # acme 路径（低内存）：优先调用 nginx_proxy.sh 进行环境初始化与站点/反代发布
+  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
+  ensure_proxy_script "nginx_proxy.sh" || true
+  if [ -x "$nginx_proxy_bin" ]; then
+    local force_flag=""
+    force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
+    "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+
+    _webroot="${webroot:-/var/www/html}"
+    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+      if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+        deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+      fi
+    fi
+
+    # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
+    local proxy_target="${web_proxy:-}"
+
+    if [ -n "$proxy_target" ]; then
+      "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
+    else
+      "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
+    fi
+
+    if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
+      mkdir -p "$CERT_DIR" 2>/dev/null || true
+      cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
+      cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
+      chmod 600 "$CERT_KEY" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
   # nginx 已安装？写 vhost 并返回
   if command -v nginx >/dev/null 2>&1; then
     _webserver_write_nginx_conf "$ym_c" || true
@@ -3298,7 +3330,7 @@ command -v register_hook >/dev/null 2>&1 && {
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -3436,6 +3468,101 @@ cert_migrate_paths(){
     cp "$HOME/argosbx/Caddyfile" "$HOME/agsbx/Caddyfile" 2>/dev/null || true
   fi
 }
+
+# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
+ensure_local_bin_in_path(){
+  local target_dir="$HOME/.local/bin"
+  mkdir -p "$target_dir" 2>/dev/null || true
+  case ":$PATH:" in
+    *":$target_dir:"*) ;;
+    *)
+      export PATH="$target_dir:$PATH"
+      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+      fi
+      ;;
+  esac
+}
+
+# get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0
+get_latest_github_vps_tag(){
+  local repo="qytang2014/software"
+  local fallback="vps-v1.0.0"
+  local latest=""
+  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
+  if [ -n "$latest" ]; then
+    echo "$latest"
+  else
+    echo "$fallback"
+  fi
+}
+
+# ensure_proxy_script：自动保障 caddy_proxy.sh / nginx_proxy.sh 存在于 $HOME/.local/bin
+ensure_proxy_script(){
+  local script_name="$1"
+  [ -n "$script_name" ] || return 1
+  ensure_local_bin_in_path
+  local target_path="$HOME/.local/bin/$script_name"
+  if [ -s "$target_path" ] && [ -x "$target_path" ]; then
+    return 0
+  fi
+
+  local repo="qytang2014/software"
+  local tag="${VPS_TAG:-$(get_latest_github_vps_tag)}"
+  local raw_url="https://github.com/${repo}/releases/download/${tag}/${script_name}"
+  local mirror_url="https://ghproxy.net/${raw_url}"
+
+  echo "正在拉取 $script_name (Release: $tag)..."
+  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+  if ! curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$target_path" 2>/dev/null; then
+    echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
+    if ! curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$target_path" 2>/dev/null; then
+      echo "下载 $script_name 失败，请检查网络"
+      rm -f "$target_path"
+      return 1
+    fi
+  fi
+  chmod +x "$target_path" 2>/dev/null || true
+  return 0
+}
+
+# check_and_prompt_force_email：检测是否已有旧全局邮箱，如有且不同，在交互模式下警告并询问用户是否全局覆盖（默认 n）
+check_and_prompt_force_email(){
+  local script_cmd="$1"
+  local new_email="$2"
+  [ -z "$new_email" ] && return 0
+  [ -x "$script_cmd" ] || command -v "$script_cmd" >/dev/null 2>&1 || return 0
+
+  local old_email=""
+  old_email=$("$script_cmd" get-email 2>/dev/null | tr -d ' \r\n')
+  if [ -n "$old_email" ] && [ "$old_email" != "$new_email" ]; then
+    echo "------------------------------------------------------------" >&2
+    echo "⚠️  【告警提示】检测到 Web 服务已配置全局 ACME 邮箱: [$old_email]" >&2
+    echo "⚠️  注意: 替换该邮箱将进行【全局替换】，影响此服务器上所有的站点证书！" >&2
+    echo "------------------------------------------------------------" >&2
+
+    local replace_email="n"
+    if [ -t 0 ] || [ "${FORCE_INTERACTIVE:-0}" = "1" ]; then
+      printf "是否确认将全局邮箱替换为 [%s]? [y/N] (默认 n): " "$new_email" >&2
+      read -r replace_email || replace_email="n"
+    else
+      echo "非交互环境，默认保持现有全局邮箱 [$old_email]，不覆盖。" >&2
+    fi
+
+    case "$replace_email" in
+      [yY]|[yY][eE][sS])
+        echo "--force-email"
+        return 0
+        ;;
+      *)
+        echo "保持现有全局邮箱 [$old_email]。" >&2
+        return 0
+        ;;
+    esac
+  fi
+  return 0
+}
+
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
@@ -8807,24 +8934,53 @@ if [ -n "$ym" ]; then
     fi
     echo "$certmode_selected" > "$HOME/agsbx/certmode"
     echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
-    write_caddyfile
-    if ! command -v caddy >/dev/null 2>&1; then
-      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-    fi
-    if command -v caddy >/dev/null 2>&1; then
-      if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
-        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-          echo "Caddy 未在运行，尝试启动..."
-          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
-        }
-      else
-        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-          echo "Caddy 未在运行，尝试启动..."
-          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
-        }
+    local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+    ensure_proxy_script "caddy_proxy.sh" || true
+    if [ -x "$caddy_proxy_bin" ]; then
+      local force_flag=""
+      force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$caddy_email")
+      "$caddy_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+
+      _webroot="${webroot:-/var/www/html}"
+      if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+        if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+          deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+        fi
       fi
+
+      local dns_arg=""
+      [ "$certmode_selected" = "dns" ] && dns_arg="--dns cloudflare"
+
+      # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
+      local proxy_target="${web_proxy:-}"
+
+      if [ -n "$proxy_target" ]; then
+        "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
+      else
+        "$caddy_proxy_bin" site --domain "$ym" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
+      fi
+      caddyfile_path="/etc/caddy/Caddyfile"
+      echo "$caddyfile_path" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
     else
-      echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
+      write_caddyfile
+      if ! command -v caddy >/dev/null 2>&1; then
+        ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
+      fi
+      if command -v caddy >/dev/null 2>&1; then
+        if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
+          systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+            echo "Caddy 未在运行，尝试启动..."
+            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
+          }
+        else
+          caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+            echo "Caddy 未在运行，尝试启动..."
+            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
+          }
+        fi
+      else
+        echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
+      fi
     fi
   fi
   if wait_domain_cert; then
