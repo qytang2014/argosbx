@@ -24,3 +24,7 @@
         <div class="row"><label>ACME 邮箱 <span class="pill">caddy_email</span></label>
           <input id="caddy_email" placeholder="可选，用于 Let's Encrypt 过期提醒">
         </div>
+        <div class="row"><label>反代后端 <span class="pill">web_proxy</span></label>
+          <input id="web_proxy" type="text" placeholder="留空则直接读文件；填 127.0.0.1:端口 反代到本地服务（如 Docker）"/>
+          <div class="field-note">填了就反代到指定后端（如 Docker 里的网站），不填则 Caddy/Nginx 直接读 webroot 的静态文件。</div>
+        </div>

@@ -5,65 +5,6 @@
 # machines where the user chose acme.sh to avoid Caddy) AND configures
 # the vhost to serve the camouflage blog.
 
-# ensure_web_proxy_backend: 启动本机 127.0.0.1 伪装站服务，自动分配未占用随机端口
-# 供 Caddy / Nginx 反代调用，无需外部 UFW 放行，无需用户在页面填写
-ensure_web_proxy_backend(){
-  local webroot="${1:-/var/www/html}"
-  mkdir -p "$webroot" 2>/dev/null || true
-  if [ ! -f "$webroot/index.html" ]; then
-    echo "<h1>Welcome</h1>" > "$webroot/index.html" 2>/dev/null || true
-  fi
-
-  local port=""
-  if command -v port_resolve >/dev/null 2>&1; then
-    port=$(port_resolve "webproxy" "")
-  fi
-  if [ -z "$port" ] || case "$port" in *[!0-9]*) true;; *) false;; esac; then
-    local candidate
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      candidate=$(shuf -i 10000-65535 -n 1 2>/dev/null || echo "$(( (RANDOM % 55535) + 10000 ))")
-      if ! ss -tln 2>/dev/null | grep -qE ":${candidate}\s" && ! netstat -tln 2>/dev/null | grep -qE ":${candidate}\s"; then
-        port="$candidate"
-        break
-      fi
-    done
-    port="${port:-18088}"
-    if command -v port_set >/dev/null 2>&1; then
-      port_set "webproxy" "$port"
-    fi
-  fi
-
-  local is_listening=0
-  if command -v ss >/dev/null 2>&1; then
-    ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:${port}\s" && is_listening=1
-  elif command -v netstat >/dev/null 2>&1; then
-    netstat -tln 2>/dev/null | grep -qE "127\.0\.0\.1:${port}\s" && is_listening=1
-  fi
-
-  if [ "$is_listening" -eq 0 ]; then
-    if command -v busybox >/dev/null 2>&1; then
-      busybox httpd -p "127.0.0.1:${port}" -h "$webroot" >/dev/null 2>&1 || \
-      busybox httpd -f -p "127.0.0.1:${port}" -h "$webroot" >/dev/null 2>&1 &
-    elif command -v busybox-extras >/dev/null 2>&1; then
-      busybox-extras httpd -p "127.0.0.1:${port}" -h "$webroot" >/dev/null 2>&1 || \
-      busybox-extras httpd -f -p "127.0.0.1:${port}" -h "$webroot" >/dev/null 2>&1 &
-    elif command -v python3 >/dev/null 2>&1; then
-      nohup python3 -m http.server "$port" --bind 127.0.0.1 --directory "$webroot" >/dev/null 2>&1 &
-    fi
-
-    if command -v crontab >/dev/null 2>&1; then
-      local crontmp
-      crontmp=$(mktemp 2>/dev/null || echo "/tmp/crontab.webproxy.$$")
-      crontab -l 2>/dev/null | grep -v "webproxy" > "$crontmp" || true
-      echo '@reboot sleep 8 && /bin/bash -c "if command -v busybox >/dev/null 2>&1; then busybox httpd -p 127.0.0.1:'"$port"' -h '"$webroot"' >/dev/null 2>&1; elif command -v python3 >/dev/null 2>&1; then nohup python3 -m http.server '"$port"' --bind 127.0.0.1 --directory '"$webroot"' >/dev/null 2>&1 &; fi" # webproxy' >> "$crontmp"
-      crontab "$crontmp" 2>/dev/null || true
-      rm -f "$crontmp"
-    fi
-  fi
-
-  echo "127.0.0.1:${port}"
-}
-
 # ensure_web_server: called when ym is non-empty and camouflage is active.
 # Web server choice follows detect_certsrc(): caddy path -> ensure Caddy,
 # acme path (low memory) -> install nginx.
@@ -115,11 +56,8 @@ ensure_web_server(){
       fi
     fi
 
-    # 自动生成 127.0.0.1 未占用随机端口作为反代后端，无需页面手动填写，亦无需 UFW 放行
+    # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
     local proxy_target="${web_proxy:-}"
-    if [ -z "$proxy_target" ]; then
-      proxy_target=$(ensure_web_proxy_backend "$_webroot")
-    fi
 
     if [ -n "$proxy_target" ]; then
       "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true

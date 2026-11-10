@@ -60,11 +60,8 @@ if [ -n "$ym" ]; then
       local dns_arg=""
       [ "$certmode_selected" = "dns" ] && dns_arg="--dns cloudflare"
 
-      # 自动生成 127.0.0.1 未占用随机端口作为反代后端，无需页面手动填写，亦无需 UFW 放行
+      # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
       local proxy_target="${web_proxy:-}"
-      if [ -z "$proxy_target" ]; then
-        proxy_target=$(ensure_web_proxy_backend "$_webroot")
-      fi
 
       if [ -n "$proxy_target" ]; then
         "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true

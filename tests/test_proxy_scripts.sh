@@ -8,7 +8,7 @@ trap 'rm -rf "$TMP"' EXIT
 python3 - "$ROOT/argosbx.sh" "$TMP" << 'PY'
 import re, sys
 t = open(sys.argv[1]).read()
-helpers = ["ensure_local_bin_in_path", "get_latest_github_vps_tag", "ensure_proxy_script", "check_and_prompt_force_email", "ensure_web_proxy_backend"]
+helpers = ["ensure_local_bin_in_path", "get_latest_github_vps_tag", "ensure_proxy_script", "check_and_prompt_force_email"]
 for h in helpers:
     m = re.search(rf"{h}\(\)\{{.*?\n\}}\n", t, re.S)
     assert m, f"Helper {h} not found"
@@ -73,17 +73,5 @@ source "$TMP/ensure_proxy_script.sh"
 source "$TMP/get_latest_github_vps_tag.sh"
 ensure_proxy_script "mock_proxy.sh" || { echo "FAIL: existing mock_proxy should return 0"; exit 1; }
 echo "ensure_proxy_script existing OK"
-
-# Test 4: ensure_web_proxy_backend
-export HOME="$TMP/home3"
-mkdir -p "$HOME/agsbx"
-# Mock port_resolve and port_set
-port_resolve(){ echo "34567"; }
-port_set(){ :; }
-source "$TMP/ensure_web_proxy_backend.sh"
-target=$(ensure_web_proxy_backend "$TMP/fake_webroot")
-[ "$target" = "127.0.0.1:34567" ] || { echo "FAIL: ensure_web_proxy_backend expected 127.0.0.1:34567, got '$target'"; exit 1; }
-[ -f "$TMP/fake_webroot/index.html" ] || { echo "FAIL: index.html was not generated in fake_webroot"; exit 1; }
-echo "ensure_web_proxy_backend OK"
 
 echo "PASS: proxy scripts integration"
