@@ -525,7 +525,7 @@ def main():
                      build_camouflage(), "camouflage-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
+                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
     # --- vmess-ws-tls inbound (main): insert xrsbvmtls after xrsbvm ---
     vmtls_mod = read("modules/vmtls.sh")
     t = replace(t, "xrsbso(){\nif [ -n \"$sop\" ]; then",
@@ -537,8 +537,8 @@ def main():
     if n != 3:
         print(f"BUILD FAIL: vmtls-call: expected 3 occurrence(s), found {n}", file=sys.stderr); sys.exit(1)
     t = t.replace("xrsbvm\nxrsbso", "xrsbvm\nxrsbvmtls\nxrsbso")
-    t = replace(t, 'export alns=\\"${alns}\\" ',
-                'export alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" vlpt_kernel=\\"${vlpt_kernel}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
+    t = replace(t, 'export agqc=\\"${agqc}\\" alns=\\"${alns}\\" ',
+                'export agqc=\\"${agqc}\\" alns=\\"${alns}\\" ym=\\"${ym}\\" certmode=\\"${certmode}\\" certsrc=\\"${certsrc}\\" vlpt_kernel=\\"${vlpt_kernel}\\" egress_nodes=\\"${egress_nodes}\\" egress_bind=\\"${egress_bind}\\" egress_rules=\\"${egress_rules}\\" ', "recovery-line", 1)
 
     # --- vlpt dual-support (private): vlpt_kernel=auto/xray/sb ---
     # vlpt_on is computed at the top of ins(), before the kernel branches:
@@ -1157,6 +1157,9 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
         _m += 1
     if 'argoport=$(cat "$HOME/agsbx/port_vw" 2>/dev/null)' in t:
         t = t.replace('argoport=$(cat "$HOME/agsbx/port_vw" 2>/dev/null)', 'argoport=$(port_get "vw" 2>/dev/null)')
+        _m += 1
+    if 'argoport=$(cat "$HOME/agsbx/port_vx" 2>/dev/null)' in t:
+        t = t.replace('argoport=$(cat "$HOME/agsbx/port_vx" 2>/dev/null)', 'argoport=$(port_get "vx" 2>/dev/null)')
         _m += 1
     # hyport
     if 'hyport=$(cat "$HOME/agsbx/port_hy2")' in t:
