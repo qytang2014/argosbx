@@ -43,24 +43,56 @@ if [ -n "$ym" ]; then
     fi
     echo "$certmode_selected" > "$HOME/agsbx/certmode"
     echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
-    write_caddyfile
-    if ! command -v caddy >/dev/null 2>&1; then
-      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-    fi
-    if command -v caddy >/dev/null 2>&1; then
-      if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
-        systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-          echo "Caddy 未在运行，尝试启动..."
-          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
-        }
-      else
-        caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-          echo "Caddy 未在运行，尝试启动..."
-          caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
-        }
+    local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+    ensure_proxy_script "caddy_proxy.sh" || true
+    if [ -x "$caddy_proxy_bin" ]; then
+      local force_flag=""
+      force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$caddy_email")
+      "$caddy_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+
+      _webroot="${webroot:-/var/www/html}"
+      if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+        if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+          deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
+        fi
       fi
+
+      local dns_arg=""
+      [ "$certmode_selected" = "dns" ] && dns_arg="--dns cloudflare"
+
+      # 自动生成 127.0.0.1 未占用随机端口作为反代后端，无需页面手动填写，亦无需 UFW 放行
+      local proxy_target="${web_proxy:-}"
+      if [ -z "$proxy_target" ]; then
+        proxy_target=$(ensure_web_proxy_backend "$_webroot")
+      fi
+
+      if [ -n "$proxy_target" ]; then
+        "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
+      else
+        "$caddy_proxy_bin" site --domain "$ym" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
+      fi
+      caddyfile_path="/etc/caddy/Caddyfile"
+      echo "$caddyfile_path" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
     else
-      echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
+      write_caddyfile
+      if ! command -v caddy >/dev/null 2>&1; then
+        ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
+      fi
+      if command -v caddy >/dev/null 2>&1; then
+        if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
+          systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+            echo "Caddy 未在运行，尝试启动..."
+            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
+          }
+        else
+          caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
+            echo "Caddy 未在运行，尝试启动..."
+            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
+          }
+        fi
+      else
+        echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
+      fi
     fi
   fi
   if wait_domain_cert; then
