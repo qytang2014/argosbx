@@ -1262,11 +1262,18 @@ _webserver_write_nginx_conf(){
     _key="$HOME/agsbx/selfsigned/private.key"
     [ -s "$_cert" ] || return 1
   fi
-  # 确定 conf 位置
+  # 清理旧版残留的 argosbx 配置文件
+  rm -f /etc/nginx/conf.d/argosbx.conf /etc/nginx/sites-enabled/argosbx /etc/nginx/sites-available/argosbx 2>/dev/null || true
+
+  # 确定 conf 位置（按域名统一规范命名，与 nginx_proxy 对齐）
   if [ -d /etc/nginx/conf.d ]; then
-    _conf="/etc/nginx/conf.d/argosbx.conf"
+    _conf="/etc/nginx/conf.d/${ym_c}.conf"
+  elif [ -d /etc/nginx/sites-available ]; then
+    _conf="/etc/nginx/sites-available/${ym_c}.conf"
+    mkdir -p /etc/nginx/sites-enabled 2>/dev/null || true
+    ln -sf "$_conf" "/etc/nginx/sites-enabled/${ym_c}.conf" 2>/dev/null || true
   elif [ -d /etc/nginx/sites-enabled ]; then
-    _conf="/etc/nginx/sites-enabled/argosbx"
+    _conf="/etc/nginx/sites-enabled/${ym_c}.conf"
   else
     echo "未找到 nginx conf 目录，跳过自动配置"
     return 1
@@ -2258,7 +2265,7 @@ agsbx_restore(){
 #                     domain cert in $HOME/agsbx/cert, so no separate
 #                     subscription server is needed in this mode.
 #   mode https-merged: https 决议后独立 Caddy 绑不上 443，但 443 正被我们自己的
-#                     证书流程 Caddy（/etc/caddy/argosbx.caddyfile）占用时，把订阅
+#                     证书流程 Caddy（/etc/caddy/Caddyfile）占用时，把订阅
 #                     handle 块自动合并进系统 Caddyfile 并 reload，不新增进程。
 #   mode http-domain: ym set, but cert not ready, or memory gate
 #                     fails, or caddy missing / 443 busy. Plain HTTP
@@ -2396,13 +2403,12 @@ subhttps_write_conf(){
   return 0
 }
 # --- 自动合并到系统 Caddy ---
-# 场景：证书是 Caddy 申请的（certsrc=caddy，证书流程写过系统 Caddyfile
-# /etc/caddy/argosbx.caddyfile）。这个文件就是我们自己的配置，直接把订阅的
-# handle 块合并进去并 reload，不再判断 443 被 Caddy 还是 Nginx 占用。
+# 场景：证书是 Caddy 申请的（certsrc=caddy，写入系统 /etc/caddy/Caddyfile）。
+# 这个文件就是系统 Caddy 的主配置，直接把订阅的 handle 块合并进去并 reload。
 # 安全由结果校验兜底：插入→全量 validate→reload→回环验证 200，任何一步失败都
 # 摘除合并块恢复原文件，并回退到原来的 http-domain + 片段流程。
 # 路径用环境变量覆盖（SUBHTTPS_MERGE_SYSFILE/MAINFILE），主要给测试用。
-subhttps_merge_sysfile(){ echo "${SUBHTTPS_MERGE_SYSFILE:-/etc/caddy/argosbx.caddyfile}"; }
+subhttps_merge_sysfile(){ echo "${SUBHTTPS_MERGE_SYSFILE:-/etc/caddy/Caddyfile}"; }
 subhttps_merge_mainfile(){ echo "${SUBHTTPS_MERGE_MAINFILE:-/etc/caddy/Caddyfile}"; }
 subhttps_ensure_websbx_readable(){
   # 系统 Caddy 以 caddy 用户运行（官方包默认 User=caddy），而 HOME=/root
@@ -2427,7 +2433,9 @@ subhttps_merge_eligible(){
   local ym_c="$1" sysfile=""
   [ -n "$ym_c" ] || return 1
   sysfile=$(subhttps_merge_sysfile)
-  [ "$(subhttps_read "$HOME/agsbx/caddyfile_path")" = "$sysfile" ] || return 1
+  local cur_cf
+  cur_cf=$(subhttps_read "$HOME/agsbx/caddyfile_path")
+  [ "$cur_cf" = "$sysfile" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ] || return 1
   [ -f "$sysfile" ] || return 1
   return 0
 }
@@ -2483,7 +2491,7 @@ subhttps_merge_insert(){
   subhttps_strip_merge_block >/dev/null 2>&1 || true
   if awk -v ym="$ym_c" -v bf="$block_tmp" '
     BEGIN{ while((getline line < bf) > 0){ block = block line "\n" } }
-    !done && index($0, ym " {") == 1 { print; printf "%s", block; done=1; next }
+    !done && index($0, ym) == 1 && $NF == "{" { print; printf "%s", block; done=1; next }
     { print }
     END{ if(!done) exit 1 }
   ' "$sysfile" > "$sysfile.new" 2>/dev/null; then
@@ -2502,7 +2510,7 @@ subhttps_merge_verify(){
   [ "$code" = "200" ]
 }
 subhttps_merge_system_caddy(){
-  # 编排：已合并（token 一致）直接成功；否则插入→全量校验→reload→回环验证；
+  # 编排：已合并（token 一致）直接成功；否则优先 caddy_proxy 追加，保底插入→全量校验→reload→回环验证；
   # 失败摘除恢复并说明原因（调用方据此决定是继续试独立 Caddy 还是回退）
   local ym_c="$1" token="" sysfile=""
   [ -n "$ym_c" ] || return 1
@@ -2512,6 +2520,18 @@ subhttps_merge_system_caddy(){
   if subhttps_merge_active "$ym_c"; then return 0; fi
   # caddy 用户需能读取 $HOME/websbx，否则验证 403
   subhttps_ensure_websbx_readable
+
+  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  ensure_proxy_script "caddy_proxy.sh" || true
+  local websbx="$HOME/websbx"
+  if [ -x "$caddy_proxy_bin" ]; then
+    if "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*=${websbx}:nostrip:static" --append; then
+      if subhttps_merge_verify "$ym_c" "$token"; then
+        echo "订阅成功合并到系统 Caddy（通过 caddy_proxy）：https://$ym_c/$token/"
+        return 0
+      fi
+    fi
+  fi
   sysfile=$(subhttps_merge_sysfile)
   [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
   if ! subhttps_merge_insert "$ym_c" "$token"; then
@@ -3563,6 +3583,48 @@ check_and_prompt_force_email(){
   return 0
 }
 
+# cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
+# 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
+cert_setup_caddy_proxy(){
+  local ym="$1"
+  local certmode="$2"
+  local email="$3"
+  local webroot_dir="${4:-/var/www/html}"
+  local camouflage_flag="$5"
+  local proxy_backend="$6"
+
+  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  ensure_proxy_script "caddy_proxy.sh" || true
+  cleanup_legacy_argosbx_caddyfile 2>/dev/null || true
+
+  if [ ! -x "$caddy_proxy_bin" ]; then
+    return 1
+  fi
+
+  local force_flag=""
+  force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
+  "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
+
+  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+    fi
+  fi
+
+  local dns_arg=""
+  [ "$certmode" = "dns" ] && dns_arg="--dns cloudflare"
+
+  if [ -n "$proxy_backend" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_backend" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  else
+    "$caddy_proxy_bin" site --domain "$ym" --root "$webroot_dir" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  fi
+
+  caddyfile_path="/etc/caddy/Caddyfile"
+  echo "$caddyfile_path" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
+  return 0
+}
+
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
@@ -3628,27 +3690,34 @@ prompt_cf_token(){
   [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]
 }
 
+# cleanup_legacy_argosbx_caddyfile: 迁移并清理旧版残留的 argosbx.caddyfile 及 import 语句
+cleanup_legacy_argosbx_caddyfile(){
+  local main_caddyfile="/etc/caddy/Caddyfile"
+  local legacy_file="/etc/caddy/argosbx.caddyfile"
+  if [ -f "$main_caddyfile" ] && grep -qE '^[ \t]*import[ \t]+.*argosbx\.caddyfile' "$main_caddyfile" 2>/dev/null; then
+    sed -i.bak_legacy '/^[ \t]*import[ \t]\+.*argosbx\.caddyfile/d' "$main_caddyfile" 2>/dev/null || true
+  fi
+  if [ -f "$legacy_file" ]; then
+    mv "$legacy_file" "${legacy_file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+  fi
+}
+
 write_caddyfile(){
   local conf_file=""
   caddyfile_path=""
+  cleanup_legacy_argosbx_caddyfile
+
   if [ "$(id -u 2>/dev/null)" = "0" ]; then
     mkdir -p /etc/caddy 2>/dev/null || true
     if [ -w /etc/caddy ]; then
-      conf_file="/etc/caddy/argosbx.caddyfile"
-      if [ -f /etc/caddy/Caddyfile ]; then
-        if ! grep -q "argosbx.caddyfile" /etc/caddy/Caddyfile 2>/dev/null; then
-          cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-          printf "\nimport argosbx.caddyfile\n" >> /etc/caddy/Caddyfile
-        fi
-      else
-        printf "# argosbx: main Caddyfile (auto-generated)\n# Site config is in argosbx.caddyfile\nimport argosbx.caddyfile\n" > /etc/caddy/Caddyfile
-      fi
+      conf_file="/etc/caddy/Caddyfile"
     fi
   fi
   if [ -z "$conf_file" ]; then
     mkdir -p "$HOME/agsbx"
     conf_file="$HOME/agsbx/Caddyfile"
   fi
+
   _webroot="${webroot:-/var/www/html}"
   # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
   if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
@@ -3656,12 +3725,33 @@ write_caddyfile(){
       deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
     fi
   fi
-  # ACME email (set via caddy_email; optional, only for expiry notices)
-  if [ -n "${caddy_email:-}" ]; then
-    printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
-  else
-    : > "$conf_file"
+
+  # 若文件已存在，先移除旧有的该域名块（幂等覆盖）
+  if [ -f "$conf_file" ]; then
+    awk -v dom="$ym" '
+      BEGIN { skip = 0 }
+      $1 == dom && $NF == "{" { skip = 1; next }
+      skip && /^[ \t]*\}/ { skip = 0; next }
+      !skip { print $0 }
+    ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
   fi
+
+  # ACME email: 若文件不存在或为空，且设置了 caddy_email，初始化全局块
+  if [ ! -s "$conf_file" ]; then
+    if [ -n "${caddy_email:-}" ]; then
+      printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
+    else
+      : > "$conf_file"
+    fi
+  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[ \t]*email[ \t]+' "$conf_file"; then
+    if grep -q "^{" "$conf_file"; then
+      awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
+    else
+      printf "{\n  email %s\n}\n\n%s" "$caddy_email" "$(cat "$conf_file")" > "$conf_file"
+    fi
+  fi
+
+  # 写入站点块
   if [ "$certmode_selected" = "dns" ]; then
     printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
   else
@@ -8934,44 +9024,22 @@ if [ -n "$ym" ]; then
     fi
     echo "$certmode_selected" > "$HOME/agsbx/certmode"
     echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
-    local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
-    ensure_proxy_script "caddy_proxy.sh" || true
-    if [ -x "$caddy_proxy_bin" ]; then
-      local force_flag=""
-      force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$caddy_email")
-      "$caddy_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
-
-      _webroot="${webroot:-/var/www/html}"
-      if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
-        if command -v deploy_camouflage_blog >/dev/null 2>&1; then
-          deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
-        fi
-      fi
-
-      local dns_arg=""
-      [ "$certmode_selected" = "dns" ] && dns_arg="--dns cloudflare"
-
-      # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
-      local proxy_target="${web_proxy:-}"
-
-      if [ -n "$proxy_target" ]; then
-        "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
-      else
-        "$caddy_proxy_bin" site --domain "$ym" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || true
-      fi
-      caddyfile_path="/etc/caddy/Caddyfile"
-      echo "$caddyfile_path" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
+    _webroot="${webroot:-/var/www/html}"
+    if cert_setup_caddy_proxy "$ym" "$certmode_selected" "$caddy_email" "$_webroot" "$camouflage" "$web_proxy"; then
+      :
     else
       write_caddyfile
       if ! command -v caddy >/dev/null 2>&1; then
         ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
       fi
       if command -v caddy >/dev/null 2>&1; then
-        if [ "$caddyfile_path" = "/etc/caddy/argosbx.caddyfile" ] && command -v systemctl >/dev/null 2>&1; then
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
           systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
             echo "Caddy 未在运行，尝试启动..."
             caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
           }
+        elif command -v systemctl >/dev/null 2>&1; then
+          systemctl restart caddy >/dev/null 2>&1 || systemctl start caddy >/dev/null 2>&1 || caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || true
         else
           caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
             echo "Caddy 未在运行，尝试启动..."

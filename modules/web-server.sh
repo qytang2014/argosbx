@@ -115,11 +115,18 @@ _webserver_write_nginx_conf(){
     _key="$HOME/agsbx/selfsigned/private.key"
     [ -s "$_cert" ] || return 1
   fi
-  # 确定 conf 位置
+  # 清理旧版残留的 argosbx 配置文件
+  rm -f /etc/nginx/conf.d/argosbx.conf /etc/nginx/sites-enabled/argosbx /etc/nginx/sites-available/argosbx 2>/dev/null || true
+
+  # 确定 conf 位置（按域名统一规范命名，与 nginx_proxy 对齐）
   if [ -d /etc/nginx/conf.d ]; then
-    _conf="/etc/nginx/conf.d/argosbx.conf"
+    _conf="/etc/nginx/conf.d/${ym_c}.conf"
+  elif [ -d /etc/nginx/sites-available ]; then
+    _conf="/etc/nginx/sites-available/${ym_c}.conf"
+    mkdir -p /etc/nginx/sites-enabled 2>/dev/null || true
+    ln -sf "$_conf" "/etc/nginx/sites-enabled/${ym_c}.conf" 2>/dev/null || true
   elif [ -d /etc/nginx/sites-enabled ]; then
-    _conf="/etc/nginx/sites-enabled/argosbx"
+    _conf="/etc/nginx/sites-enabled/${ym_c}.conf"
   else
     echo "未找到 nginx conf 目录，跳过自动配置"
     return 1

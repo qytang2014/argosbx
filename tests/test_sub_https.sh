@@ -151,12 +151,18 @@ sub_https_sync >/dev/null 2>&1 || fail "restore http-domain sync failed"
 # --- caddy missing: http-domain, no start ---
 mkdir -p "$TESTHOME/no-caddy-bin"
 for b in ufw crontab ps; do cp "$MOCKBIN/$b" "$TESTHOME/no-caddy-bin/$b"; done
-export PATH="$TESTHOME/no-caddy-bin:/usr/bin:/bin"
+mkdir -p "$TESTHOME/no-caddy-bin/tools"
+for t in awk sed grep egrep cat tr cut date openssl mktemp sleep head id mkdir cp chmod; do
+  p=$(type -P "$t" 2>/dev/null)
+  [ -n "$p" ] && ln -s "$p" "$TESTHOME/no-caddy-bin/tools/$t"
+done
+export PATH="$TESTHOME/no-caddy-bin:$TESTHOME/no-caddy-bin/tools"
 export SUBHTTPS_MEM_KB=524288
 [ "$(subhttps_decide_mode)" = "http-domain" ] || fail "missing caddy should be http-domain"
 sub_https_sync >/dev/null 2>&1 || fail "missing-caddy sync failed"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "missing caddy mode should be http-domain"
 [ ! -f "$HOME/agsbx/subhttps.pid" ] || fail "missing caddy should not leave pid"
+export PATH="$MOCKBIN:/usr/bin:/bin"
 
 # --- caddy start failure: falls back to http-domain ---
 mkdir -p "$TESTHOME/fail-caddy-bin"
@@ -228,11 +234,22 @@ sub_https_sync >/dev/null 2>&1 || fail "second merge sync failed"
 # guard: 证书不是 Caddy 申请的（caddyfile_path 未指向系统 Caddyfile）→ 不合并，直接回退
 rm -f "$HOME/agsbx/caddyfile_path"
 printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
-BEFORE_SUM=$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')
+_test_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+_test_perm() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+BEFORE_SUM=$(_test_sha256 "$SUBHTTPS_MERGE_SYSFILE")
 subhttps_merge_eligible "example.test" && fail "should not be eligible without caddyfile_path"
 sub_https_sync >/dev/null 2>&1
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "should fall back to http-domain"
-[ "$(sha256sum "$SUBHTTPS_MERGE_SYSFILE" | awk '{print $1}')" = "$BEFORE_SUM" ] || fail "sysfile must not be touched"
+[ "$(_test_sha256 "$SUBHTTPS_MERGE_SYSFILE")" = "$BEFORE_SUM" ] || fail "sysfile must not be touched"
 grep -q "handle /token-123/" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should use handle"
 grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/caddy-snippet.txt" && fail "caddy snippet must not use handle_path"
 grep -q "root $HOME/websbx;" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should use root"
@@ -320,11 +337,11 @@ echo "x" > "$HOME/websbx/token-abc/clmi.yaml"
 chmod 700 "$HOME" "$HOME/websbx" "$HOME/websbx/token-abc"
 chmod 600 "$HOME/websbx/token-abc/clmi.yaml"
 subhttps_ensure_websbx_readable
-[ "$(( $(stat -c '%a' "$HOME/websbx") ))" = "755" ] || fail "websbx dir should be 755"
-[ "$(( $(stat -c '%a' "$HOME/websbx/token-abc") ))" = "755" ] || fail "token dir should be 755"
-[ "$(( $(stat -c '%a' "$HOME/websbx/token-abc/clmi.yaml") ))" = "644" ] || fail "sub file should be 644"
+[ "$(( $(_test_perm "$HOME/websbx") ))" = "755" ] || fail "websbx dir should be 755"
+[ "$(( $(_test_perm "$HOME/websbx/token-abc") ))" = "755" ] || fail "token dir should be 755"
+[ "$(( $(_test_perm "$HOME/websbx/token-abc/clmi.yaml") ))" = "644" ] || fail "sub file should be 644"
 # HOME itself must be traversable by others (o+x bit set); temp HOME is not /root
-perm=$(stat -c '%a' "$HOME"); [ "$(( 0$perm & 1 ))" = "1" ] || fail "HOME should be traversable (o+x)"
+perm=$(_test_perm "$HOME"); [ "$(( 0$perm & 1 ))" = "1" ] || fail "HOME should be traversable (o+x)"
 # missing websbx dir is a no-op, not a failure
 rm -rf "$HOME/websbx"
 subhttps_ensure_websbx_readable || fail "ensure should no-op when websbx missing"

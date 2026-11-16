@@ -121,6 +121,48 @@ check_and_prompt_force_email(){
   return 0
 }
 
+# cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
+# 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
+cert_setup_caddy_proxy(){
+  local ym="$1"
+  local certmode="$2"
+  local email="$3"
+  local webroot_dir="${4:-/var/www/html}"
+  local camouflage_flag="$5"
+  local proxy_backend="$6"
+
+  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  ensure_proxy_script "caddy_proxy.sh" || true
+  cleanup_legacy_argosbx_caddyfile 2>/dev/null || true
+
+  if [ ! -x "$caddy_proxy_bin" ]; then
+    return 1
+  fi
+
+  local force_flag=""
+  force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
+  "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
+
+  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+    fi
+  fi
+
+  local dns_arg=""
+  [ "$certmode" = "dns" ] && dns_arg="--dns cloudflare"
+
+  if [ -n "$proxy_backend" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_backend" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  else
+    "$caddy_proxy_bin" site --domain "$ym" --root "$webroot_dir" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  fi
+
+  caddyfile_path="/etc/caddy/Caddyfile"
+  echo "$caddyfile_path" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
+  return 0
+}
+
 export certmode=${certmode:-''}
 export certsrc=${certsrc:-''}
 # certsrc：证书来源，空=自动，caddy=Caddy，acme=acme.sh。
@@ -186,27 +228,34 @@ prompt_cf_token(){
   [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]
 }
 
+# cleanup_legacy_argosbx_caddyfile: 迁移并清理旧版残留的 argosbx.caddyfile 及 import 语句
+cleanup_legacy_argosbx_caddyfile(){
+  local main_caddyfile="/etc/caddy/Caddyfile"
+  local legacy_file="/etc/caddy/argosbx.caddyfile"
+  if [ -f "$main_caddyfile" ] && grep -qE '^[ \t]*import[ \t]+.*argosbx\.caddyfile' "$main_caddyfile" 2>/dev/null; then
+    sed -i.bak_legacy '/^[ \t]*import[ \t]\+.*argosbx\.caddyfile/d' "$main_caddyfile" 2>/dev/null || true
+  fi
+  if [ -f "$legacy_file" ]; then
+    mv "$legacy_file" "${legacy_file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+  fi
+}
+
 write_caddyfile(){
   local conf_file=""
   caddyfile_path=""
+  cleanup_legacy_argosbx_caddyfile
+
   if [ "$(id -u 2>/dev/null)" = "0" ]; then
     mkdir -p /etc/caddy 2>/dev/null || true
     if [ -w /etc/caddy ]; then
-      conf_file="/etc/caddy/argosbx.caddyfile"
-      if [ -f /etc/caddy/Caddyfile ]; then
-        if ! grep -q "argosbx.caddyfile" /etc/caddy/Caddyfile 2>/dev/null; then
-          cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-          printf "\nimport argosbx.caddyfile\n" >> /etc/caddy/Caddyfile
-        fi
-      else
-        printf "# argosbx: main Caddyfile (auto-generated)\n# Site config is in argosbx.caddyfile\nimport argosbx.caddyfile\n" > /etc/caddy/Caddyfile
-      fi
+      conf_file="/etc/caddy/Caddyfile"
     fi
   fi
   if [ -z "$conf_file" ]; then
     mkdir -p "$HOME/agsbx"
     conf_file="$HOME/agsbx/Caddyfile"
   fi
+
   _webroot="${webroot:-/var/www/html}"
   # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
   if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
@@ -214,12 +263,33 @@ write_caddyfile(){
       deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
     fi
   fi
-  # ACME email (set via caddy_email; optional, only for expiry notices)
-  if [ -n "${caddy_email:-}" ]; then
-    printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
-  else
-    : > "$conf_file"
+
+  # 若文件已存在，先移除旧有的该域名块（幂等覆盖）
+  if [ -f "$conf_file" ]; then
+    awk -v dom="$ym" '
+      BEGIN { skip = 0 }
+      $1 == dom && $NF == "{" { skip = 1; next }
+      skip && /^[ \t]*\}/ { skip = 0; next }
+      !skip { print $0 }
+    ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
   fi
+
+  # ACME email: 若文件不存在或为空，且设置了 caddy_email，初始化全局块
+  if [ ! -s "$conf_file" ]; then
+    if [ -n "${caddy_email:-}" ]; then
+      printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
+    else
+      : > "$conf_file"
+    fi
+  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[ \t]*email[ \t]+' "$conf_file"; then
+    if grep -q "^{" "$conf_file"; then
+      awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
+    else
+      printf "{\n  email %s\n}\n\n%s" "$caddy_email" "$(cat "$conf_file")" > "$conf_file"
+    fi
+  fi
+
+  # 写入站点块
   if [ "$certmode_selected" = "dns" ]; then
     printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
   else

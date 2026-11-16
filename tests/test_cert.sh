@@ -12,7 +12,7 @@ import re, sys
 t = open(sys.argv[1]).read()
 # cert module functions live in modules/cert.sh in source, but in the
 # built file they are inline; extract by function names.
-for name in ["detect_certsrc", "detect_certmode", "write_caddyfile", "ensure_caddy_download", "caddy_fetch_cert", "wait_domain_cert"]:
+for name in ["detect_certsrc", "detect_certmode", "cleanup_legacy_argosbx_caddyfile", "cert_setup_caddy_proxy", "write_caddyfile", "ensure_caddy_download", "caddy_fetch_cert", "wait_domain_cert"]:
     m = re.search(rf"{name}\(\)\{{.*?\n\}}\n", t, re.S)
     assert m, f"{name} not found"
     open(f"{sys.argv[2]}/{name}.sh", "w").write(m.group(0))
@@ -40,7 +40,8 @@ echo "certmode explicit/argo/default OK"
 RUN
 mkdir -p "$TMP/fakehome/agsbx"
 bash "$TMP/run_certmode.sh" "$TMP/fakehome" "$TMP/certdir"
-# write_caddyfile: system path replaced by temp dir, import added once, not duplicated
+# write_caddyfile: directly writes to main Caddyfile, no argosbx.caddyfile, idempotently updates domain block
+sed -e 's|/etc/caddy|'"$TMP"'/testetc|g' -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/cleanup_legacy_argosbx_caddyfile.sh" > "$TMP/cleanup_test.sh"
 sed -e 's|/etc/caddy|'"$TMP"'/testetc|g' -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/write_caddyfile.sh" > "$TMP/write_test.sh"
 cat > "$TMP/run_write.sh" << 'RUN'
 #!/bin/bash
@@ -48,15 +49,54 @@ export HOME="$1"
 mkdir -p "$1/agsbx" "$2/testetc"
 printf 'example.com {\n  reverse_proxy localhost:8080\n}\n' > "$2/testetc/Caddyfile"
 source "$3"
+source "$4"
 ym="test.example.com"; certmode_selected="http"; write_caddyfile
-grep -q "import argosbx.caddyfile" "$2/testetc/Caddyfile" || { echo "FAIL: import missing"; exit 1; }
-grep -q 'test.example.com' "$2/testetc/argosbx.caddyfile" || { echo "FAIL: domain missing in caddyfile"; exit 1; }
+[ ! -f "$2/testetc/argosbx.caddyfile" ] || { echo "FAIL: argosbx.caddyfile should not exist"; exit 1; }
+! grep -q "import argosbx.caddyfile" "$2/testetc/Caddyfile" || { echo "FAIL: import argosbx.caddyfile should not exist"; exit 1; }
+grep -q 'test.example.com' "$2/testetc/Caddyfile" || { echo "FAIL: domain missing in main Caddyfile"; exit 1; }
+grep -q 'example.com' "$2/testetc/Caddyfile" || { echo "FAIL: existing site missing in main Caddyfile"; exit 1; }
 ym="test.example.com"; certmode_selected="dns"; write_caddyfile
-[ "$(grep -c "import argosbx.caddyfile" "$2/testetc/Caddyfile")" = "1" ] || { echo "FAIL: import duplicated"; exit 1; }
-grep -q "dns cloudflare" "$2/testetc/argosbx.caddyfile" || { echo "FAIL: dns caddyfile missing cloudflare"; exit 1; }
-echo "write_caddyfile system/import/dns OK"
+[ "$(grep -c "test.example.com" "$2/testetc/Caddyfile")" = "1" ] || { echo "FAIL: domain block duplicated"; exit 1; }
+grep -q "dns cloudflare" "$2/testetc/Caddyfile" || { echo "FAIL: dns caddyfile missing cloudflare"; exit 1; }
+echo "write_caddyfile direct/idempotent/dns OK"
 RUN
-bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/write_test.sh"
+bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/cleanup_test.sh" "$TMP/write_test.sh"
+
+# cert_setup_caddy_proxy: returns 1 when caddy_proxy.sh missing, returns 0 and executes site/init when present
+cat > "$TMP/run_proxy_setup.sh" << 'RUN'
+#!/bin/bash
+export HOME="$1"
+mkdir -p "$1/.local/bin" "$1/agsbx"
+source "$2/certdir/cleanup_legacy_argosbx_caddyfile.sh"
+# Dummy helpers required by cert_setup_caddy_proxy
+ensure_proxy_script() { return 0; }
+check_and_prompt_force_email() { echo ""; }
+source "$2/certdir/cert_setup_caddy_proxy.sh"
+
+# Test 1: No proxy script -> returns 1
+cert_setup_caddy_proxy "test.example.com" "http" "" "/var/www/html" "0" "" && { echo "FAIL: missing proxy script should return 1"; exit 1; }
+
+# Test 2: Proxy script exists -> executes and returns 0
+cat > "$1/.local/bin/caddy_proxy.sh" << 'PROXY'
+#!/bin/bash
+echo "$@" >> "$HOME/proxy_calls.log"
+exit 0
+PROXY
+chmod +x "$1/.local/bin/caddy_proxy.sh"
+
+cert_setup_caddy_proxy "test.example.com" "http" "admin@example.com" "/var/www/html" "0" "" || { echo "FAIL: existing proxy script should return 0"; exit 1; }
+grep -q "site --domain test.example.com --root /var/www/html" "$1/proxy_calls.log" || { echo "FAIL: site call missing"; exit 1; }
+grep -q "init --email admin@example.com" "$1/proxy_calls.log" || { echo "FAIL: init call missing"; exit 1; }
+[ "$(cat "$1/agsbx/caddyfile_path")" = "/etc/caddy/Caddyfile" ] || { echo "FAIL: caddyfile_path not written"; exit 1; }
+
+echo "cert_setup_caddy_proxy OK"
+RUN
+mkdir -p "$TMP/proxyhome"
+bash "$TMP/run_proxy_setup.sh" "$TMP/proxyhome" "$TMP"
+
+# Scope safety check: modules/cert-main.sh must not contain 'local' declarations outside functions
+! grep -E '^[[:space:]]*local[[:space:]]+' "$ROOT/modules/cert-main.sh" || { echo "FAIL: cert-main.sh contains top-level local declaration"; exit 1; }
+echo "cert-main.sh scope safety OK"
 # acme.sh --issue must pin --server letsencrypt (default CA is ZeroSSL which needs EAB registration)
 [ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "3" ] || { echo "FAIL: expected 3 --issue --server letsencrypt commands"; exit 1; }
 # webroot mode: detect_certmode returns webroot, acme uses -w
