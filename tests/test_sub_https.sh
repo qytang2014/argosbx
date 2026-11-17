@@ -274,6 +274,29 @@ sub_https_stop
 grep -q "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" && fail "del stop should unmerge"
 [ ! -f "$HOME/agsbx/subhttps.mode" ] || fail "mode file should be removed on del stop"
 
+# caddy_proxy format detection without markers
+echo "https-merged" > "$HOME/agsbx/subhttps.mode"
+echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
+cat << "CADDY_PROXY_FMT" > "$SUBHTTPS_MERGE_SYSFILE"
+example.test {
+    handle /token-123* {
+        root * "/tmp/websbx"
+        file_server
+    }
+    handle {
+        root * /var/www/html
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
+CADDY_PROXY_FMT
+subhttps_merge_active "example.test" || fail "should detect caddy_proxy format handle /token*"
+OUT="$(sub_https_display)"
+echo "$OUT" | grep -q "https://example.test/token-123/clmi.yaml" || fail "caddy_proxy format display https clmi missing"
+subhttps_strip_merge_block "$SUBHTTPS_MERGE_SYSFILE" "token-123"
+grep -q "/token-123" "$SUBHTTPS_MERGE_SYSFILE" && fail "caddy_proxy handle block should be stripped by subhttps_strip_merge_block"
+grep -q "/var/www/html" "$SUBHTTPS_MERGE_SYSFILE" || fail "fallback handle should survive strip"
+
 # --- restore env for remaining phases ---
 unset SUBHTTPS_MERGE_SYSFILE SUBHTTPS_MERGE_MAINFILE
 rm -f "$HOME/agsbx/caddyfile_path"

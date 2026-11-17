@@ -340,17 +340,20 @@ cat <<EOF
 "server": "$reality_addr",
 "server_port": $_pm_p,
 "password": "$uuid",
+"idle_session_check_interval": "30s",
+"idle_session_timeout": "30s",
+"min_idle_session": 5,
 "tls": {
 "enabled": true,
 "server_name": "$ym_vl_re",
-"reality": {
-"enabled": true,
-"handshake": {
-"server": "$ym_vl_re",
-"server_port": 443
+"utls": {
+  "enabled": true,
+  "fingerprint": "chrome"
 },
-"private_key": "$private_key_s",
-"short_id": ["$short_id_s"]
+"reality": {
+  "enabled": true,
+  "public_key": "$public_key_s",
+  "short_id": "$short_id_s"
 }
 }
 },

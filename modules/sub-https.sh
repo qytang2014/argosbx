@@ -190,6 +190,14 @@ subhttps_merge_active(){
   [ -n "$ym_c" ] || return 1
   token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
   sysfile=$(subhttps_merge_sysfile)
+  [ -f "$sysfile" ] || return 1
+
+  # 优先匹配 caddy_proxy.sh 写入的标准 handle /<token>* 格式
+  if grep -qE "(handle|handle_path)[[:space:]]+/$token(\*|/)" "$sysfile" 2>/dev/null; then
+    return 0
+  fi
+
+  # 兼容旧版手写注入的独立标记
   grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
   grep -qF "handle /$token/" "$sysfile" 2>/dev/null
 }
@@ -209,12 +217,36 @@ subhttps_https_active(){
 }
 subhttps_strip_merge_block(){
   # 从系统 Caddyfile 里手术摘除合并块（保留用户其他手工修改）；摘掉了返回 0
-  local sysfile="" before="" after=""
+  local sysfile="" before="" after="" token=""
   sysfile=$(subhttps_merge_sysfile)
   [ -f "$sysfile" ] || return 1
-  grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
   before=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
-  awk '/# >>> argosbx-subscription/{skip=1} !skip{print} /# <<< argosbx-subscription/{skip=0}' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
+
+  if grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null; then
+    awk '/# >>> argosbx-subscription/{skip=1} !skip{print} /# <<< argosbx-subscription/{skip=0}' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
+  elif [ -n "$token" ] && grep -qE "(handle|handle_path)[[:space:]]+/$token" "$sysfile" 2>/dev/null; then
+    awk -v tok="$token" '
+      BEGIN { in_tok = 0; count = 0 }
+      $0 ~ "(handle|handle_path)[[:space:]]+/" tok {
+        in_tok = 1; count = 1; next
+      }
+      in_tok {
+        line = $0
+        c_open = gsub(/\{/, "{", line)
+        c_close = gsub(/\}/, "}", line)
+        count += c_open
+        count -= c_close
+        if (count == 0) {
+          in_tok = 0
+        }
+        next
+      }
+      { print $0 }
+    ' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
+  else
+    return 1
+  fi
   after=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
   [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]
 }
