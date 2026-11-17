@@ -27,7 +27,7 @@ run_case() { # $1 = case name, $2 = 1 if sb.json exists
 #!/bin/bash
 source "$TMP/egress.sh"
 export HOME="$home"
-egress_nodes='tuic://11111111-2222-3333-4444-555555555555:mypass@203.0.113.20:443?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=tuic.example.com#tuic-node;hysteria2://hy2pass@203.0.113.21:443?sni=hy2.example.com&alpn=h3#hy2-node;anytls://anypass@203.0.113.22:443?sni=any.example.com#anytls-node;naive+https://nuser:npass@203.0.113.23:443?sni=naive.example.com#naive-node;vless://22222222-2222-3333-4444-555555555555@203.0.113.24:443?encryption=none&security=tls&sni=xhttp.example.com&type=xhttp&path=/x&host=xhttp.example.com#xhttp-node'
+egress_nodes='tuic://11111111-2222-3333-4444-555555555555:mypass@203.0.113.20:443?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=tuic.example.com&allowInsecure=1#tuic-node;hysteria2://hy2pass@203.0.113.21:443?sni=hy2.example.com&alpn=h3&allow_insecure=true#hy2-node;anytls://anypass@203.0.113.22:443?sni=any.example.com&skip-cert-verify=1#anytls-node;naive+https://nuser:npass@203.0.113.23:443?sni=naive.example.com&insecure=0#naive-node;vless://22222222-2222-3333-4444-555555555555@203.0.113.24:443?encryption=none&security=tls&sni=xhttp.example.com&type=xhttp&path=/x&host=xhttp.example.com&allowInsecure=1#xhttp-node'
 egress_bind=''; egress_rules='domain:google.com=>tuic-node;domain:example.com=>hy2-node;domain:xhttp.example=>xhttp-node'
 egress_init
 printf '{"outbounds":[\n%s{"type":"direct","tag":"direct"}\n]}\n' "\$egress_sb_outbounds" > "$home/sb_out.json"
@@ -55,13 +55,22 @@ assert [o["type"] for o in sb["outbounds"] if o["tag"] == "tuic-node"] == ["tuic
 tuic = [o for o in sb["outbounds"] if o["tag"] == "tuic-node"][0]
 assert tuic["uuid"] == "11111111-2222-3333-4444-555555555555" and tuic["password"] == "mypass"
 assert tuic["tls"]["server_name"] == "tuic.example.com" and tuic["congestion_control"] == "bbr"
+assert "utls" not in tuic["tls"], tuic["tls"]
+assert tuic["tls"]["insecure"] is True, tuic["tls"]
 assert [o["type"] for o in sb["outbounds"] if o["tag"] == "hy2-node"] == ["hysteria2"]
+hy2sb = [o for o in sb["outbounds"] if o["tag"] == "hy2-node"][0]
+assert hy2sb["tls"]["insecure"] is True, hy2sb["tls"]
 assert [o["type"] for o in sb["outbounds"] if o["tag"] == "anytls-node"] == ["anytls"]
+anytls = [o for o in sb["outbounds"] if o["tag"] == "anytls-node"][0]
+assert anytls["tls"]["insecure"] is True, anytls["tls"]
 assert [o["type"] for o in sb["outbounds"] if o["tag"] == "naive-node"] == ["naive"]
+naive = [o for o in sb["outbounds"] if o["tag"] == "naive-node"][0]
+assert "insecure" not in naive["tls"], naive["tls"]
 assert [o["protocol"] for o in xr["outbounds"] if o["tag"] == "hy2-node"] == ["hysteria"], xr_tags
 hy2xr = [o for o in xr["outbounds"] if o["tag"] == "hy2-node"][0]
 assert hy2xr["settings"] == {"version": 2, "address": "203.0.113.21", "port": 443}, hy2xr["settings"]
 assert hy2xr["streamSettings"]["network"] == "hysteria"
+assert hy2xr["streamSettings"]["tlsSettings"]["allowInsecure"] is True, hy2xr["streamSettings"]
 assert hy2xr["streamSettings"]["hysteriaSettings"] == {"version": 2, "auth": "hy2pass"}, hy2xr["streamSettings"]
 assert "tuic-node" not in xr_tags and "anytls-node" not in xr_tags and "naive-node" not in xr_tags, xr_tags
 # xhttp transport: Xray-only (sing-box 1.14.4 FATALs on unknown transport xhttp)
@@ -69,6 +78,7 @@ assert [o["protocol"] for o in xr["outbounds"] if o["tag"] == "xhttp-node"] == [
 assert "xhttp-node" not in sb_tags, sb_tags
 xhttpxr = [o for o in xr["outbounds"] if o["tag"] == "xhttp-node"][0]
 assert xhttpxr["streamSettings"]["network"] == "xhttp", xhttpxr["streamSettings"]
+assert xhttpxr["streamSettings"]["tlsSettings"]["allowInsecure"] is True, xhttpxr["streamSettings"]
 sbr = [r["outbound"] for r in load("dual", "sb_rules.json")["rules"]]
 xrr = [r["outboundTag"] for r in load("dual", "xr_rules.json")["rules"]]
 assert "tuic-node" in sbr and "hy2-node" in sbr, sbr

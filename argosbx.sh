@@ -6033,6 +6033,13 @@ egress_inbound_tags(){
 }
 egress_url_decode(){ local s="$1"; s=$(printf '%s' "$s" | sed 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g'); printf '%b' "$s"; }
 egress_query_param(){ local q="&$1&" k="$2" v=""; case "$q" in *"&${k}="*) v="${q#*&${k}=}"; v="${v%%&*}"; egress_url_decode "$v";; *) printf '';; esac; }
+egress_is_insecure(){
+  local q="$1"
+  case "$(egress_query_param "$q" "insecure")$(egress_query_param "$q" "allowInsecure")$(egress_query_param "$q" "allow_insecure")$(egress_query_param "$q" "skip-cert-verify")" in
+    *1*|*[tT][rR][uU][eE]*) return 0;;
+    *) return 1;;
+  esac
+}
 egress_json_array(){ local list="$1" out="" item="" oldifs="$IFS"; IFS=','; for item in $list; do item=$(printf '%s' "$item" | xargs 2>/dev/null || printf '%s' "$item"); [ -n "$item" ] || continue; [ -n "$out" ] && out="${out}, "; out="${out}\"$(egress_json_escape "$item")\""; done; IFS="$oldifs"; printf '%s' "$out"; }
 egress_b64_decode(){ local s="$1"; s=$(printf '%s' "$s" | tr '_-' '+/'); local pad=$(( (4 - ${#s} % 4) % 4 )) i=0; while [ $i -lt $pad ]; do s="${s}="; i=$((i + 1)); done; printf '%s' "$s" | base64 -d 2>/dev/null; }
 # $2 = xr|sb|both (default both): which kernels get an outbound for this tag.
@@ -6077,9 +6084,13 @@ egress_parse_link(){
       local sec="" typ="" sni="" pth="" hdr="" pbk="" sid="" fp="" flow="" svc="" mode=""
       sec=$(egress_query_param "$query" security); typ=$(egress_query_param "$query" type); sni=$(egress_query_param "$query" sni); pth=$(egress_query_param "$query" path); hdr=$(egress_query_param "$query" host); pbk=$(egress_query_param "$query" pbk); sid=$(egress_query_param "$query" sid); fp=$(egress_query_param "$query" fp); flow=$(egress_query_param "$query" flow); svc=$(egress_query_param "$query" serviceName); mode=$(egress_query_param "$query" mode)
       [ -n "$sni" ] || sni="$host"; [ -n "$typ" ] || typ="tcp"; [ -n "$pth" ] || pth="/"; [ -n "$hdr" ] || hdr="$sni"; [ -n "$fp" ] || fp="chrome"; [ -n "$mode" ] || mode="auto"
-      local sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr=""
+      local sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr="" tls_ins_sb="" tls_ins_xr=""
+      if egress_is_insecure "$query"; then
+        tls_ins_sb=", \"insecure\": true"
+        tls_ins_xr=", \"allowInsecure\": true"
+      fi
       case "$sec" in
-        tls) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"insecure\": false}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"}";;
+        tls) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_ins_sb}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"$tls_ins_xr}";;
         reality)
           [ -n "$pbk" ] || { echo "vless reality 节点 $tag 缺少 pbk，已跳过"; return 0; }
           sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"utls\": {\"enabled\": true, \"fingerprint\": \"$(egress_json_escape "$fp")\"}, \"reality\": {\"enabled\": true, \"public_key\": \"$(egress_json_escape "$pbk")\", \"short_id\": \"$(egress_json_escape "$sid")\"}}"
@@ -6102,13 +6113,17 @@ egress_parse_link(){
       if [ "$xr_only" = "1" ]; then egress_add_tag "$tag" xr; else egress_add_tag "$tag"; fi;;
     trojan)
       egress_trojan_count=$((egress_trojan_count + 1)); [ -n "$tag" ] || tag="trojan${egress_trojan_count}"; [ -z "$port" ] && port=443
-      local pass="" sec="" typ="" sni="" pth="" hdr="" fp="" svc="" mode="" sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr=""
+      local pass="" sec="" typ="" sni="" pth="" hdr="" fp="" svc="" mode="" sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr="" tls_ins_sb="" tls_ins_xr=""
       pass=$(egress_url_decode "$userinfo")
       sec=$(egress_query_param "$query" security); typ=$(egress_query_param "$query" type); sni=$(egress_query_param "$query" sni); pth=$(egress_query_param "$query" path); hdr=$(egress_query_param "$query" host); fp=$(egress_query_param "$query" fp); svc=$(egress_query_param "$query" serviceName); mode=$(egress_query_param "$query" mode)
       [ -n "$sni" ] || sni="$host"; [ -n "$typ" ] || typ="tcp"; [ -n "$pth" ] || pth="/"; [ -n "$hdr" ] || hdr="$sni"; [ -n "$fp" ] || fp="chrome"; [ -n "$mode" ] || mode="auto"
+      if egress_is_insecure "$query"; then
+        tls_ins_sb=", \"insecure\": true"
+        tls_ins_xr=", \"allowInsecure\": true"
+      fi
       case "$sec" in
         none) sb_tls=""; xr_sec="none";;
-        *) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"insecure\": false}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"}";;
+        *) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_ins_sb}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"$tls_ins_xr}";;
       esac
       case "$typ" in
         tcp) sb_tr=""; xr_tr=", \"tcpSettings\": {}";;
@@ -6126,11 +6141,15 @@ egress_parse_link(){
       if [ -z "$userinfo" ]; then echo "vmess base64 链接暂不支持，请用 vmess://uuid@host:port?... 形式，已跳过"; return 0; fi
       egress_vmess_count=$((egress_vmess_count + 1)); [ -n "$tag" ] || tag="vmess${egress_vmess_count}"; [ -z "$port" ] && port=443
       uuid="$userinfo"
-      local sec="" typ="" sni="" pth="" hdr="" fp="" svc="" mode="" aid="" scy="" sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr=""
+      local sec="" typ="" sni="" pth="" hdr="" fp="" svc="" mode="" aid="" scy="" sb_tls="" sb_tr="" xr_sec="none" xr_tls="" xr_tr="" tls_ins_sb="" tls_ins_xr=""
       sec=$(egress_query_param "$query" security); typ=$(egress_query_param "$query" type); sni=$(egress_query_param "$query" sni); pth=$(egress_query_param "$query" path); hdr=$(egress_query_param "$query" host); fp=$(egress_query_param "$query" fp); svc=$(egress_query_param "$query" serviceName); mode=$(egress_query_param "$query" mode); aid=$(egress_query_param "$query" alterId); scy=$(egress_query_param "$query" scy)
       [ -n "$sni" ] || sni="$host"; [ -n "$typ" ] || typ="ws"; [ -n "$pth" ] || pth="/"; [ -n "$hdr" ] || hdr="$sni"; [ -n "$fp" ] || fp="chrome"; [ -n "$mode" ] || mode="auto"; [ -n "$aid" ] || aid=0; [ -n "$scy" ] || scy="auto"
+      if egress_is_insecure "$query"; then
+        tls_ins_sb=", \"insecure\": true"
+        tls_ins_xr=", \"allowInsecure\": true"
+      fi
       case "$sec" in
-        tls) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"insecure\": false}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"}";;
+        tls) sb_tls=", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_ins_sb}"; xr_sec="tls"; xr_tls=", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"fingerprint\": \"$(egress_json_escape "$fp")\"$tls_ins_xr}";;
         *) sb_tls=""; xr_sec="none"; xr_tls="";;
       esac
       case "$typ" in
@@ -6177,17 +6196,20 @@ egress_parse_link(){
       obfs=$(egress_query_param "$query" "obfs")
       obfs_pass=$(egress_query_param "$query" "obfs-password"); [ -n "$obfs_pass" ] || obfs_pass=$(egress_query_param "$query" "obfs_password")
       upmbps=$(egress_query_param "$query" "upmbps"); downmbps=$(egress_query_param "$query" "downmbps")
-      local sb_obfs="" sb_bw="" tls_ins=""
-      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      local sb_obfs="" sb_bw="" tls_ins_sb="" tls_ins_xr=""
+      if egress_is_insecure "$query"; then
+        tls_ins_sb=", \"insecure\": true"
+        tls_ins_xr=", \"allowInsecure\": true"
+      fi
       if [ -n "$obfs" ]; then
         sb_obfs=", \"obfs\": {\"type\": \"$(egress_json_escape "$obfs")\", \"password\": \"$(egress_json_escape "$obfs_pass")\"}"
         echo "hysteria2 节点 $tag 带 obfs 参数，Xray 不支持 obfs，Xray 侧已忽略（该侧可能无法连接）"
       fi
       [ -n "$upmbps" ] && sb_bw="${sb_bw}, \"up_mbps\": $upmbps"
       [ -n "$downmbps" ] && sb_bw="${sb_bw}, \"down_mbps\": $downmbps"
-      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"hysteria2\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\"$sb_bw, \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins}$sb_obfs},
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"hysteria2\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\"$sb_bw, \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins_sb}$sb_obfs},
 "
-      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"hysteria\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"version\": 2, \"address\": \"$(egress_json_escape "$host")\", \"port\": $port}, \"streamSettings\": {\"network\": \"hysteria\", \"security\": \"tls\", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins}, \"hysteriaSettings\": {\"version\": 2, \"auth\": \"$(egress_json_escape "$pass")\"}}},
+      egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"hysteria\", \"tag\": \"$(egress_json_escape "$tag")\", \"settings\": {\"version\": 2, \"address\": \"$(egress_json_escape "$host")\", \"port\": $port}, \"streamSettings\": {\"network\": \"hysteria\", \"security\": \"tls\", \"tlsSettings\": {\"serverName\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins_xr}, \"hysteriaSettings\": {\"version\": 2, \"auth\": \"$(egress_json_escape "$pass")\"}}},
 "
       egress_add_tag "$tag";;
     tuic)
@@ -6202,8 +6224,8 @@ egress_parse_link(){
       alpn=$(egress_query_param "$query" "alpn"); [ -n "$alpn" ] || alpn="h3"
       cc=$(egress_query_param "$query" "congestion_control"); [ -n "$cc" ] || cc="bbr"
       mode=$(egress_query_param "$query" "udp_relay_mode"); [ -n "$mode" ] || mode="native"
-      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
-      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"tuic\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\", \"password\": \"$(egress_json_escape "$pass")\", \"congestion_control\": \"$(egress_json_escape "$cc")\", \"udp_relay_mode\": \"$(egress_json_escape "$mode")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins, \"utls\": {\"enabled\": true, \"fingerprint\": \"chrome\"}}},
+      egress_is_insecure "$query" && tls_ins=", \"insecure\": true"
+      egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"tuic\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"uuid\": \"$(egress_json_escape "$uuid")\", \"password\": \"$(egress_json_escape "$pass")\", \"congestion_control\": \"$(egress_json_escape "$cc")\", \"udp_relay_mode\": \"$(egress_json_escape "$mode")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\", \"alpn\": [\"$(egress_json_escape "$alpn")\"]$tls_ins}},
 "
       egress_add_tag "$tag" sb;;
     anytls)
@@ -6223,7 +6245,7 @@ egress_parse_link(){
           tls_extra=", \"utls\": {\"enabled\": true, \"fingerprint\": \"$(egress_json_escape "$fp")\"}, \"reality\": {\"enabled\": true, \"public_key\": \"$(egress_json_escape "$pbk")\", \"short_id\": \"$(egress_json_escape "$sid")\"}";;
         *) tls_extra=", \"utls\": {\"enabled\": true, \"fingerprint\": \"chrome\"}";;
       esac
-      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      egress_is_insecure "$query" && tls_ins=", \"insecure\": true"
       egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"anytls\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"password\": \"$(egress_json_escape "$pass")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_extra$tls_ins}},
 "
       egress_add_tag "$tag" sb;;
@@ -6236,7 +6258,7 @@ egress_parse_link(){
       user=$(egress_url_decode "$user"); pass=$(egress_url_decode "$pass")
       if [ -z "$user" ] || [ -z "$pass" ]; then echo "naive 节点 $tag 缺少用户名或密码，已跳过"; return 0; fi
       sni=$(egress_query_param "$query" "sni"); [ -n "$sni" ] || sni="$host"
-      case "$(egress_query_param "$query" "insecure")" in 1|true) tls_ins=", \"insecure\": true";; esac
+      egress_is_insecure "$query" && tls_ins=", \"insecure\": true"
       egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"naive\", \"tag\": \"$(egress_json_escape "$tag")\", \"server\": \"$(egress_json_escape "$host")\", \"server_port\": $port, \"username\": \"$(egress_json_escape "$user")\", \"password\": \"$(egress_json_escape "$pass")\", \"tls\": {\"enabled\": true, \"server_name\": \"$(egress_json_escape "$sni")\"$tls_ins}},
 "
       egress_add_tag "$tag" sb;;
@@ -6267,7 +6289,7 @@ egress_parse_and_rule(){
       domain) carr=$(egress_json_array "$cval"); [ -n "$sb_domain" ] && sb_domain="${sb_domain}, "; sb_domain="${sb_domain}${carr}"; [ -n "$xr_domain" ] && xr_domain="${xr_domain}, "; xr_domain="${xr_domain}${carr}";;
       ip) carr=$(egress_json_array "$cval"); [ -n "$sb_ip" ] && sb_ip="${sb_ip}, "; sb_ip="${sb_ip}${carr}"; [ -n "$xr_ip" ] && xr_ip="${xr_ip}, "; xr_ip="${xr_ip}${carr}";;
       source) carr=$(egress_json_array "$cval"); [ -n "$sb_source" ] && sb_source="${sb_source}, "; sb_source="${sb_source}${carr}"; [ -n "$xr_source" ] && xr_source="${xr_source}, "; xr_source="${xr_source}${carr}";;
-      inbound) _exp=""; IFS=','; for _it in $cval; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; done; IFS="$oldifs2"
+      inbound) _exp=""; IFS=','; for _it in $cval; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; case "$(printf '%s' "$_it" | tr 'A-Z' 'a-z')" in vlpt[0-9]*) if [ -n "$vlpt" ] && [ -z "$vlpt_more" ]; then echo "⚠ 提示：分流规则中指定了 $_it，但本机仅配置了单端口 Reality (vlpt)，若要匹配主 Reality 流量请使用 inbound:vlpt"; fi;; esac; done; IFS="$oldifs2"
         carr=$(egress_json_array "$_exp"); [ -n "$sb_inbound" ] && sb_inbound="${sb_inbound}, "; sb_inbound="${sb_inbound}${carr}"; [ -n "$xr_inbound" ] && xr_inbound="${xr_inbound}, "; xr_inbound="${xr_inbound}${carr}";;
       geoip) carr=$(egress_json_array "$cval"); [ -n "$sb_geoip" ] && sb_geoip="${sb_geoip}, "; sb_geoip="${sb_geoip}${carr}"; [ -n "$xr_geoip" ] && xr_geoip="${xr_geoip}, "; xr_geoip="${xr_geoip}${carr}";;
       geosite) carr=$(egress_json_array "$cval"); [ -n "$sb_geosite" ] && sb_geosite="${sb_geosite}, "; sb_geosite="${sb_geosite}${carr}"
@@ -6324,7 +6346,7 @@ egress_parse_rules(){
       # Expand protocol aliases to real inbound tags, deduping in order.
       # e.g. inbound:vlpt,hypt => reality-vision,vl-reality-sb,hy2-xr,hy2-sb
       local _exp="" _it="" _tg="" _goldifs="$IFS"
-      IFS=','; for _it in $val; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; done; IFS="$_goldifs"
+      IFS=','; for _it in $val; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; case "$(printf '%s' "$_it" | tr 'A-Z' 'a-z')" in vlpt[0-9]*) if [ -n "$vlpt" ] && [ -z "$vlpt_more" ]; then echo "⚠ 提示：分流规则中指定了 $_it，但本机仅配置了单端口 Reality (vlpt)，若要匹配主 Reality 流量请使用 inbound:vlpt"; fi;; esac; done; IFS="$_goldifs"
       val="$_exp"
     fi
     arr=$(egress_json_array "$val")
