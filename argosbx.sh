@@ -94,6 +94,140 @@ command -v register_hook >/dev/null 2>&1 && {
   register_hook on_init vars_merge
   register_hook on_complete vars_save
 }
+# proxy-script.sh: Helper functions for managing caddy_proxy.sh and nginx_proxy.sh
+
+# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
+ensure_local_bin_in_path(){
+  local target_dir="$HOME/.local/bin"
+  mkdir -p "$target_dir" 2>/dev/null || true
+  case ":$PATH:" in
+    *":$target_dir:"*) ;;
+    *)
+      export PATH="$target_dir:$PATH"
+      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+      fi
+      ;;
+  esac
+}
+
+# get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0
+get_latest_github_vps_tag(){
+  local repo="qytang2014/software"
+  local fallback="vps-v1.0.0"
+  local latest=""
+  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
+  if [ -n "$latest" ]; then
+    echo "$latest"
+  else
+    echo "$fallback"
+  fi
+}
+
+# ensure_proxy_script：自动保障 caddy_proxy.sh / nginx_proxy.sh 存在于 $HOME/.local/bin 且为最新可用版本
+ensure_proxy_script(){
+  local script_name="$1"
+  [ -n "$script_name" ] || return 1
+  ensure_local_bin_in_path
+  local target_path="$HOME/.local/bin/$script_name"
+  local tag_file="$HOME/.local/bin/.${script_name}.tag"
+
+  local repo="qytang2014/software"
+  local tag="${VPS_TAG:-$(get_latest_github_vps_tag)}"
+
+  local is_old=0
+  if [ ! -s "$target_path" ] || [ ! -x "$target_path" ]; then
+    is_old=1
+  elif [ "$script_name" = "caddy_proxy.sh" ]; then
+    if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
+      is_old=1
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null; then
+      is_old=1
+    fi
+  elif [ "$script_name" = "nginx_proxy.sh" ]; then
+    if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
+      is_old=1
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null; then
+      is_old=1
+    fi
+  fi
+
+  if [ "$is_old" = "0" ]; then
+    return 0
+  fi
+
+  echo "检测到 $script_name 为旧版本或缺失 (当前: $(cat "$tag_file" 2>/dev/null || echo "未记录")，最新: $tag)，正在拉取最新版本..."
+  local raw_url="https://github.com/${repo}/releases/download/${tag}/${script_name}"
+  local mirror_url="https://ghproxy.net/${raw_url}"
+
+  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+  local tmpfile
+  tmpfile=$(mktemp 2>/dev/null || echo "/tmp/${script_name}.$$")
+
+  local dl_ok=0
+  if curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$tmpfile" 2>/dev/null; then
+    dl_ok=1
+  else
+    echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
+    if curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$tmpfile" 2>/dev/null; then
+      dl_ok=1
+    fi
+  fi
+
+  if [ "$dl_ok" = "1" ] && [ -s "$tmpfile" ] && head -n 1 "$tmpfile" | grep -q "bash"; then
+    rm -f "$target_path" 2>/dev/null || true
+    mv -f "$tmpfile" "$target_path"
+    chmod +x "$target_path" 2>/dev/null || true
+    echo "$tag" > "$tag_file" 2>/dev/null || true
+    echo "✅ 已成功更新 $script_name 至最新版 ($tag)"
+    return 0
+  else
+    rm -f "$tmpfile" 2>/dev/null || true
+    if [ -s "$target_path" ] && [ -x "$target_path" ]; then
+      echo "⚠️ 下载最新 $script_name 失败，继续使用现有版本保底"
+      return 0
+    fi
+    echo "下载 $script_name 失败，请检查网络"
+    return 1
+  fi
+}
+
+# check_and_prompt_force_email：检测是否已有旧全局邮箱，如有且不同，在交互模式下警告并询问用户是否全局覆盖（默认 n）
+check_and_prompt_force_email(){
+  local script_cmd="$1"
+  local new_email="$2"
+  [ -z "$new_email" ] && return 0
+  [ -x "$script_cmd" ] || command -v "$script_cmd" >/dev/null 2>&1 || return 0
+
+  local old_email=""
+  old_email=$("$script_cmd" get-email 2>/dev/null | tr -d ' \r\n')
+  if [ -n "$old_email" ] && [ "$old_email" != "$new_email" ]; then
+    echo "------------------------------------------------------------" >&2
+    echo "⚠️  【告警提示】检测到 Web 服务已配置全局 ACME 邮箱: [$old_email]" >&2
+    echo "⚠️  注意: 替换该邮箱将进行【全局替换】，影响此服务器上所有的站点证书！" >&2
+    echo "------------------------------------------------------------" >&2
+
+    local replace_email="n"
+    if [ -t 0 ] || [ "${FORCE_INTERACTIVE:-0}" = "1" ]; then
+      printf "是否确认将全局邮箱替换为 [%s]? [y/N] (默认 n): " "$new_email" >&2
+      read -r replace_email || replace_email="n"
+    else
+      echo "非交互环境，默认保持现有全局邮箱 [$old_email]，不覆盖。" >&2
+    fi
+
+    case "$replace_email" in
+      [yY]|[yY][eE][sS])
+        echo "--force-email"
+        return 0
+        ;;
+      *)
+        echo "保持现有全局邮箱 [$old_email]。" >&2
+        return 0
+        ;;
+    esac
+  fi
+  return 0
+}
 run_hook on_init "$1"
 # camouflage-blog.sh: 伪装博客部署模块
 # 每台机器按 /etc/machine-id 确定性随机选一个人设（16 选 1），
@@ -1145,6 +1279,213 @@ CAMOUFLAGE_TPL_EOF
   find "$webroot" -type f -exec chmod 644 {} \; 2>/dev/null || true
   echo "伪装博客已部署到 $webroot"
 }
+# vlpt-coexistence.sh: VLESS-Reality 443 port coexistence with local Web servers (Caddy / Nginx)
+# Handles:
+# 1. Automatic probing for available local Web port (starting at 8443, sequential 9443, 10443...)
+# 2. Interactive prompt when vlpt=443 is configured; safe exit if user declines; auto-agree in unattended mode
+# 3. Delegating Web configuration and port migration to caddy_proxy.sh and nginx_proxy.sh (set-port)
+# 4. Smooth reload and verification that 443 is freed before Xray/Sing-box takes over 443
+# 5. Restoring initial environment (reverting Caddy/Nginx to 443, removing web_port) on uninstall
+
+web_port_is_available_or_self(){
+  local port="$1"
+  [ -n "$port" ] || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+  [ "$port" != "443" ] || return 1
+
+  local out=""
+  if command -v ss >/dev/null 2>&1; then
+    out=$(ss -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v netstat >/dev/null 2>&1; then
+    out=$(netstat -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v lsof >/dev/null 2>&1; then
+    out=$(lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)
+  fi
+
+  # 1. 未被任何进程占用 -> 可用
+  if [ -z "$out" ]; then
+    return 0
+  fi
+
+  # 2. 已被占用：判断占用者是否为自身受纳管 Web 服务 (caddy 或 nginx)
+  if [ -n "$out" ] && ! echo "$out" | grep -qvE '("caddy"|"nginx"|caddy:|nginx:|/caddy|/nginx)'; then
+    return 0
+  fi
+
+  # 3. 若输出未包含进程信息（如普通用户权限），但该端口确实与已有记录一致，且 caddy/nginx 服务正在运行
+  local known_wp=""
+  [ -f "$HOME/agsbx/web_port" ] && known_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  [ -z "$known_wp" ] && [ -f "${CADDY_PORT_FILE:-/etc/caddy/web_port}" ] && known_wp=$(cat "${CADDY_PORT_FILE:-/etc/caddy/web_port}" 2>/dev/null | tr -d '[:space:]')
+  [ -z "$known_wp" ] && [ -f "${NGINX_PORT_FILE:-/etc/nginx/web_port}" ] && known_wp=$(cat "${NGINX_PORT_FILE:-/etc/nginx/web_port}" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$known_wp" ] && [ "$known_wp" = "$port" ]; then
+    if (command -v systemctl >/dev/null 2>&1 && (systemctl is-active --quiet caddy 2>/dev/null || systemctl is-active --quiet nginx 2>/dev/null)) || \
+       pgrep -x caddy >/dev/null 2>&1 || pgrep -x nginx >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  return 1 # 被其他外部进程占用
+}
+
+web_port_find_available(){
+  local preferred="${1:-}"
+  if [ -n "$preferred" ] && web_port_is_available_or_self "$preferred"; then
+    printf '%s' "$preferred"
+    return 0
+  fi
+
+  local port=8443
+  local step=1000
+  local max_tries=10
+  local i=0
+  while [ $i -lt $max_tries ]; do
+    if web_port_is_available_or_self "$port"; then
+      printf '%s' "$port"
+      return 0
+    fi
+    port=$((port + step))
+    i=$((i + 1))
+  done
+  # Fallback if all 10 candidates were busy: random port between 10000-65535
+  shuf -i 10000-65535 -n 1
+}
+
+web_server_migrate_to_port(){
+  local target_port="$1"
+  [ -n "$target_port" ] || return 0
+
+  # 委托 caddy_proxy.sh / nginx_proxy.sh 执行 set-port
+  local caddy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  local nginx_bin="$HOME/.local/bin/nginx_proxy.sh"
+  if command -v ensure_proxy_script >/dev/null 2>&1; then
+    ensure_proxy_script "caddy_proxy.sh" || true
+    ensure_proxy_script "nginx_proxy.sh" || true
+  fi
+
+  if [ -x "$caddy_bin" ]; then
+    "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+  fi
+
+  if [ -x "$nginx_bin" ]; then
+    "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+  fi
+
+  # 等待 443 释放（仅在迁移至非 443 端口时需要等待 443 端口腾空）
+  if [ "$target_port" != "443" ]; then
+    local waited=0
+    while [ $waited -lt 5 ]; do
+      local occupied=0
+      if command -v ss >/dev/null 2>&1; then
+        if ss -tlnp 2>/dev/null | grep -qE ':443\s'; then occupied=1; fi
+      elif command -v netstat >/dev/null 2>&1; then
+        if netstat -tlnp 2>/dev/null | grep -qE ':443\s'; then occupied=1; fi
+      fi
+      if [ "$occupied" = "0" ]; then break; fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+  fi
+  return 0
+}
+
+vlpt_coexistence_check(){
+  local p="${port_vl_re:-${vlpt:-}}"
+  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+    p=$(port_get "vl_re" 2>/dev/null || true)
+  fi
+  [ "$p" = "443" ] || return 0
+
+  # 检测是否已存在先前配置的有效 web_port
+  local existing_wp=""
+  if command -v port_get >/dev/null 2>&1; then
+    existing_wp=$(port_get "web_port" 2>/dev/null || true)
+  fi
+  if [ -z "$existing_wp" ] && [ -f "$HOME/agsbx/web_port" ]; then
+    existing_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  fi
+  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
+  if [ -z "$existing_wp" ] && [ -f "$cport_file" ]; then
+    existing_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
+  fi
+  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
+  if [ -z "$existing_wp" ] && [ -f "$nport_file" ]; then
+    existing_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+  fi
+  case "$existing_wp" in
+    443|''|*[!0-9]*) existing_wp="" ;;
+  esac
+
+  local is_already_coexisting=0
+  if [ -n "$existing_wp" ] && web_port_is_available_or_self "$existing_wp"; then
+    is_already_coexisting=1
+  fi
+
+  if [ "$is_already_coexisting" = "1" ]; then
+    echo "检测到现有 Web 服务已处于 443 共存状态 (监听本地端口: $existing_wp)，继续保持该端口。"
+  elif [ -t 0 ] && [ "${FORCE_NONINTERACTIVE:-0}" != "1" ]; then
+    echo "------------------------------------------------------------"
+    echo "⚠️  【端口冲突提示】检测到 VLESS-Reality (vlpt) 配置了 443 端口。"
+    echo "系统 Web 服务 (Caddy/Nginx) 默认亦监听 443 端口。"
+    echo "继续操作需要将现有及后续 Web 服务迁移至本地回环高位端口 (如 8443)，"
+    echo "由 Reality 统一接管 443 入口并进行透明内部流量回落 (Fallback)。"
+    echo "------------------------------------------------------------"
+    local ans="y"
+    printf "是否允许调整 Web 服务端口并继续安装？[Y/n]: "
+    read -r ans || ans="y"
+    case "$ans" in
+      [nN][oO]|[nN])
+        echo "已取消配置：请勿在 vlpt 中填入 443，请保持默认留空（使用随机高位端口）或使用其他非 443 端口。"
+        exit 0
+        ;;
+      *)
+        echo "已确认同意，正在执行 443 端口共存迁移..."
+        ;;
+    esac
+  else
+    echo "检测到 vlpt=443 且处于非交互/无人值守模式，默认同意 Web 服务端口迁移并启用 Reality 443 共存。"
+  fi
+
+  local wp=""
+  wp=$(web_port_find_available "$existing_wp")
+  export web_port="$wp"
+  mkdir -p "$HOME/agsbx" 2>/dev/null || true
+  echo "$wp" > "$HOME/agsbx/web_port" 2>/dev/null || true
+  command -v port_set >/dev/null 2>&1 && port_set "web_port" "$wp"
+
+  web_server_migrate_to_port "$wp"
+  export ym_vl_fb_port="$wp"
+  return 0
+}
+
+vlpt_coexistence_cleanup(){
+  local wp=""
+  [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  local caddy_wp="" nginx_wp=""
+  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
+  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
+  [ -f "$cport_file" ] && caddy_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
+  [ -f "$nport_file" ] && nginx_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+
+  if [ -n "$wp" ] || [ -n "$caddy_wp" ] || [ -n "$nginx_wp" ]; then
+    echo "检测到 Web 服务曾配置高位端口共存，正在恢复 Caddy / Nginx 默认 443 端口与初始配置..."
+    # 提前停止占有 443 端口的节点内核服务，确保 443 端口释放给 Web 服务接管
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl stop xr sb >/dev/null 2>&1 || true
+    elif command -v rc-service >/dev/null 2>&1; then
+      rc-service xray stop >/dev/null 2>&1 || true
+      rc-service sing-box stop >/dev/null 2>&1 || true
+    fi
+    kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
+    web_server_migrate_to_port 443
+  fi
+  rm -f "$HOME/agsbx/web_port" "$cport_file" "$nport_file" 2>/dev/null || true
+  return 0
+}
+
+if command -v register_hook >/dev/null 2>&1; then
+  register_hook on_uninstall vlpt_coexistence_cleanup
+fi
 # web-server.sh: ensure a web server listens on 443 when ym (own domain) is set.
 # Background: ym enables Reality camouflage with fallback to 127.0.0.1:443.
 # If neither Caddy nor nginx listens on 443, the camouflage is broken.
@@ -1159,13 +1500,14 @@ CAMOUFLAGE_TPL_EOF
 ensure_web_server(){
   local ym_c="$1" src=""
   [ -n "$ym_c" ] || return 0
-  # 443 已有监听？（Caddy、nginx 或其他）直接返回
+  local target_p="${web_port:-443}"
+  # 目标端口已有监听？（Caddy、nginx 或其他）直接返回
   if command -v ss >/dev/null 2>&1; then
-    if ss -tlnp 2>/dev/null | grep -qE ':443\s'; then
+    if ss -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
       return 0
     fi
   elif command -v netstat >/dev/null 2>&1; then
-    if netstat -tlnp 2>/dev/null | grep -qE ':443\s'; then
+    if netstat -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
       return 0
     fi
   fi
@@ -1248,65 +1590,17 @@ ensure_web_server(){
   fi
 }
 
-# _webserver_write_nginx_conf <ym>: 写 nginx vhost，root 指向 webroot（伪装博客目录）
+# _webserver_write_nginx_conf <ym>: 委托 nginx_proxy.sh 配置 vhost
 _webserver_write_nginx_conf(){
-  local ym_c="$1" _webroot="" _conf="" _cert="" _key=""
-  [ -n "$ym_c" ] || return 1
-  _webroot="${webroot:-/var/www/html}"
-  _cert="$HOME/agsbx/cert/cert.crt"
-  _key="$HOME/agsbx/cert/private.key"
-  # 证书不存在？用自签占位（nginx 需要 cert 才能起 443）
-  if [ ! -s "$_cert" ] || [ ! -s "$_key" ]; then
-    echo "警告：$ym_c 的证书尚未就绪，nginx 443 暂用自签占位，证书就绪后需重载"
-    _cert="$HOME/agsbx/selfsigned/cert.crt"
-    _key="$HOME/agsbx/selfsigned/private.key"
-    [ -s "$_cert" ] || return 1
+  local ym_c="$1" _webroot="${webroot:-/var/www/html}"
+  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
+  ensure_proxy_script "nginx_proxy.sh" || true
+  if [ -x "$nginx_proxy_bin" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" --force || true
+    return 0
   fi
-  # 清理旧版残留的 argosbx 配置文件
-  rm -f /etc/nginx/conf.d/argosbx.conf /etc/nginx/sites-enabled/argosbx /etc/nginx/sites-available/argosbx 2>/dev/null || true
-
-  # 确定 conf 位置（按域名统一规范命名，与 nginx_proxy 对齐）
-  if [ -d /etc/nginx/conf.d ]; then
-    _conf="/etc/nginx/conf.d/${ym_c}.conf"
-  elif [ -d /etc/nginx/sites-available ]; then
-    _conf="/etc/nginx/sites-available/${ym_c}.conf"
-    mkdir -p /etc/nginx/sites-enabled 2>/dev/null || true
-    ln -sf "$_conf" "/etc/nginx/sites-enabled/${ym_c}.conf" 2>/dev/null || true
-  elif [ -d /etc/nginx/sites-enabled ]; then
-    _conf="/etc/nginx/sites-enabled/${ym_c}.conf"
-  else
-    echo "未找到 nginx conf 目录，跳过自动配置"
-    return 1
-  fi
-  {
-    echo "# argosbx auto-generated for $ym_c (camouflage blog)"
-    echo "server {"
-    echo "  listen 80;"
-    echo "  server_name $ym_c;"
-    echo "  location ^~ /.well-known/acme-challenge/ { root $_webroot; }"
-    echo "  location / { return 301 https://\$host\$request_uri; }"
-    echo "}"
-    echo "server {"
-    echo "  listen 443 ssl;"
-    echo "  server_name $ym_c;"
-    echo "  ssl_certificate $_cert;"
-    echo "  ssl_certificate_key $_key;"
-    echo "  root $_webroot;"
-    echo "  index index.html;"
-    # 订阅路径（https-manual 模式用）
-    if [ -n "${token:-}" ]; then
-      echo "  location ^~ /$token/ { root $HOME/websbx; }"
-    fi
-    echo "}"
-  } > "$_conf" 2>/dev/null || { echo "写 nginx 配置失败：$_conf"; return 1; }
-  nginx -t 2>/dev/null || { echo "nginx 配置测试失败，请检查 $_conf"; return 1; }
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
-  else
-    nginx -s reload 2>/dev/null || nginx 2>/dev/null || true
-  fi
-  echo "nginx vhost 已配置：$_conf（root=$_webroot）"
-  return 0
+  echo "未找到 nginx_proxy.sh，跳过自动配置"
+  return 1
 }
 # ports.sh: consolidated port storage in $HOME/agsbx/ports.env
 # Replaces the old per-protocol port_* files (port_vl_re, port_xh, ...).
@@ -2586,8 +2880,23 @@ subhttps_merge_system_caddy(){
   return 1
 }
 subhttps_unmerge_system_caddy(){
-  # 降级/del 时摘除合并块并 reload；没摘到东西就不 reload
-  if subhttps_strip_merge_block; then subhttps_merge_reload || true; fi
+  # 降级/del 时通过 caddy_proxy.sh 摘除子路由；若无 caddy_proxy 则回退使用保底 strip
+  local ym_c="" token=""
+  ym_c=$(subhttps_read "$HOME/agsbx/ym")
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
+  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  if command -v ensure_proxy_script >/dev/null 2>&1; then
+    ensure_proxy_script "caddy_proxy.sh" || true
+  fi
+
+  if [ -x "$caddy_proxy_bin" ] && [ -n "$ym_c" ] && [ -n "$token" ]; then
+    "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+  fi
+
+  # 保底：若残留旧式注释块，再尝试清理
+  if subhttps_strip_merge_block; then
+    subhttps_merge_reload || true
+  fi
   return 0
 }
 # subhttps_write_snippets: 为用户自有 Nginx/Caddy 生成配置片段（脚本不能绑 443 时手动加）
@@ -3382,7 +3691,7 @@ command -v register_hook >/dev/null 2>&1 && {
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do
+for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt web_port; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -3488,8 +3797,9 @@ export port_so=${sopt:-''}
 export port_nv=${nvpt:-''}
 export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
+case "$1" in del|list|upx|ups|upa|res) ;; *) vlpt_coexistence_check ;; esac
 export ym_vl_re=${reym:-$ym}
-if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi
+if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi
 if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
@@ -3521,100 +3831,6 @@ cert_migrate_paths(){
   fi
 }
 
-# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
-ensure_local_bin_in_path(){
-  local target_dir="$HOME/.local/bin"
-  mkdir -p "$target_dir" 2>/dev/null || true
-  case ":$PATH:" in
-    *":$target_dir:"*) ;;
-    *)
-      export PATH="$target_dir:$PATH"
-      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-      fi
-      ;;
-  esac
-}
-
-# get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0
-get_latest_github_vps_tag(){
-  local repo="qytang2014/software"
-  local fallback="vps-v1.0.0"
-  local latest=""
-  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
-  if [ -n "$latest" ]; then
-    echo "$latest"
-  else
-    echo "$fallback"
-  fi
-}
-
-# ensure_proxy_script：自动保障 caddy_proxy.sh / nginx_proxy.sh 存在于 $HOME/.local/bin
-ensure_proxy_script(){
-  local script_name="$1"
-  [ -n "$script_name" ] || return 1
-  ensure_local_bin_in_path
-  local target_path="$HOME/.local/bin/$script_name"
-  if [ -s "$target_path" ] && [ -x "$target_path" ]; then
-    return 0
-  fi
-
-  local repo="qytang2014/software"
-  local tag="${VPS_TAG:-$(get_latest_github_vps_tag)}"
-  local raw_url="https://github.com/${repo}/releases/download/${tag}/${script_name}"
-  local mirror_url="https://ghproxy.net/${raw_url}"
-
-  echo "正在拉取 $script_name (Release: $tag)..."
-  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
-  if ! curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$target_path" 2>/dev/null; then
-    echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
-    if ! curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$target_path" 2>/dev/null; then
-      echo "下载 $script_name 失败，请检查网络"
-      rm -f "$target_path"
-      return 1
-    fi
-  fi
-  chmod +x "$target_path" 2>/dev/null || true
-  return 0
-}
-
-# check_and_prompt_force_email：检测是否已有旧全局邮箱，如有且不同，在交互模式下警告并询问用户是否全局覆盖（默认 n）
-check_and_prompt_force_email(){
-  local script_cmd="$1"
-  local new_email="$2"
-  [ -z "$new_email" ] && return 0
-  [ -x "$script_cmd" ] || command -v "$script_cmd" >/dev/null 2>&1 || return 0
-
-  local old_email=""
-  old_email=$("$script_cmd" get-email 2>/dev/null | tr -d ' \r\n')
-  if [ -n "$old_email" ] && [ "$old_email" != "$new_email" ]; then
-    echo "------------------------------------------------------------" >&2
-    echo "⚠️  【告警提示】检测到 Web 服务已配置全局 ACME 邮箱: [$old_email]" >&2
-    echo "⚠️  注意: 替换该邮箱将进行【全局替换】，影响此服务器上所有的站点证书！" >&2
-    echo "------------------------------------------------------------" >&2
-
-    local replace_email="n"
-    if [ -t 0 ] || [ "${FORCE_INTERACTIVE:-0}" = "1" ]; then
-      printf "是否确认将全局邮箱替换为 [%s]? [y/N] (默认 n): " "$new_email" >&2
-      read -r replace_email || replace_email="n"
-    else
-      echo "非交互环境，默认保持现有全局邮箱 [$old_email]，不覆盖。" >&2
-    fi
-
-    case "$replace_email" in
-      [yY]|[yY][eE][sS])
-        echo "--force-email"
-        return 0
-        ;;
-      *)
-        echo "保持现有全局邮箱 [$old_email]。" >&2
-        return 0
-        ;;
-    esac
-  fi
-  return 0
-}
-
 # cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
 # 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
 cert_setup_caddy_proxy(){
@@ -3631,6 +3847,11 @@ cert_setup_caddy_proxy(){
 
   if [ ! -x "$caddy_proxy_bin" ]; then
     return 1
+  fi
+
+  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF 和 DNS 模块的最新版
+  if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
+    ensure_caddy_download || true
   fi
 
   local force_flag=""
@@ -3758,13 +3979,33 @@ write_caddyfile(){
     fi
   fi
 
-  # 若文件已存在，先移除旧有的该域名块（幂等覆盖）
+  # 若文件已存在，先移除旧有的该域名块（幂等覆盖，兼容嵌套 handle {} 与带端口格式）
   if [ -f "$conf_file" ]; then
-    awk -v dom="$ym" '
-      BEGIN { skip = 0 }
-      $1 == dom && $NF == "{" { skip = 1; next }
-      skip && /^[ \t]*\}/ { skip = 0; next }
-      !skip { print $0 }
+    awk -v target="$ym" '
+      function matches_domain(header, target,   n, items, i, item) {
+        sub(/[[:space:]]*\{.*$/, "", header)
+        gsub(/,/, " ", header)
+        n = split(header, items, /[[:space:]]+/)
+        for (i = 1; i <= n; i++) {
+          item = items[i]
+          sub(/^https?:\/\//, "", item)
+          sub(/:[0-9]+$/, "", item)
+          if (item == target) return 1
+        }
+        return 0
+      }
+      BEGIN { in_block = 0; count = 0 }
+      $0 ~ /\{[[:space:]]*(#.*)?$/ && count == 0 && matches_domain($0, target) {
+        in_block = 1; count = 1; next
+      }
+      in_block {
+        line = $0
+        count += gsub(/\{/, "{", line)
+        count -= gsub(/\}/, "}", line)
+        if (count <= 0) { in_block = 0 }
+        next
+      }
+      { print $0 }
     ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
   fi
 
@@ -3775,7 +4016,7 @@ write_caddyfile(){
     else
       : > "$conf_file"
     fi
-  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[ \t]*email[ \t]+' "$conf_file"; then
+  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[[:space:]]*email[[:space:]]+' "$conf_file"; then
     if grep -q "^{" "$conf_file"; then
       awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
     else
@@ -4244,7 +4485,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
         "security": "reality",
         "realitySettings": {
           "fingerprint": "chrome",
-          "target": "${ym_vl_fb:-$ym_vl_re}:443",
+          "target": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}",
           "serverNames": [
             "${ym_vl_re}"
           ],
@@ -4469,7 +4710,7 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
                 "security": "reality",
                 "realitySettings": {
                     "fingerprint": "chrome",
-                    "dest": "${ym_vl_fb:-$ym_vl_re}:443",
+                    "dest": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}",
                     "serverNames": [
                       "${ym_vl_re}"
                     ],
@@ -4541,7 +4782,7 @@ while :; do
                 "security": "reality",
                 "realitySettings": {
                     "fingerprint": "chrome",
-                    "dest": "${ym_vl_fb:-$ym_vl_re}:443",
+                    "dest": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}",
                     "serverNames": [
                       "${ym_vl_re}"
                     ],
@@ -4610,7 +4851,7 @@ if [ -n "${xhpt_more:-}" ]; then
         "security": "reality",
         "realitySettings": {
           "fingerprint": "chrome",
-          "target": "${ym_vl_fb:-$ym_vl_re}:443",
+          "target": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}",
           "serverNames": [
             "${ym_vl_re}"
           ],
@@ -4971,7 +5212,7 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
               "enabled": true,
               "handshake": {
               "server": "${ym_vl_fb:-$ym_vl_re}",
-              "server_port": 443
+              "server_port": ${ym_vl_fb_port:-443}
              },
              "private_key": "$private_key_s",
              "short_id": ["$short_id_s"]
@@ -5031,7 +5272,7 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
                 "enabled": true,
                 "handshake": {
                     "server": "${ym_vl_fb:-$ym_vl_re}",
-                    "server_port": 443
+                    "server_port": ${ym_vl_fb_port:-443}
                 },
                 "private_key": "$private_key_s",
                 "short_id": ["$short_id_s"]
@@ -5103,7 +5344,7 @@ while :; do
                 "enabled": true,
                 "handshake": {
                     "server": "${ym_vl_fb:-$ym_vl_re}",
-                    "server_port": 443
+                    "server_port": ${ym_vl_fb_port:-443}
                 },
                 "private_key": "$private_key_s",
                 "short_id": ["$short_id_s"]
@@ -5304,7 +5545,7 @@ if [ -n "${arpt_more:-}" ]; then
               "enabled": true,
               "handshake": {
               "server": "${ym_vl_fb:-$ym_vl_re}",
-              "server_port": 443
+              "server_port": ${ym_vl_fb_port:-443}
              },
              "private_key": "$private_key_s",
              "short_id": ["$short_id_s"]
@@ -6851,7 +7092,39 @@ crontab /tmp/crontab.tmp >/dev/null 2>&1
 rm /tmp/crontab.tmp
 echo "Argosbx脚本进程启动成功，安装完毕" && sleep 2
 else
-echo "Argosbx脚本进程未启动，安装失败" && exit
+echo "------------------------------------------------------------"
+echo "❌ Argosbx脚本进程未启动，安装失败"
+echo "正在诊断失败原因..."
+echo "------------------------------------------------------------"
+if command -v ss >/dev/null 2>&1; then
+  echo "当前系统监听的 TCP 端口及对应进程:"
+  ss -tlnp 2>/dev/null | head -n 25 || true
+elif command -v netstat >/dev/null 2>&1; then
+  echo "当前系统监听的 TCP 端口及对应进程:"
+  netstat -tlnp 2>/dev/null | head -n 25 || true
+fi
+if [ -f "$HOME/agsbx/xr.json" ] && [ -x "$HOME/agsbx/xray" ]; then
+  echo "--- Xray 配置校验测试 ---"
+  env XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray" "$HOME/agsbx/xray" run -test -c "$HOME/agsbx/xr.json" 2>&1 || true
+  if pidof systemd >/dev/null 2>&1; then
+    echo "--- systemctl status xr ---"
+    systemctl status xr --no-pager -l 2>&1 | tail -n 15 || true
+    echo "--- journalctl -u xr ---"
+    journalctl -u xr -n 15 --no-pager 2>&1 || true
+  fi
+fi
+if [ -f "$HOME/agsbx/sb.json" ] && [ -x "$HOME/agsbx/sing-box" ]; then
+  echo "--- Sing-box 配置校验测试 ---"
+  "$HOME/agsbx/sing-box" check -c "$HOME/agsbx/sb.json" 2>&1 || true
+  if pidof systemd >/dev/null 2>&1; then
+    echo "--- systemctl status sb ---"
+    systemctl status sb --no-pager -l 2>&1 | tail -n 15 || true
+    echo "--- journalctl -u sb ---"
+    journalctl -u sb -n 15 --no-pager 2>&1 || true
+  fi
+fi
+echo "------------------------------------------------------------"
+exit 1
 fi
 if [ -n "$cfip" ]; then
 set -- $cfip
@@ -9086,9 +9359,7 @@ if [ -n "$ym" ]; then
       :
     else
       write_caddyfile
-      if ! command -v caddy >/dev/null 2>&1; then
-        ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-      fi
+      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
       if command -v caddy >/dev/null 2>&1; then
         if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
           systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {

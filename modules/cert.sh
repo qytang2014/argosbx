@@ -27,100 +27,6 @@ cert_migrate_paths(){
   fi
 }
 
-# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
-ensure_local_bin_in_path(){
-  local target_dir="$HOME/.local/bin"
-  mkdir -p "$target_dir" 2>/dev/null || true
-  case ":$PATH:" in
-    *":$target_dir:"*) ;;
-    *)
-      export PATH="$target_dir:$PATH"
-      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-      fi
-      ;;
-  esac
-}
-
-# get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0
-get_latest_github_vps_tag(){
-  local repo="qytang2014/software"
-  local fallback="vps-v1.0.0"
-  local latest=""
-  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
-  if [ -n "$latest" ]; then
-    echo "$latest"
-  else
-    echo "$fallback"
-  fi
-}
-
-# ensure_proxy_script：自动保障 caddy_proxy.sh / nginx_proxy.sh 存在于 $HOME/.local/bin
-ensure_proxy_script(){
-  local script_name="$1"
-  [ -n "$script_name" ] || return 1
-  ensure_local_bin_in_path
-  local target_path="$HOME/.local/bin/$script_name"
-  if [ -s "$target_path" ] && [ -x "$target_path" ]; then
-    return 0
-  fi
-
-  local repo="qytang2014/software"
-  local tag="${VPS_TAG:-$(get_latest_github_vps_tag)}"
-  local raw_url="https://github.com/${repo}/releases/download/${tag}/${script_name}"
-  local mirror_url="https://ghproxy.net/${raw_url}"
-
-  echo "正在拉取 $script_name (Release: $tag)..."
-  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
-  if ! curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$target_path" 2>/dev/null; then
-    echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
-    if ! curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$target_path" 2>/dev/null; then
-      echo "下载 $script_name 失败，请检查网络"
-      rm -f "$target_path"
-      return 1
-    fi
-  fi
-  chmod +x "$target_path" 2>/dev/null || true
-  return 0
-}
-
-# check_and_prompt_force_email：检测是否已有旧全局邮箱，如有且不同，在交互模式下警告并询问用户是否全局覆盖（默认 n）
-check_and_prompt_force_email(){
-  local script_cmd="$1"
-  local new_email="$2"
-  [ -z "$new_email" ] && return 0
-  [ -x "$script_cmd" ] || command -v "$script_cmd" >/dev/null 2>&1 || return 0
-
-  local old_email=""
-  old_email=$("$script_cmd" get-email 2>/dev/null | tr -d ' \r\n')
-  if [ -n "$old_email" ] && [ "$old_email" != "$new_email" ]; then
-    echo "------------------------------------------------------------" >&2
-    echo "⚠️  【告警提示】检测到 Web 服务已配置全局 ACME 邮箱: [$old_email]" >&2
-    echo "⚠️  注意: 替换该邮箱将进行【全局替换】，影响此服务器上所有的站点证书！" >&2
-    echo "------------------------------------------------------------" >&2
-
-    local replace_email="n"
-    if [ -t 0 ] || [ "${FORCE_INTERACTIVE:-0}" = "1" ]; then
-      printf "是否确认将全局邮箱替换为 [%s]? [y/N] (默认 n): " "$new_email" >&2
-      read -r replace_email || replace_email="n"
-    else
-      echo "非交互环境，默认保持现有全局邮箱 [$old_email]，不覆盖。" >&2
-    fi
-
-    case "$replace_email" in
-      [yY]|[yY][eE][sS])
-        echo "--force-email"
-        return 0
-        ;;
-      *)
-        echo "保持现有全局邮箱 [$old_email]。" >&2
-        return 0
-        ;;
-    esac
-  fi
-  return 0
-}
-
 # cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
 # 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
 cert_setup_caddy_proxy(){
@@ -137,6 +43,11 @@ cert_setup_caddy_proxy(){
 
   if [ ! -x "$caddy_proxy_bin" ]; then
     return 1
+  fi
+
+  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF 和 DNS 模块的最新版
+  if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
+    ensure_caddy_download || true
   fi
 
   local force_flag=""
@@ -264,13 +175,33 @@ write_caddyfile(){
     fi
   fi
 
-  # 若文件已存在，先移除旧有的该域名块（幂等覆盖）
+  # 若文件已存在，先移除旧有的该域名块（幂等覆盖，兼容嵌套 handle {} 与带端口格式）
   if [ -f "$conf_file" ]; then
-    awk -v dom="$ym" '
-      BEGIN { skip = 0 }
-      $1 == dom && $NF == "{" { skip = 1; next }
-      skip && /^[ \t]*\}/ { skip = 0; next }
-      !skip { print $0 }
+    awk -v target="$ym" '
+      function matches_domain(header, target,   n, items, i, item) {
+        sub(/[[:space:]]*\{.*$/, "", header)
+        gsub(/,/, " ", header)
+        n = split(header, items, /[[:space:]]+/)
+        for (i = 1; i <= n; i++) {
+          item = items[i]
+          sub(/^https?:\/\//, "", item)
+          sub(/:[0-9]+$/, "", item)
+          if (item == target) return 1
+        }
+        return 0
+      }
+      BEGIN { in_block = 0; count = 0 }
+      $0 ~ /\{[[:space:]]*(#.*)?$/ && count == 0 && matches_domain($0, target) {
+        in_block = 1; count = 1; next
+      }
+      in_block {
+        line = $0
+        count += gsub(/\{/, "{", line)
+        count -= gsub(/\}/, "}", line)
+        if (count <= 0) { in_block = 0 }
+        next
+      }
+      { print $0 }
     ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
   fi
 
@@ -281,7 +212,7 @@ write_caddyfile(){
     else
       : > "$conf_file"
     fi
-  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[ \t]*email[ \t]+' "$conf_file"; then
+  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[[:space:]]*email[[:space:]]+' "$conf_file"; then
     if grep -q "^{" "$conf_file"; then
       awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
     else

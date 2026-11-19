@@ -48,9 +48,7 @@ if [ -n "$ym" ]; then
       :
     else
       write_caddyfile
-      if ! command -v caddy >/dev/null 2>&1; then
-        ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-      fi
+      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
       if command -v caddy >/dev/null 2>&1; then
         if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
           systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {

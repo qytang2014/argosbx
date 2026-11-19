@@ -439,7 +439,9 @@ def main():
     repinherit_mod = read("modules/rep-inherit.sh")
     ports_mod = read("modules/ports.sh")
     webserver_mod = read("modules/web-server.sh")
+    vlpt_coexistence_mod = read("modules/vlpt-coexistence.sh")
     hook_mod = read("modules/hook.sh")
+    proxy_script_mod = read("modules/proxy-script.sh")
 
     # --- identity: script URL only (binary download URLs stay upstream) ---
     t = replace(t, "url='https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh'",
@@ -464,6 +466,42 @@ def main():
                 'chmod +x "$HOME/agsbx/xray"\nif [ ! -x "$HOME/agsbx/xray" ] || ! "$HOME/agsbx/xray" version 2>/dev/null | grep -q \'^Xray\'; then echo "Xray 内核下载失败，安装中止"; rm -f "$HOME/agsbx/xray"; exit 1; fi\nsbcore=$("$HOME/agsbx/xray" version 2>/dev/null | awk \'/^Xray/{print $2}\')', "kernel-verify-xray", 1)
     t = replace(t, 'chmod +x "$HOME/agsbx/sing-box"\nsbcore=$("$HOME/agsbx/sing-box" version 2>/dev/null | awk \'/version/{print $NF}\')',
                 'chmod +x "$HOME/agsbx/sing-box"\nif [ ! -x "$HOME/agsbx/sing-box" ] || ! "$HOME/agsbx/sing-box" version 2>/dev/null | grep -q \'sing-box version\'; then echo "Sing-box 内核下载失败，安装中止"; rm -f "$HOME/agsbx/sing-box"; exit 1; fi\nsbcore=$("$HOME/agsbx/sing-box" version 2>/dev/null | awk \'/version/{print $NF}\')', "kernel-verify-sb", 1)
+
+    # --- kernel startup failure diagnostics (private): detailed diagnostics on failure ---
+    startup_diag = '''echo "------------------------------------------------------------"
+echo "❌ Argosbx脚本进程未启动，安装失败"
+echo "正在诊断失败原因..."
+echo "------------------------------------------------------------"
+if command -v ss >/dev/null 2>&1; then
+  echo "当前系统监听的 TCP 端口及对应进程:"
+  ss -tlnp 2>/dev/null | head -n 25 || true
+elif command -v netstat >/dev/null 2>&1; then
+  echo "当前系统监听的 TCP 端口及对应进程:"
+  netstat -tlnp 2>/dev/null | head -n 25 || true
+fi
+if [ -f "$HOME/agsbx/xr.json" ] && [ -x "$HOME/agsbx/xray" ]; then
+  echo "--- Xray 配置校验测试 ---"
+  env XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray" "$HOME/agsbx/xray" run -test -c "$HOME/agsbx/xr.json" 2>&1 || true
+  if pidof systemd >/dev/null 2>&1; then
+    echo "--- systemctl status xr ---"
+    systemctl status xr --no-pager -l 2>&1 | tail -n 15 || true
+    echo "--- journalctl -u xr ---"
+    journalctl -u xr -n 15 --no-pager 2>&1 || true
+  fi
+fi
+if [ -f "$HOME/agsbx/sb.json" ] && [ -x "$HOME/agsbx/sing-box" ]; then
+  echo "--- Sing-box 配置校验测试 ---"
+  "$HOME/agsbx/sing-box" check -c "$HOME/agsbx/sb.json" 2>&1 || true
+  if pidof systemd >/dev/null 2>&1; then
+    echo "--- systemctl status sb ---"
+    systemctl status sb --no-pager -l 2>&1 | tail -n 15 || true
+    echo "--- journalctl -u sb ---"
+    journalctl -u sb -n 15 --no-pager 2>&1 || true
+  fi
+fi
+echo "------------------------------------------------------------"
+exit 1'''
+    t = replace(t, 'echo "Argosbx脚本进程未启动，安装失败" && exit', startup_diag, "kernel-startup-diagnostics", 1)
 
     # --- dead code: remove commented-out upstream private.key/cert.crt download ---
     # The original public private.key was deliberately dropped (it is public,
@@ -492,7 +530,7 @@ def main():
                 '$vmp=\\"${port_vm_ws}\\" $vmt=\\"${port_vm_tls}\\"', "vmtls-recovery", 1)
     # --- incremental update module (top, before sh.txt save + protocol selection) ---
     t = insert_after(t, 'mkdir -p "$HOME/agsbx"\n',
-                     hook_mod + vars_mod + 'run_hook on_init "$1"\n', "vars-module-anchor")
+                     hook_mod + vars_mod + proxy_script_mod + 'run_hook on_init "$1"\n', "vars-module-anchor")
     # --- ufw module (top level, functions only; called after ins) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      ufw_mod, "ufw-module-anchor")
@@ -522,13 +560,16 @@ def main():
     # --- web-server module ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      webserver_mod, "webserver-module-anchor")
+    # --- vlpt-coexistence module ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     vlpt_coexistence_mod, "vlpt-coexistence-module-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      build_camouflage(), "camouflage-module-anchor")
     # --- variable lists ---
     t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt; do", "export-list", 1)
+                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt web_port; do", "export-list", 1)
     # --- vmess-ws-tls inbound (main): insert xrsbvmtls after xrsbvm ---
     vmtls_mod = read("modules/vmtls.sh")
     t = replace(t, "xrsbso(){\nif [ -n \"$sop\" ]; then",
@@ -1056,7 +1097,10 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # When reym == ym, the SNI is the user's own domain: probes fall back to
     # the local web server (127.0.0.1:443) instead of the external domain.
     _rfb_old = 'export ym_vl_re=${reym:-' + chr(39)*2 + '}' + chr(10)
-    _rfb_new = 'export ym_vl_re=${reym:-$ym}' + chr(10) + 'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; else export ym_vl_fb=""; fi' + chr(10) + 'if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
+    _rfb_new = 'case "$1" in del|list|upx|ups|upa|res) ;; *) vlpt_coexistence_check ;; esac' + chr(10) + \
+               'export ym_vl_re=${reym:-$ym}' + chr(10) + \
+               'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi' + chr(10) + \
+               'if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
     t = replace(t, _rfb_old, _rfb_new, "reality-fb-var", 1)
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
@@ -1082,9 +1126,10 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     _name_old = 'if [ -n "$name" ]; then' + chr(10) + 'sxname=$name-' + chr(10) + 'echo "$sxname" > "$HOME/agsbx/name"'
     _name_new = _name_old + chr(10) + 'else' + chr(10) + 'rm -f "$HOME/agsbx/name" 2>/dev/null || true' + chr(10) + 'sxname=""'
     t = replace(t, _name_old, _name_new, "name-stale-cleanup", 1)
-    t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-dest", 2)
-    t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:443"', "reality-fb-target", 2)
+    t = replace(t, '"dest": "${ym_vl_re}:443"', '"dest": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}"', "reality-fb-dest", 2)
+    t = replace(t, '"target": "${ym_vl_re}:443"', '"target": "${ym_vl_fb:-$ym_vl_re}:${ym_vl_fb_port:-443}"', "reality-fb-target", 2)
     t = replace(t, '"server": "${ym_vl_re}"', '"server": "${ym_vl_fb:-$ym_vl_re}"', "reality-fb-handshake", 4)
+    t = replace(t, '"server_port": 443\n', '"server_port": ${ym_vl_fb_port:-443}\n', "reality-fb-handshake-port", 4)
 
     # --- consolidate port files to ports.env (string post-process) ---
     _port_vars = ['port_vl_re','port_xh','port_vx','port_xu','port_xc','port_vw',

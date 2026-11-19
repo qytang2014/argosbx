@@ -10,8 +10,9 @@ python3 build/build.py >/dev/null 2>&1 || fail "build failed"
 grep -q "agsbx_check" argosbx.sh || fail "built script missing agsbx_check"
 grep -q "check_kernels" argosbx.sh || fail "built script missing check_kernels"
 
-# --- isolated HOME ---
+# --- isolated HOME & MOCKBIN ---
 TESTHOME="$(mktemp -d)"; export HOME="$TESTHOME"
+MOCKBIN="$(mktemp -d)"; export PATH="$MOCKBIN:$PATH"
 mkdir -p "$HOME/agsbx"
 source "modules/check.sh" || fail "cannot source modules/check.sh"
 
@@ -22,6 +23,11 @@ echo "$out" | grep -q "结果：" || fail "missing summary line"
 echo "no-kernel WARN OK"
 
 # --- 2. kernel json exists but no process: FAIL ---
+cat > "$MOCKBIN/pgrep" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "$MOCKBIN/pgrep"
 echo '{}' > "$HOME/agsbx/xr.json"
 echo '{}' > "$HOME/agsbx/sb.json"
 out=$(agsbx_check 2>&1)
@@ -31,7 +37,6 @@ echo "missing process FAIL OK"
 
 # --- 3. fake processes: PASS ---
 # mock pgrep to pretend kernels are running
-MOCKBIN="$(mktemp -d)"; export PATH="$MOCKBIN:$PATH"
 cat > "$MOCKBIN/pgrep" <<'EOF'
 #!/bin/bash
 # match anything containing agsbx/xray or agsbx/sing-box

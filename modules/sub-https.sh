@@ -331,8 +331,23 @@ subhttps_merge_system_caddy(){
   return 1
 }
 subhttps_unmerge_system_caddy(){
-  # 降级/del 时摘除合并块并 reload；没摘到东西就不 reload
-  if subhttps_strip_merge_block; then subhttps_merge_reload || true; fi
+  # 降级/del 时通过 caddy_proxy.sh 摘除子路由；若无 caddy_proxy 则回退使用保底 strip
+  local ym_c="" token=""
+  ym_c=$(subhttps_read "$HOME/agsbx/ym")
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
+  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  if command -v ensure_proxy_script >/dev/null 2>&1; then
+    ensure_proxy_script "caddy_proxy.sh" || true
+  fi
+
+  if [ -x "$caddy_proxy_bin" ] && [ -n "$ym_c" ] && [ -n "$token" ]; then
+    "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+  fi
+
+  # 保底：若残留旧式注释块，再尝试清理
+  if subhttps_strip_merge_block; then
+    subhttps_merge_reload || true
+  fi
   return 0
 }
 # subhttps_write_snippets: 为用户自有 Nginx/Caddy 生成配置片段（脚本不能绑 443 时手动加）

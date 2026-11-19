@@ -12,13 +12,14 @@
 ensure_web_server(){
   local ym_c="$1" src=""
   [ -n "$ym_c" ] || return 0
-  # 443 已有监听？（Caddy、nginx 或其他）直接返回
+  local target_p="${web_port:-443}"
+  # 目标端口已有监听？（Caddy、nginx 或其他）直接返回
   if command -v ss >/dev/null 2>&1; then
-    if ss -tlnp 2>/dev/null | grep -qE ':443\s'; then
+    if ss -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
       return 0
     fi
   elif command -v netstat >/dev/null 2>&1; then
-    if netstat -tlnp 2>/dev/null | grep -qE ':443\s'; then
+    if netstat -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
       return 0
     fi
   fi
@@ -101,63 +102,15 @@ ensure_web_server(){
   fi
 }
 
-# _webserver_write_nginx_conf <ym>: 写 nginx vhost，root 指向 webroot（伪装博客目录）
+# _webserver_write_nginx_conf <ym>: 委托 nginx_proxy.sh 配置 vhost
 _webserver_write_nginx_conf(){
-  local ym_c="$1" _webroot="" _conf="" _cert="" _key=""
-  [ -n "$ym_c" ] || return 1
-  _webroot="${webroot:-/var/www/html}"
-  _cert="$HOME/agsbx/cert/cert.crt"
-  _key="$HOME/agsbx/cert/private.key"
-  # 证书不存在？用自签占位（nginx 需要 cert 才能起 443）
-  if [ ! -s "$_cert" ] || [ ! -s "$_key" ]; then
-    echo "警告：$ym_c 的证书尚未就绪，nginx 443 暂用自签占位，证书就绪后需重载"
-    _cert="$HOME/agsbx/selfsigned/cert.crt"
-    _key="$HOME/agsbx/selfsigned/private.key"
-    [ -s "$_cert" ] || return 1
+  local ym_c="$1" _webroot="${webroot:-/var/www/html}"
+  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
+  ensure_proxy_script "nginx_proxy.sh" || true
+  if [ -x "$nginx_proxy_bin" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" --force || true
+    return 0
   fi
-  # 清理旧版残留的 argosbx 配置文件
-  rm -f /etc/nginx/conf.d/argosbx.conf /etc/nginx/sites-enabled/argosbx /etc/nginx/sites-available/argosbx 2>/dev/null || true
-
-  # 确定 conf 位置（按域名统一规范命名，与 nginx_proxy 对齐）
-  if [ -d /etc/nginx/conf.d ]; then
-    _conf="/etc/nginx/conf.d/${ym_c}.conf"
-  elif [ -d /etc/nginx/sites-available ]; then
-    _conf="/etc/nginx/sites-available/${ym_c}.conf"
-    mkdir -p /etc/nginx/sites-enabled 2>/dev/null || true
-    ln -sf "$_conf" "/etc/nginx/sites-enabled/${ym_c}.conf" 2>/dev/null || true
-  elif [ -d /etc/nginx/sites-enabled ]; then
-    _conf="/etc/nginx/sites-enabled/${ym_c}.conf"
-  else
-    echo "未找到 nginx conf 目录，跳过自动配置"
-    return 1
-  fi
-  {
-    echo "# argosbx auto-generated for $ym_c (camouflage blog)"
-    echo "server {"
-    echo "  listen 80;"
-    echo "  server_name $ym_c;"
-    echo "  location ^~ /.well-known/acme-challenge/ { root $_webroot; }"
-    echo "  location / { return 301 https://\$host\$request_uri; }"
-    echo "}"
-    echo "server {"
-    echo "  listen 443 ssl;"
-    echo "  server_name $ym_c;"
-    echo "  ssl_certificate $_cert;"
-    echo "  ssl_certificate_key $_key;"
-    echo "  root $_webroot;"
-    echo "  index index.html;"
-    # 订阅路径（https-manual 模式用）
-    if [ -n "${token:-}" ]; then
-      echo "  location ^~ /$token/ { root $HOME/websbx; }"
-    fi
-    echo "}"
-  } > "$_conf" 2>/dev/null || { echo "写 nginx 配置失败：$_conf"; return 1; }
-  nginx -t 2>/dev/null || { echo "nginx 配置测试失败，请检查 $_conf"; return 1; }
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl reload nginx 2>/dev/null || systemctl start nginx 2>/dev/null || true
-  else
-    nginx -s reload 2>/dev/null || nginx 2>/dev/null || true
-  fi
-  echo "nginx vhost 已配置：$_conf（root=$_webroot）"
-  return 0
+  echo "未找到 nginx_proxy.sh，跳过自动配置"
+  return 1
 }
