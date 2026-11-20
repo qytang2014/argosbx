@@ -6,14 +6,14 @@ if [ "$1" = "rep" ]; then
 if [ -z "${vlpt+x}" ] && [ -z "${hypt+x}" ] && [ -z "${tupt+x}" ] && \
    [ -z "${xhpt+x}" ] && [ -z "${vxpt+x}" ] && [ -z "${vwpt+x}" ] && \
    [ -z "${xupt+x}" ] && [ -z "${xcpt+x}" ] && [ -z "${nvpt+x}" ] && \
-   [ -z "${anpt+x}" ] && [ -z "${arpt+x}" ] && [ -z "${sspt+x}" ] && \
+   [ -z "${anpt+x}" ] && [ -z "${arpt+x}" ] && [ -z "${sspt+x}" ] && [ -z "${snpt+x}" ] && \
    [ -z "${vmpt+x}" ] && [ -z "${vmtls+x}" ] && [ -z "${sopt+x}" ]; then
   if [ -f "$HOME/agsbx/vars.env" ]; then
     while IFS= read -r _rl || [ -n "$_rl" ]; do
       case "$_rl" in ''|\#*) continue;; esac
       _rn="${_rl%%=*}"
       case "$_rn" in
-        vlpt|hypt|tupt|xhpt|vxpt|vwpt|xupt|xcpt|nvpt|anpt|arpt|sspt|vmpt|vmtls|sopt)
+        vlpt|hypt|tupt|xhpt|vxpt|vwpt|xupt|xcpt|nvpt|anpt|arpt|sspt|snpt|vmpt|vmtls|sopt)
           if [ -z "${!_rn+x}" ]; then eval "export $_rl" 2>/dev/null || true; fi;;
       esac
     done < "$HOME/agsbx/vars.env"

@@ -45,8 +45,8 @@ chmod +x "$td/bin/ufw" "$td/bin/docker"
 run_main(){
   local assignments="$1" fn="$2"
   HOME="$td/home" PATH="$td/bin:/usr/bin:/bin" UFW_MOCK_LOG="$td/ufw.log" UFW_MOCK_STATUS="${UFW_STATUS:-active}" bash -c '
-    vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; hyp=""; vmp=""; vmt=""; sop="";
-    port_vl_re=""; port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
+    vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; snp=""; hyp=""; vmp=""; vmt=""; sop="";
+    port_vl_re=""; port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_sn=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
     eval "$1"
     source "modules/ufw.sh"
     "$2"
@@ -128,8 +128,8 @@ grep -Fq "ufw --force delete allow 31002/udp" "$td/ufw.log" || fail "cleanup fal
 # 8. Missing ufw: sync still writes state and returns 0.
 rm -rf "$td/home/agsbx"
 HOME="$td/home" PATH="/usr/bin:/bin" bash -c '
-  vlp=vlpt; port_vl_re=40001; hyp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; vmp=""; vmt=""; sop="";
-  port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
+  vlp=vlpt; port_vl_re=40001; hyp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; snp=""; vmp=""; vmt=""; sop="";
+  port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_sn=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
   source "modules/ufw.sh"; ufw_sync
 ' || fail "sync without ufw must return 0"
 grep -Fq "40001/tcp" "$td/home/agsbx/ufw.rules" || fail "sync without ufw must still record rules"

@@ -69,12 +69,12 @@ vars_merge(){
     case "$_vn" in vlpt2|vlpt_more) continue;; esac
     # rep: 只继承非协议变量，协议变量保持重置语义（显式写了哪些就装哪些）
     if [ "$1" = "rep" ]; then
-      case "$_vn" in vlpt|vmpt|vmtls|vwpt|hypt|tupt|xhpt|vxpt|anpt|arpt|sspt|sopt|nvpt|xupt|xcpt|*_more) continue;; esac
+      case "$_vn" in vlpt|vmpt|vmtls|vwpt|hypt|tupt|xhpt|vxpt|anpt|arpt|sspt|snpt|sopt|nvpt|xupt|xcpt|*_more) continue;; esac
     fi
     if [ -z "${!_vn+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
   if [ "$1" = "rep" ]; then return 0; fi
-  for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt; do
+  for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt snpt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
   done
   echo "增量更新失败：合并后没有任何协议变量，请在 add 命令前至少设置一个新增或修改的协议变量"
@@ -84,7 +84,7 @@ vars_save(){
   local f="$HOME/agsbx/vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc caddy_email web_proxy vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz hostname sub subid subpt; do
+  for v in uuid vlpt vmpt vmpt_more vmtls vmtls_more vwpt vwpt_more hypt hypt_more tupt tupt_more xhpt xhpt_more vxpt vxpt_more anpt anpt_more arpt arpt_more sspt sspt_more snpt sopt sopt_more nvpt nvpt_more xupt xupt_more xcpt xcpt_more reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc caddy_email web_proxy vlpt_kernel egress_nodes egress_bind egress_rules cfip hyjpt ippz hostname sub subid subpt; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -1704,14 +1704,14 @@ if [ "$1" = "rep" ]; then
 if [ -z "${vlpt+x}" ] && [ -z "${hypt+x}" ] && [ -z "${tupt+x}" ] && \
    [ -z "${xhpt+x}" ] && [ -z "${vxpt+x}" ] && [ -z "${vwpt+x}" ] && \
    [ -z "${xupt+x}" ] && [ -z "${xcpt+x}" ] && [ -z "${nvpt+x}" ] && \
-   [ -z "${anpt+x}" ] && [ -z "${arpt+x}" ] && [ -z "${sspt+x}" ] && \
+   [ -z "${anpt+x}" ] && [ -z "${arpt+x}" ] && [ -z "${sspt+x}" ] && [ -z "${snpt+x}" ] && \
    [ -z "${vmpt+x}" ] && [ -z "${vmtls+x}" ] && [ -z "${sopt+x}" ]; then
   if [ -f "$HOME/agsbx/vars.env" ]; then
     while IFS= read -r _rl || [ -n "$_rl" ]; do
       case "$_rl" in ''|\#*) continue;; esac
       _rn="${_rl%%=*}"
       case "$_rn" in
-        vlpt|hypt|tupt|xhpt|vxpt|vwpt|xupt|xcpt|nvpt|anpt|arpt|sspt|vmpt|vmtls|sopt)
+        vlpt|hypt|tupt|xhpt|vxpt|vwpt|xupt|xcpt|nvpt|anpt|arpt|sspt|snpt|vmpt|vmtls|sopt)
           if [ -z "${!_rn+x}" ]; then eval "export $_rl" 2>/dev/null || true; fi;;
       esac
     done < "$HOME/agsbx/vars.env"
@@ -3364,7 +3364,7 @@ command -v register_hook >/dev/null 2>&1 && {
 # the node ports:
 #   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
-#   tcp+udp:  sspt, sopt, nvpt (naive h2=TCP, h3/QUIC=UDP, same port)
+#   tcp+udp:  sspt, sopt, nvpt (naive h2=TCP, h3/QUIC=UDP, same port), snpt (Snell listens on both)
 # Why xcpt is tcp only even though its display name says TCP/UDP:
 # the direct inbound uses alpn h2/http/1.1 (TCP); the UDP variants in
 # the display are CDN links, not the direct port. Opening UDP for it
@@ -3439,6 +3439,7 @@ ufw_desired_rules(){
   _ufw_emit "$anp" anpt "$port_an" "$HOME/agsbx/port_an" "tcp"
   _ufw_emit "$arp" arpt "$port_ar" "$HOME/agsbx/port_ar" "tcp"
   _ufw_emit "$ssp" sspt "$port_ss" "$HOME/agsbx/port_ss" "tcp udp"
+  _ufw_emit "$snp" snpt "$port_sn" "$HOME/agsbx/port_sn" "tcp udp"
   _ufw_emit "$hyp" hypt "$port_hy2" "$HOME/agsbx/port_hy2" "udp"
   _ufw_emit "$vmp" vmpt "$port_vm_ws" "$HOME/agsbx/port_vm_ws" "tcp"
   _ufw_emit "$vmt" vmtls "$port_vm_tls" "$HOME/agsbx/port_vm_tls" "tcp"
@@ -3790,7 +3791,7 @@ command -v register_hook >/dev/null 2>&1 && {
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)
 cmd=""
-for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt web_port; do
+for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt ym certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add ippz web_port; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
 done
 main="bash <(curl -Ls $url)"
@@ -3813,12 +3814,13 @@ cmd+="$main${*:+ $*}"
 [ -z "${nvpt+x}" ] || nvp=yes
 [ -z "${xupt+x}" ] || xup=yes
 [ -z "${xcpt+x}" ] || xcp=yes
+[ -z "${snpt+x}" ] || snp=yes
 if agsbx_is_installed; then
 if [ "$1" = "rep" ]; then
-[ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$snp" = yes ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 else
-[ "$1" = "del" ] || [ "$1" = "backup" ] || [ "$1" = "check" ] || [ "$1" = "restore" ] || [ "$1" = "audit" ] || [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "up" ] || [ "$1" = "update" ] || [ "$1" = "list" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$1" = "del" ] || [ "$1" = "backup" ] || [ "$1" = "check" ] || [ "$1" = "restore" ] || [ "$1" = "audit" ] || [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "up" ] || [ "$1" = "update" ] || [ "$1" = "list" ] || [ "$snp" = yes ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 # vlpt comma list (private module, runs at top level, before exports).
 # The generator now has only one vlpt field: its value is a comma list.
@@ -3896,6 +3898,7 @@ export port_so=${sopt:-''}
 export port_nv=${nvpt:-''}
 export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
+export port_sn=${snpt:-''}
 if _is_install_run "$1"; then vlpt_coexistence_check; fi
 export ym_vl_re=${reym:-$ym}
 if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi
@@ -4387,7 +4390,7 @@ echo
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo "项目地址：github.com/qytang2014/argosbx"
 echo "Argosbx一键无交互小钢炮脚本💣"
-echo "当前版本：V26.7.16"
+echo "当前版本：V26.11.20"
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 hostname=${hostname:-$(uname -a | awk '{print $2}')}
 op=$(cat /etc/redhat-release 2>/dev/null || cat /etc/os-release 2>/dev/null | grep -i pretty_name | cut -d \" -f2)
@@ -4789,7 +4792,7 @@ fi
 if [ -n "$vlp" ] && [ "$vlpt_on" = "xray" ]; then
 vlp=vlpt
 port_vl_re=$(port_resolve "vl_re" "$port_vl_re")
-echo "Vless-tcp-reality-v端口：$port_vl_re"
+echo "Vless-tcp-reality-enc端口：$port_vl_re"
 cat >> "$HOME/agsbx/xr.json" <<EOF
         {
             "tag":"reality-vision",
@@ -5479,6 +5482,24 @@ EOF
 else
 ssp=ssptargo
 fi
+if [ -n "$snp" ]; then
+snp=snpt
+port_sn=$(port_resolve "sn" "$port_sn")
+echo "Snell-V6端口：$port_sn"
+cat >> "$HOME/agsbx/sb.json" <<EOF
+        {
+         "type": "snell",
+         "tag": "snellv",
+         "listen": "::",
+         "listen_port": $port_sn,
+         "version": 6,
+         "psk": "$uuid",
+         "mode": "default"
+    },  
+EOF
+else
+snp=snptargo
+fi
 # Other protocols more instances on Sing-box (private module, loop).
 # fallback: port_get/port_set 未定义时（孤立测试），用旧文件方式
 if ! command -v port_get >/dev/null 2>&1; then
@@ -5489,7 +5510,7 @@ port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
 fi
 # Inserted into installsb() after the vlpt-more block, before sspt is
 # not applicable here: sspt itself is looped below, so this module is
-# inserted at the end of installsb(), after the sspt block.
+# inserted at the end of installsb(), after the snpt block.
 # Same while-loop parsing as proto-more-xray: trailing empty items
 # are preserved, empty/random reuses the port file for that index,
 # non-numeric items are skipped with a warning and the index advances.
@@ -6361,6 +6382,7 @@ egress_inbound_tags(){
     arpt[0-9]*) echo "anyreality-sb-${low#arpt}";;
     sspt) echo "ss-2022";;
     sspt[0-9]*) echo "ss-2022-${low#sspt}";;
+    snpt) echo "snellv";;
     hypt) echo "hy2-xr,hy2-sb";;
     hypt[0-9]*) echo "hy2-xr-${low#hypt},hy2-sb-${low#hypt}";;
     vmpt) echo "vmess-xr,vmess-sb";;
@@ -7049,7 +7071,7 @@ xrsbvmtls
 xrsbso
 warpsx
 xrsbout
-tup="tuptargo"; anp="anptargo"; arp="arptargo"; ssp="ssptargo"; nvp="nvptargo"
+tup="tuptargo"; anp="anptargo"; arp="arptargo"; ssp="ssptargo"; nvp="nvptargo"; snp="snptargo"
 elif [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ] && [ "$vlpt_on" != "xray" ]; then
 installsb
 xrsbhy2
@@ -7151,7 +7173,7 @@ else
 fi
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export agqc=\"${agqc}\" alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export agqc=\"${agqc}\" alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $snp=\"${port_sn}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
 fi
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
 echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
@@ -7238,7 +7260,7 @@ echo "$cdnip1" > "$HOME/agsbx/cdnip1"
 echo "$cdnip2" > "$HOME/agsbx/cdnip2"
 else
 cdnip1="www.shopify.com"
-cdnip2="www.wto.org"
+cdnip2="icook.tw"
 echo "$cdnip1" > "$HOME/agsbx/cdnip1"
 echo "$cdnip2" > "$HOME/agsbx/cdnip2"
 fi
@@ -7420,6 +7442,32 @@ vl_xh_link="vless://$uuid@$reality_addr:$port_xh?encryption=$enkey&flow=xtls-rpr
 echo "$vl_xh_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_xh_link"
 echo
+clxhreaencpt(){
+cat <<EOF
+- name: ${sxname}vless-xhttp-reality-enc-$hostname
+  type: vless
+  server: $server_ip
+  port: $port_xh
+  uuid: $uuid
+  udp: true
+  network: xhttp
+  tls: true
+  servername: $ym_vl_re
+  client-fingerprint: chrome
+  flow: xtls-rprx-vision
+  encryption: "$enkey"
+  reality-opts:
+    public-key: $public_key_x
+    short-id: $short_id_x
+    support-x25519mlkem768: true
+  xhttp-opts:
+    path: $uuid-xh
+    mode: auto
+EOF
+}
+clxhreaencpt1(){
+echo "- ${sxname}vless-xhttp-reality-enc-$hostname"
+}
 fi
 if grep vless-xhttp "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 echo "💣【 Vless-xhttp-enc 】支持ENC加密，节点信息如下："
@@ -7428,9 +7476,29 @@ vl_vx_link="vless://$uuid@$domain_addr:$port_vx?encryption=$enkey&flow=xtls-rprx
 echo "$vl_vx_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vx_link"
 echo
+clxhencpt(){
+cat <<EOF
+- name: ${sxname}vless-xhttp-enc-$hostname
+  type: vless
+  server: $server_ip
+  port: $port_vx
+  uuid: $uuid
+  udp: true
+  network: xhttp
+  tls: false
+  flow: xtls-rprx-vision
+  encryption: "$enkey"
+  xhttp-opts:
+    path: $uuid-vx
+    mode: auto
+EOF
+}
+clxhencpt1(){
+echo "- ${sxname}vless-xhttp-enc-$hostname"
+}
 if [ -f "$HOME/agsbx/cdnym" ]; then
 echo "💣【 Vless-xhttp-ecn-cdn 】支持ENC加密，节点信息如下："
-echo "可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口"
+echo "可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口(无订阅节点)"
 vl_vx_cdn_link="vless://$uuid@$cdnip1:$port_vx?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&host=$xvvmcdnym&path=$uuid-vx&mode=auto#${sxname}vl-xhttp-enc-cdn-$hostname"
 echo "$vl_vx_cdn_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vx_cdn_link"
@@ -7444,16 +7512,34 @@ vl_vw_link="vless://$uuid@$domain_addr:$port_vw?encryption=$enkey&flow=xtls-rprx
 echo "$vl_vw_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vw_link"
 echo
+clwsencpt(){
+cat <<EOF
+- name: ${sxname}vless-ws-enc-$hostname
+  type: vless
+  server: $server_ip
+  port: $port_vw
+  uuid: $uuid
+  udp: true
+  tls: false
+  network: ws
+  flow: xtls-rprx-vision
+  encryption: "$enkey"
+  ws-opts:
+    path: $uuid-vw
+EOF
+}
+clwsencpt1(){
+echo "- ${sxname}vless-ws-enc-$hostname"
+}
 if [ -f "$HOME/agsbx/cdnym" ]; then
 echo "💣【 Vless-ws-enc-cdn 】支持ENC加密，节点信息如下："
-echo "可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口"
+echo "可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口(无订阅节点)"
 vl_vw_cdn_link="vless://$uuid@$cdnip1:$port_vw?encryption=$enkey&flow=xtls-rprx-vision&type=ws&host=$xvvmcdnym&path=$uuid-vw#${sxname}vl-ws-enc-cdn-$hostname"
 echo "$vl_vw_cdn_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_vw_cdn_link"
 echo
 fi
 fi
-
 if grep xhttp-h23 "$HOME/agsbx/xr.json" >/dev/null 2>&1; then
 port_xc=$(port_get "xc" 2>/dev/null)
 xhttpclmh(){
@@ -7600,40 +7686,12 @@ echo "- ${sxname}Xhttp-UDP-$hostname"
 }
 fi
 if grep -q '"tag":"reality-vision"' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q '"tag": "vl-reality-sb"' "$HOME/agsbx/sb.json" 2>/dev/null; then
-echo "💣【 Vless-tcp-reality-vision 】节点信息如下："
+echo "💣【 Vless-tcp-reality-enc 】节点信息如下："
 port_vl_re=$(port_get "vl_re" 2>/dev/null)
 vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none#${sxname}vl-reality-vision-$hostname"
 echo "$vl_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_link"
 echo
-sbvlpt(){
-cat <<EOF
-    {
-      "type": "vless",
-      "tag": "${sxname}vless-$hostname",
-      "server": "$reality_addr",
-      "server_port": $port_vl_re,
-      "uuid": "$uuid",
-      "flow": "xtls-rprx-vision",
-      "tls": {
-        "enabled": true,
-        "server_name": "$ym_vl_re",
-        "utls": {
-          "enabled": true,
-          "fingerprint": "chrome"
-        },
-      "reality": {
-          "enabled": true,
-          "public_key": "$vlpt_pbk",
-          "short_id": "$vlpt_sid"
-        }
-      }
-    },
-EOF
-}
-sbvlpt1(){
-echo "\"${sxname}vless-$hostname\","
-}
 clvlpt(){
 cat <<EOF
 - name: ${sxname}vless-reality-vision-$hostname               
@@ -8341,6 +8399,41 @@ ss_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$port_ss" |
 echo "$ss_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ss_link"
 echo
+# sbvlpt-restore.sh: restore upstream-deleted sbvlpt()/sbvlpt1()
+# (upstream d4f4b91 deleted the sing-box subscription entry for vlpt;
+# QUINN decided 2026-11-19 to keep it). Inserted by build.py before
+# sbsspt(). pbk/sid are kernel-aware ($vlpt_pbk/$vlpt_sid, set by
+# vlpt-display-pbk); server is $server_ip here so the reality-sb-config
+# patch (which rewrites it to $reality_addr) still finds exactly one
+# occurrence. encryption stays none: sing-box has no VLESS Encryption.
+sbvlpt(){
+cat <<EOF
+    {
+      "type": "vless",
+      "tag": "${sxname}vless-$hostname",
+      "server": "$reality_addr",
+      "server_port": $port_vl_re,
+      "uuid": "$uuid",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "$ym_vl_re",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+      "reality": {
+          "enabled": true,
+          "public_key": "$vlpt_pbk",
+          "short_id": "$vlpt_sid"
+        }
+      }
+    },
+EOF
+}
+sbvlpt1(){
+echo "\"${sxname}vless-$hostname\","
+}
 sbsspt(){
 cat <<EOF
 {
@@ -8362,7 +8455,7 @@ echo "\"${sxname}Shadowsocks-2022-$hostname\","
 }
 clsspt(){
 cat <<EOF
-- name: "${sxname}Shadowsocks-2022-$hostname"
+- name: ${sxname}Shadowsocks-2022-$hostname
   type: ss
   server: $domain_addr
   port: $port_ss
@@ -8375,6 +8468,59 @@ EOF
 }
 clsspt1(){
 echo "- ${sxname}Shadowsocks-2022-$hostname"
+}
+fi
+if grep snellv "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
+echo "💣【 Snell-V6 】节点信息如下："
+port_sn=$(port_get "sn" 2>/dev/null)
+sn1_link="snell://$uuid@$domain_addr:$port_sn?version=6&reuse=true&mode=default#${sxname}Snell-V6-$hostname"
+sn2_link="snell://$(echo -n "chacha20-ietf-poly1305:$uuid@$domain_addr:$port_sn" | base64 -w0)?tfo=1&version=6&reuse=1&mode=default&udp=1#${sxname}Snell-V6-$hostname"
+echo "$sn1_link" >> "$HOME/agsbx/jhsub.txt"
+echo "$sn2_link" >> "$HOME/agsbx/jhsub.txt"
+echo "Snell-V6必要参数仅三个，可手动填写至客户端"
+echo "客户端地址：$server_ip"
+echo "客户端端口：$port_sn"
+echo "客户端密码：$uuid"
+echo "版本号选择：6"
+echo
+echo "NekoboxF单节点分享："
+echo "$sn1_link"
+echo
+echo "Shadowrocket小火箭单节点分享："
+echo "$sn2_link"
+echo
+sbsnpt(){
+cat <<EOF
+{
+  "type": "snell",
+  "tag": "${sxname}Snell-V6-$hostname",
+  "server": "$domain_addr",
+  "server_port": $port_sn,
+  "version": 6,
+  "psk": "$uuid",
+  "mode": "default",
+  "reuse": true
+     },
+EOF
+}
+sbsnpt1(){
+echo "\"${sxname}Snell-V6-$hostname\","
+}
+clsnpt(){
+cat <<EOF
+- name: ${sxname}Snell-V6-$hostname
+  type: snell
+  server: $domain_addr
+  port: $port_sn
+  psk: "$uuid"
+  version: 6
+  mode: default
+  udp: true
+  reuse: true
+EOF
+}
+clsnpt1(){
+echo "- ${sxname}Snell-V6-$hostname"
 }
 fi
 if grep vmess-xr "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vmess-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then
@@ -8910,12 +9056,86 @@ vwatls_link1="vless://$uuid@$cdnip1:443?encryption=$enkey&flow=xtls-rprx-vision&
 echo "$vwatls_link1" >> "$HOME/agsbx/jhsub.txt"
 vwa_link2="vless://$uuid@$cdnip2:80?encryption=$enkey&flow=xtls-rprx-vision&type=ws&host=$argodomain&path=$uuid-vw&security=none#${sxname}vless-ws-argo-enc-vision-$hostname"
 echo "$vwa_link2" >> "$HOME/agsbx/jhsub.txt"
+clvlwsargoencpt(){
+cat <<EOF
+- name: ${sxname}vless-ws-tls-argo-enc-vision-$hostname-443
+  type: vless
+  server: "$cdnip1"
+  port: 443
+  uuid: "$uuid"
+  encryption: "$enkey"
+  flow: xtls-rprx-vision
+  udp: true
+  tls: true
+  servername: "$argodomain"
+  skip-cert-verify: false
+  network: ws
+  ws-opts:
+    path: "$uuid-vw"
+    headers:
+      Host: "$argodomain"
+- name: ${sxname}vless-ws-argo-enc-vision-$hostname-80
+  type: vless
+  server: "$cdnip2"
+  port: 80
+  uuid: "$uuid"
+  encryption: "$enkey"
+  flow: xtls-rprx-vision
+  udp: true
+  network: ws
+  ws-opts:
+    path: "$uuid-vw"
+    headers:
+      Host: "$argodomain"
+EOF
+}
+clvlwsargoencpt1(){
+echo "- ${sxname}vless-ws-tls-argo-enc-vision-$hostname-443"
+echo "- ${sxname}vless-ws-argo-enc-vision-$hostname-80"
+}
 elif [ "$vlvm" = "Vlessx" ]; then
 vlvmvx='Vless-xhttp'
 vwatls_link1="vless://$uuid@$cdnip1:443?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&host=$argodomain&path=$uuid-vx&security=tls&sni=$argodomain&mode=auto&fp=chrome&insecure=0&allowInsecure=0#${sxname}vless-xhttp-tls-argo-enc-vision-$hostname"
 echo "$vwatls_link1" >> "$HOME/agsbx/jhsub.txt"
 vwa_link2="vless://$uuid@$cdnip2:80?encryption=$enkey&flow=xtls-rprx-vision&type=xhttp&host=$argodomain&mode=auto&path=$uuid-vx&security=none#${sxname}vless-xhttp-argo-enc-vision-$hostname"
 echo "$vwa_link2" >> "$HOME/agsbx/jhsub.txt"
+clvlxhargoencpt(){
+cat <<EOF
+- name: ${sxname}vless-xhttp-tls-argo-enc-vision-$hostname-443
+  type: vless
+  server: "$cdnip1"
+  port: 443
+  uuid: "$uuid"
+  encryption: "$enkey"
+  flow: xtls-rprx-vision
+  udp: true
+  tls: true
+  servername: "$argodomain"
+  skip-cert-verify: false
+  network: xhttp
+  xhttp-opts:
+    path: "$uuid-vx"
+    host: "$argodomain"
+    mode: auto
+- name: ${sxname}vless-xhttp-argo-enc-vision-$hostname-80
+  type: vless
+  server: "$cdnip2"
+  port: 80
+  uuid: "$uuid"
+  encryption: "$enkey"
+  flow: xtls-rprx-vision
+  udp: true
+  network: xhttp
+  xhttp-opts:
+    path: "$uuid-vx"
+    host: "$argodomain"
+    mode: auto
+EOF
+}
+clvlxhargoencpt1(){
+echo "- ${sxname}vless-xhttp-tls-argo-enc-vision-$hostname-443"
+echo "- ${sxname}vless-xhttp-argo-enc-vision-$hostname-80"
+}
 fi
 sbtk=$(cat "$HOME/agsbx/sbargotoken.log" 2>/dev/null)
 if [ -n "$sbtk" ]; then
@@ -8934,7 +9154,6 @@ ${vma_link7}${vwa_link2}
 "
 )
 fi
-
 get_func() {
 local f=$1
 if type "$f" >/dev/null 2>&1; then
@@ -8943,10 +9162,10 @@ out=$($f)
 [ -n "$out" ] && printf "%s\n" "$out"
 fi
 }
-sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
-clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
-sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
-clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
+sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsnpt; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more; get_func sbanpt; get_func sbarpt; get_func sbvmpt; get_func sbvmtlspt; get_func sbhypt; get_func sbtupt; get_func sbnvpt; get_func sbvmargopt)"
+clxy="$(get_func clsnpt; get_func clwsencpt; get_func clxhencpt; get_func clxhreaencpt; get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more; get_func clanpt; get_func clvmpt; get_func clvmtlspt; get_func clhypt; get_func cltupt; get_func clvmargopt)"
+sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsnpt1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1; get_func sbanpt1; get_func sbarpt1; get_func sbvmpt1; get_func sbvmtlspt1; get_func sbhypt1; get_func sbtupt1; get_func sbnvpt1; get_func sbvmargopt1)"
+clgz="$({ get_func clsnpt1; get_func clwsencpt1; get_func clxhencpt1; get_func clxhreaencpt1; get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1; get_func clanpt1; get_func clvmpt1; get_func clvmtlspt1; get_func clhypt1; get_func cltupt1; get_func clvmargopt1; } | sed '2,$s/^/    /')"
 sbgz=$(printf "%s\n" "$sbgz" | sed '$ s/,$//')
 cat > $HOME/agsbx/sbox.json <<EOF
 {
@@ -9431,7 +9650,6 @@ command -v openssl >/dev/null 2>&1 && openssl req -new -x509 -days 36500 -key "$
 SHA256=$(openssl x509 -in $HOME/agsbx/selfsigned/cert.crt -outform DER | sha256sum | awk '{print $1}')
 echo "$SHA256" > "$HOME/agsbx/SHA256.txt"
 fi
-#fi
 domain_cert_ready=0
 if [ -n "$ym" ]; then
   cert_migrate_paths

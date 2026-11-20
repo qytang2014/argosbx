@@ -17,14 +17,14 @@ grep -Fq "releases/download/argosbx/private.key" "$F" && { echo "FAIL: built con
 grep -Fq "releases/download/argosbx/cert.pem" "$F" && { echo "FAIL: built container still downloads public cert.pem"; FAIL=1; }
 # Kernel binary downloads stay on original release
 grep -Fq "releases/download/argosbx/sing-box" "$F" || { echo "FAIL: sing-box download lost"; FAIL=1; }
-# Links: Reality + non-TLS use domain_addr, TLS uses add/sni/tls_ins, CDN/Argo untouched
+# Links: Reality + non-TLS use domain_addr, TLS uses add/sni/tls_ins, CDN/Argo use icook.tw (our default, not upstream author's yg domains)
 for link in 'vl_xh_link="vless://$uuid@$domain_addr:$xhpt' 'vl_link="vless://$uuid@$domain_addr:$vlpt' \
             'ar_link="anytls://$uuid@$domain_addr:$arpt' 'vl_vx_link="vless://$uuid@$domain_addr:$vxpt' \
             'vl_vw_link="vless://$uuid@$domain_addr:$vwpt' 'hy2_link="hysteria2://$uuid@$add:$hypt?security=tls&alpn=h3&insecure=$hy2_c_ins&sni=$sni$hy2_c_pin' \
             'an_link="anytls://$uuid@$add:$anpt?insecure=$tls_ins'; do
   grep -Fq "$link" "$F" || { echo "FAIL: missing $link"; FAIL=1; }
 done
-grep -Fq 'vl_vx_cdn_link="vless://$uuid@yg' "$F" || { echo "FAIL: CDN link changed"; FAIL=1; }
+grep -Fq 'vl_vx_cdn_link="vless://$uuid@icook.tw' "$F" || { echo "FAIL: CDN link changed"; FAIL=1; }
 grep -Fq 'sni=$reym' "$F" || { echo "FAIL: container Reality SNI changed"; FAIL=1; }
 # 2. Cert setup isolation: source only the module function
 mkcert() { # $1=dir $2=domain

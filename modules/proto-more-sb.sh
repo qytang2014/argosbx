@@ -8,7 +8,7 @@ port_set(){ local key="$1" val="$2"; echo "$val" > "$HOME/agsbx/port_$key"; }
 fi
 # Inserted into installsb() after the vlpt-more block, before sspt is
 # not applicable here: sspt itself is looped below, so this module is
-# inserted at the end of installsb(), after the sspt block.
+# inserted at the end of installsb(), after the snpt block.
 # Same while-loop parsing as proto-more-xray: trailing empty items
 # are preserved, empty/random reuses the port file for that index,
 # non-numeric items are skipped with a warning and the index advances.

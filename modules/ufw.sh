@@ -14,7 +14,7 @@
 # the node ports:
 #   tcp only: vlpt (incl. comma instances), xhpt, vxpt, vwpt, xcpt, anpt, arpt, vmpt, vmtls
 #   udp only: xupt, tupt, hypt
-#   tcp+udp:  sspt, sopt, nvpt (naive h2=TCP, h3/QUIC=UDP, same port)
+#   tcp+udp:  sspt, sopt, nvpt (naive h2=TCP, h3/QUIC=UDP, same port), snpt (Snell listens on both)
 # Why xcpt is tcp only even though its display name says TCP/UDP:
 # the direct inbound uses alpn h2/http/1.1 (TCP); the UDP variants in
 # the display are CDN links, not the direct port. Opening UDP for it
@@ -89,6 +89,7 @@ ufw_desired_rules(){
   _ufw_emit "$anp" anpt "$port_an" "$HOME/agsbx/port_an" "tcp"
   _ufw_emit "$arp" arpt "$port_ar" "$HOME/agsbx/port_ar" "tcp"
   _ufw_emit "$ssp" sspt "$port_ss" "$HOME/agsbx/port_ss" "tcp udp"
+  _ufw_emit "$snp" snpt "$port_sn" "$HOME/agsbx/port_sn" "tcp udp"
   _ufw_emit "$hyp" hypt "$port_hy2" "$HOME/agsbx/port_hy2" "udp"
   _ufw_emit "$vmp" vmpt "$port_vm_ws" "$HOME/agsbx/port_vm_ws" "tcp"
   _ufw_emit "$vmt" vmtls "$port_vm_tls" "$HOME/agsbx/port_vm_tls" "tcp"

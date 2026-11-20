@@ -269,10 +269,9 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'agqc', 'web_proxy'];", "index-optids", 1)
-    # agqc 生成器字段（2026-11-09）：Argo 卡片里加隧道协议下拉 + 使用场景说明
-    h = insert_after(h, '<div class="row"><label>固定隧道Token <span class="pill">agk</span></label><input id="agk" type="text" placeholder="Zero Trust已提取ey开头的秘钥，留空则临时隧道" disabled></div>',
-                     '\n        <div class="row"><label>Argo隧道协议 <span class="pill">agqc</span></label><select id="agqc"><option value="">默认 http2</option><option value="quic">QUIC</option></select><div class="field-note">QUIC 走 UDP，弱网/丢包严重时更快；UDP 被墙或隧道连不上时改回 http2（默认）。</div></div>', "index-agqc-field")
+                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'web_proxy'];", "index-optids", 1)
+    # index-agqc-field REMOVED: upstream d4f4b91 ships its own
+    # id="agqc" select in the Argo card; ours would duplicate the id.
     # warp 修复（2026-11-04）：生成器"默认本地IP"选项 value 从 "" 改 "no"，否则空值进 WARP 分支
     h = replace(h, '<option value="">默认 服务器本地IP出站</option>',
                 '<option value="no">默认 服务器本地IP出站</option>', "warp-default-no", 1)
@@ -289,7 +288,7 @@ def build_index():
     # reset, dynamic disabling and paste-back all keep working unchanged,
     # and there is exactly one such element (it is NOT also in the global
     # config card any more).
-    h = replace(h, '            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-vision <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">\n',
+    h = replace(h, '            <label><input type="checkbox" data-proto="vlpt"> Vless-tcp-reality-enc <span class="pill">vlpt</span></label><input type="text" placeholder="留空则随机端口" data-port="vlpt">\n',
                 '', "index-vlpt-out-of-xray", 1)
     h = replace(h, '        <div class="protocol-group separator">\n          <h3>Xray可选协议：</h3>',
                 '''        <div class="protocol-group separator">
@@ -405,18 +404,24 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'agqc', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---
     h = replace(h, '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n',
                 '            <label><input type="checkbox" data-proto="vmpt"> Vmess-ws <span class="pill">vmpt</span></label><input type="text" placeholder="留空则随机端口（Argo固定隧道的URL端口相同）" data-port="vmpt">\n            <label><input type="checkbox" data-proto="vmtls"> Vmess-ws-tls <span class="pill">vmtls</span></label><input type="text" placeholder="留空则随机端口" data-port="vmtls">\n', "index-vmtls-checkbox", 1)
-    h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];",
-                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt'];", "index-vmtls-protokeys", 1)
+    h = replace(h, "  const protoKeys = ['sopt','vmpt','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt','snpt'];",
+                "  const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt','snpt'];", "index-vmtls-protokeys", 1)
     h = replace(h, "      if (command === 'rep') {",
                 "      if (command === 'rep' || command === 'add') {", "index-add-handler", 1)
     h = replace(h, "output.value = (vars ? vars + ' ' : '') + selectedCommand + ' rep';",
                 "output.value = (vars ? vars + ' ' : '') + selectedCommand + ' ' + command;", "index-add-output", 1)
+    # upstream d4f4b91 stray line + quote-escape typo: drop the stray
+    # ```[cite: 1] line after </html>, and restore the correct " -> \"
+    # escaping upstream broke (it now writes " as \\ instead).
+    h = replace(h, '</html>\n```[cite: 1]\n', '</html>\n', "index-stray-cite-line", 1)
+    h = replace(h, "val.replace(/\"/g, '" + chr(92)*4 + "')",
+                "val.replace(/\"/g, '" + chr(92)*2 + "\"')", "index-quote-escape-fix", 1)
     lines = h.split("\n", 1)
     out = lines[0] + "\n<!-- GENERATED BY build/build.py - DO NOT EDIT BY HAND - sources: upstream/index.html + modules/index-*.html -->\n" + lines[1]
     (ROOT / "index.html").write_text(out)
@@ -512,16 +517,15 @@ else
 fi'''
     t = replace(t, '(command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")', script_install_cmd, "script-copy-priority", 1)
 
-    # --- dead code: remove commented-out upstream private.key/cert.crt download ---
-    # The original public private.key was deliberately dropped (it is public,
-    # so it is not private); the commented block is dead weight.
-    t = replace(t, '#if [ ! -f "$HOME/agsbx/private.key" ]; then\n#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/private.key"; out="$HOME/agsbx/private.key"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")\n#url="https://github.com/yonggekkk/argosbx/releases/download/argosbx/cert.crt"; out="$HOME/agsbx/cert.crt"; (command -v curl>/dev/null 2>&1 && curl -Ls -o "$out" --retry 2 "$url") || (command -v wget>/dev/null 2>&1 && timeout 3 wget -q -O "$out" --tries=2 "$url")\n#echo "fc6dca8cfc4081102aa9655d0d4805c27d7266f605541d242ad66ad00a284a35" > "$HOME/agsbx/SHA256.txt"\n#else\n', '', "dead-private-key-block", 1)
+    # dead-private-key-block REMOVED: upstream d4f4b91 deleted the
+    # commented-out private.key/cert.crt block itself; nothing left
+    # to strip (final state already matches).
 
     # --- vmess-ws-tls (private): new protocol flag vmtls, internal flag vmt ---
     # Top variable list, flag handling, rep/install guards, port export,
     # recovery line, and vars_save list all gain vmtls, following vmpt.
-    t = replace(t, "for v in uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do", "vmtls-top-list", 1)
+    t = replace(t, "for v in agqc sub subid subpt snpt uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do",
+                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do", "vmtls-top-list", 1)
     # warp 逻辑修复（2026-11-04）：空值不再走 WARP；加显式 off/no/direct；WARP 检测改 WireGuard
     t = replace(t, '""|sx|xs) s1outtag=warp-out;',
                 'sx|xs) s1outtag=warp-out;', "warp-no-empty", 1)
@@ -580,8 +584,8 @@ fi'''
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      build_camouflage(), "camouflage-module-anchor")
     # --- variable lists ---
-    t = replace(t, "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap; do",
-                "for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt web_port; do", "export-list", 1)
+    t = replace(t, "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do",
+                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt ym certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add ippz web_port; do", "export-list", 1)
     # --- vmess-ws-tls inbound (main): insert xrsbvmtls after xrsbvm ---
     vmtls_mod = read("modules/vmtls.sh")
     t = replace(t, "xrsbso(){\nif [ -n \"$sop\" ]; then",
@@ -625,7 +629,7 @@ fi
 '''
     t = replace(t, "ins(){\nif [ \"$nvp\" != yes ]",
                 "ins(){\n" + vlpt_on + "if [ \"$nvp\" != yes ]", "vlpt-on-compute", 1)
-    t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ]; then',
+    t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then',
                 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; then', "vlpt-ins-xray-only", 1)
     t = replace(t, 'elif [ "$xhp" != yes ] && [ "$vlp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ]; then',
                 'elif [ "$xhp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ] && [ "$vlpt_on" != "xray" ]; then', "vlpt-ins-sb-only", 1)
@@ -661,10 +665,46 @@ fi
                 'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi\nif grep xhttp-reality "$HOME/agsbx/xr.json"', "vlpt-display-pbk", 1)
     t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then',
                 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then', "vlpt-display-guard", 1)
-    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
+    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=$dekey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
                 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none', "vlpt-link-pbk", 1)
-    t = replace(t, '          "public_key": "$public_key_x",\n          "short_id": "$short_id_x"',
-                '          "public_key": "$vlpt_pbk",\n          "short_id": "$vlpt_sid"', "vlpt-sb-config-pbk", 1)
+    # vlpt link name: upstream renamed the display to reality-enc when
+    # it switched to ENC; we keep encryption=none, so the name must
+    # stay vision (instance 1) to match instances 2+ and the truth.
+    t = replace(t, 'vl-reality-enc-$hostname', 'vl-reality-vision-$hostname', "vlpt-link-name-vision", 1)
+    # vlpt inbound: revert upstream ENC decryption to none (we do not
+    # follow Reality ENC; the link stays encryption=none, so the
+    # server must not require ENC or the node breaks).
+    t = replace(t, '''            "tag":"reality-vision",
+            "listen": "::",
+            "port": $port_vl_re,
+            "protocol": "vless",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}",
+                        "flow": "xtls-rprx-vision"
+                    }
+                ],
+                "decryption": "${dekey}"''',
+                '''            "tag":"reality-vision",
+            "listen": "::",
+            "port": $port_vl_re,
+            "protocol": "vless",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "${uuid}",
+                        "flow": "xtls-rprx-vision"
+                    }
+                ],
+                "decryption": "none"''', "vlpt-inbound-decryption-none", 1)
+    # sbvlpt() restored (upstream d4f4b91 deleted it; QUINN decided
+    # 2026-11-19 to keep it): insert before sbsspt(). pbk/sid are
+    # already kernel-aware in the module; server stays $server_ip so
+    # the reality-sb-config patch below still finds one occurrence.
+    sbvlpt_restore = read("modules/sbvlpt-restore.sh")
+    t = replace(t, 'sbsspt(){',
+                sbvlpt_restore + 'sbsspt(){', "sbvlpt-restore", 1)
     t = replace(t, '    public-key: $public_key_x    \n    short-id: $short_id_x',
                 '    public-key: $vlpt_pbk    \n    short-id: $vlpt_sid', "vlpt-clash-pbk", 1)
 
@@ -702,16 +742,16 @@ fi
     t = replace(t, 'if [ -n "$ssp" ]; then\nssp=sspt\n',
                 vlpt_more_sb + 'if [ -n "$ssp" ]; then\nssp=sspt\n', "vlpt-more-sb-block", 1)
     vlpt_more_display = read("modules/vlpt-more-display.sh")
-    t = replace(t, 'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\nif grep ss-2022',
+    t = replace(t, 'clvlpt1(){\necho "- ${sxname}vless-reality-enc-$hostname"\n}\nfi\nif grep ss-2022',
                 'clvlpt1(){\necho "- ${sxname}vless-reality-vision-$hostname"\n}\nfi\n' + vlpt_more_display + 'if grep ss-2022', "vlpt-more-display-block", 1)
-    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbsspt;',
-                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt;', "vlpt-more-sbxy", 1)
-    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt;',
-                'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;', "vlpt-more-clxy", 1)
-    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbsspt1;',
-                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
-    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
-                'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
+    t = replace(t, 'sbxy="$(get_func sbsnpt; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsnpt; get_func sbsspt;', "vlpt-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func clsnpt; get_func clvlwsargoencpt; get_func clvlxhargoencpt; get_func clwsencpt; get_func clxhencpt; get_func clxhreaencpt; get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clsspt;',
+                'clxy="$(get_func clsnpt; get_func clwsencpt; get_func clxhencpt; get_func clxhreaencpt; get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;', "vlpt-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbsnpt1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsnpt1; get_func sbsspt1;', "vlpt-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func clsnpt1; get_func clvlwsargoencpt1; get_func clvlxhargoencpt1; get_func clwsencpt1; get_func clxhencpt1; get_func clxhreaencpt1; get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clsspt1;',
+                'clgz="$({ get_func clsnpt1; get_func clwsencpt1; get_func clxhencpt1; get_func clxhreaencpt1; get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;', "vlpt-more-clgz", 1)
 
     # --- other protocols comma multi-instance (private): same comma
     # semantics as vlpt, for every other protocol. Comma expansion
@@ -744,11 +784,11 @@ fi
     t = replace(t, 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + '}\n\ninstallsb(){',
                 'else\n[ -n "$vlp" ] || vlp=vlptargo\nfi\n' + vlpt_more_xray + proto_more_xray + '}\n\ninstallsb(){', "proto-more-xray-block", 1)
     proto_more_sb = read("modules/proto-more-sb.sh")
-    # installsb ends with the sspt block; insert after it, before the
-    # closing brace of installsb (the sspt else branch + fi + blank
+    # installsb ends with the snpt block; insert after it, before the
+    # closing brace of installsb (the snpt else branch + fi + blank
     # line + closing brace, followed by xrsbhy2).
-    t = replace(t, 'else\nssp=ssptargo\nfi\n}\n\nxrsbhy2(){',
-                'else\nssp=ssptargo\nfi\n' + proto_more_sb + '}\n\nxrsbhy2(){', "proto-more-sb-block", 1)
+    t = replace(t, 'else\nsnp=snptargo\nfi\n}\n\nxrsbhy2(){',
+                'else\nsnp=snptargo\nfi\n' + proto_more_sb + '}\n\nxrsbhy2(){', "proto-more-sb-block", 1)
     # Auto loops: insert each into its xrsb* function, after the first
     # instance, before the function's closing else/fi. The anchor is
     # the else branch that sets the recovery dummy for that protocol.
@@ -771,14 +811,14 @@ fi
     proto_more_display = read("modules/proto-more-display.sh")
     t = replace(t, 'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n',
                 'clvlpt_more_1(){\nfor _vlpt_more_i in $(vlpt_more_idx_list); do\necho "- ${sxname}vless-reality-vision-$_vlpt_more_i-$hostname"\ndone\n}\n' + proto_more_display, "proto-more-display-block", 1)
-    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt;',
-                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more;', "proto-more-sbxy", 1)
-    t = replace(t, 'clxy="$(get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;',
-                'clxy="$(get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more;', "proto-more-clxy", 1)
-    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt1;',
-                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1;', "proto-more-sbgz", 1)
-    t = replace(t, 'clgz="$({ get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;',
-                'clgz="$({ get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1;', "proto-more-clgz", 1)
+    t = replace(t, 'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsnpt; get_func sbsspt;',
+                'sbxy="$(get_func sbvlpt; get_func sbvlpt_more; get_func sbsnpt; get_func sbsspt_more; get_func sbsspt; get_func sbanpt_more; get_func sbarpt_more; get_func sbvmpt_more; get_func sbvmtlspt_more; get_func sbhypt_more; get_func sbtupt_more; get_func sbnvpt_more;', "proto-more-sbxy", 1)
+    t = replace(t, 'clxy="$(get_func clsnpt; get_func clwsencpt; get_func clxhencpt; get_func clxhreaencpt; get_func cludpxcpt; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt;',
+                'clxy="$(get_func clsnpt; get_func clwsencpt; get_func clxhencpt; get_func clxhreaencpt; get_func cludpxcpt; get_func clxupt_more; get_func clxcpt_more; get_func clxcpt; get_func clvlpt; get_func clvlpt_more; get_func clsspt_more; get_func clsspt; get_func clanpt_more; get_func clvmpt_more; get_func clvmtlspt_more; get_func clhypt_more; get_func cltupt_more;', "proto-more-clxy", 1)
+    t = replace(t, 'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsnpt1; get_func sbsspt1;',
+                'sbgz="$(get_func sbvlpt1; get_func sbvlpt_more_1; get_func sbsnpt1; get_func sbsspt_more_1; get_func sbsspt1; get_func sbanpt_more_1; get_func sbarpt_more_1; get_func sbvmpt_more_1; get_func sbvmtlspt_more_1; get_func sbhypt_more_1; get_func sbtupt_more_1; get_func sbnvpt_more_1;', "proto-more-sbgz", 1)
+    t = replace(t, 'clgz="$({ get_func clsnpt1; get_func clwsencpt1; get_func clxhencpt1; get_func clxhreaencpt1; get_func cludpxcpt1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt1;',
+                'clgz="$({ get_func clsnpt1; get_func clwsencpt1; get_func clxhencpt1; get_func clxhreaencpt1; get_func cludpxcpt1; get_func clxupt_more_1; get_func clxcpt_more_1; get_func clxcpt1; get_func clvlpt1; get_func clvlpt_more_1; get_func clsspt_more_1; get_func clsspt1; get_func clanpt_more_1; get_func clvmpt_more_1; get_func clvmtlspt_more_1; get_func clhypt_more_1; get_func cltupt_more_1;', "proto-more-clgz", 1)
 
     # --- cert module insertion (after cdnym export, before argo export) ---
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
@@ -897,8 +937,8 @@ fi
                 'agsbx_audit\nexit\nfi\nif [ "$1" = "up" ] || [ "$1" = "update" ]; then\nagsbx_update\nexit\nfi', "update-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
                 'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
-    t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$xcp\" = yes ]',
-                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$1\" = \"audit\" ] || [ \"$1\" = \"help\" ] || [ \"$1\" = \"-h\" ] || [ \"$1\" = \"--help\" ] || [ \"$1\" = \"up\" ] || [ \"$1\" = \"update\" ] || [ \"$1\" = \"list\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
+    t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$snp\" = yes ] || [ \"$xcp\" = yes ]',
+                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$1\" = \"audit\" ] || [ \"$1\" = \"help\" ] || [ \"$1\" = \"-h\" ] || [ \"$1\" = \"--help\" ] || [ \"$1\" = \"up\" ] || [ \"$1\" = \"update\" ] || [ \"$1\" = \"list\" ] || [ \"$snp\" = yes ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\nrun_hook pre_xrsbout\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
@@ -1065,8 +1105,14 @@ if _is_install_run "$1"; then"""
     t = replace(t, '      "tag": "${sxname}vless-$hostname",\n      "server": "$server_ip",',
                 '      "tag": "${sxname}vless-$hostname",\n      "server": "$reality_addr",', "reality-sb-config", 1)
     # clash client config for vless-reality (clvlpt)
-    t = replace(t, '- name: ${sxname}vless-reality-vision-$hostname               \n  type: vless\n  server: $server_ip',
+    t = replace(t, '- name: ${sxname}vless-reality-enc-$hostname               \n  type: vless\n  server: $server_ip',
                 '- name: ${sxname}vless-reality-vision-$hostname               \n  type: vless\n  server: $reality_addr', "reality-clash-config", 1)
+    # vlpt Clash entry must not carry ENC: server decryption stays
+    # none (we do not follow upstream ENC), so drop the encryption
+    # line upstream added to clvlpt (the flow+servername context
+    # makes this unique among the enc Clash functions).
+    t = replace(t, '  flow: xtls-rprx-vision\n  encryption: "$enkey"\n  servername: $ym_vl_re',
+                '  flow: xtls-rprx-vision\n  servername: $ym_vl_re', "vlpt-clash-encryption-none", 1)
     # sing-box client config for any-reality (sbarpt)
     t = replace(t, '        "tag": "${sxname}any-reality-$hostname",\n        "server": "$server_ip",',
                 '        "tag": "${sxname}any-reality-$hostname",\n        "server": "$reality_addr",', "reality-any-sb-config", 1)
@@ -1082,8 +1128,18 @@ if _is_install_run "$1"; then"""
                 '\\\"add\\\": \\\"$domain_addr\\\", \\\"port\\\": \\\"$port_vm_ws\\\"', "plain-vm-link", 1)
     t = replace(t, '      "tag": "${sxname}Shadowsocks-2022-$hostname",\n       "server": "$server_ip",',
                 '      "tag": "${sxname}Shadowsocks-2022-$hostname",\n       "server": "$domain_addr",', "plain-ss-sb-config", 1)
-    t = replace(t, '- name: "${sxname}Shadowsocks-2022-$hostname"\n  type: ss\n  server: $server_ip',
-                '- name: "${sxname}Shadowsocks-2022-$hostname"\n  type: ss\n  server: $domain_addr', "plain-ss-clash-config", 1)
+    t = replace(t, '- name: ${sxname}Shadowsocks-2022-$hostname\n  type: ss\n  server: $server_ip',
+                '- name: ${sxname}Shadowsocks-2022-$hostname\n  type: ss\n  server: $domain_addr', "plain-ss-clash-config", 1)
+    # Snell-V6 (upstream d4f4b91): same plain-addr rule as ss — links
+    # and client configs use $domain_addr, not $server_ip.
+    t = replace(t, 'sn1_link="snell://$uuid@$server_ip:$port_sn?version=6&reuse=true&mode=default#${sxname}Snell-V6-$hostname"',
+                'sn1_link="snell://$uuid@$domain_addr:$port_sn?version=6&reuse=true&mode=default#${sxname}Snell-V6-$hostname"', "plain-sn-link", 1)
+    t = replace(t, 'sn2_link="snell://$(echo -n "chacha20-ietf-poly1305:$uuid@$server_ip:$port_sn" | base64 -w0)?tfo=1&version=6&reuse=1&mode=default&udp=1#${sxname}Snell-V6-$hostname"',
+                'sn2_link="snell://$(echo -n "chacha20-ietf-poly1305:$uuid@$domain_addr:$port_sn" | base64 -w0)?tfo=1&version=6&reuse=1&mode=default&udp=1#${sxname}Snell-V6-$hostname"', "plain-sn-link2", 1)
+    t = replace(t, '  "tag": "${sxname}Snell-V6-$hostname",\n  "server": "$server_ip",',
+                '  "tag": "${sxname}Snell-V6-$hostname",\n  "server": "$domain_addr",', "plain-sn-sb-config", 1)
+    t = replace(t, '- name: ${sxname}Snell-V6-$hostname\n  type: snell\n  server: $server_ip',
+                '- name: ${sxname}Snell-V6-$hostname\n  type: snell\n  server: $domain_addr', "plain-sn-clash-config", 1)
     t = replace(t, '            "server": "$server_ip",\n            "server_port": $port_vm_ws,',
                 '            "server": "$domain_addr",\n            "server_port": $port_vm_ws,', "plain-vm-sb-config", 1)
     t = replace(t, '- name: ${sxname}vmess-ws-$hostname                         \n  type: vmess\n  server: $server_ip',
@@ -1286,7 +1342,7 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
 
     # --- consolidate port files to ports.env (string post-process) ---
     _port_vars = ['port_vl_re','port_xh','port_vx','port_xu','port_xc','port_vw',
-                  'port_nv','port_tu','port_an','port_ar','port_ss','port_hy2',
+                  'port_nv','port_tu','port_an','port_ar','port_ss','port_hy2','port_sn',
                   'port_vm_ws','port_vm_tls','port_so']
     _n = 0
     for _pv in _port_vars:
@@ -1337,7 +1393,7 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
         ('port_xu', 'xu'), ('port_vl_re', 'vl_re'), ('port_ss', 'ss'),
         ('port_vm_ws', 'vm_ws'), ('port_vm_tls', 'vm_tls'), ('port_nv', 'nv'),
         ('port_an', 'an'), ('port_ar', 'ar'), ('port_hy2', 'hy2'),
-        ('port_tu', 'tu'), ('port_so', 'so'),
+        ('port_tu', 'tu'), ('port_so', 'so'), ('port_sn', 'sn'),
     ]
     _m = 0
     for _var, _key in _simple_reads:
@@ -1397,6 +1453,15 @@ def build_container():
     c = replace(c, 'echo "甬哥Github项目 ：github.com/yonggekkk"\necho "甬哥Blogger博客 ：ygkkk.blogspot.com"\necho "甬哥YouTube频道 ：www.youtube.com/@ygkkk"', 'echo "项目地址：github.com/qytang2014/argosbx"', "container-banner-project-url", 1)
     c = replace(c, 'echo "Argosbx脚本项目地址：https://github.com/yonggekkk/argosbx"',
                 'echo "Argosbx脚本项目地址：https://github.com/qytang2014/argosbx"', "container-project-link", 1)
+    # --- container default CDN addresses: upstream uses the author's
+    # yg*.ygkkk.dpdns.org domains; ours use the same default CDN
+    # domain as the main script (icook.tw). WARP detection domain
+    # (ygkkk-warp.renky.eu.org) is left untouched. ---
+    c = replace(c, 'yg$(cfip).ygkkk.dpdns.org', 'icook.tw', "container-dpdns-cfip", 5)
+    for _i in range(1, 12):
+        c = replace(c, f'yg{_i}.ygkkk.dpdns.org', 'icook.tw', f'container-dpdns-yg{_i}', 1)
+    c = replace(c, '注：默认地址 yg数字.ygkkk.dpdns.org 可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口',
+                '注：默认地址 icook.tw 可自行更换优选IP域名，如是回源端口需手动修改443或者80系端口', "container-dpdns-note", 3)
     c = replace(c, "export name=${name}", "export name=${name}\nexport ym=${ym}\nexport vlpt_kernel=${vlpt_kernel}", "container-ym-export", 1)
     # --- vmess-ws-tls (container): export, inbound, call, display link ---
     c = replace(c, "export vmpt=${vmpt}", "export vmpt=${vmpt}\nexport vmtls=${vmtls}", "container-vmtls-export", 1)

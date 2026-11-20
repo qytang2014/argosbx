@@ -44,8 +44,8 @@ chmod +x "$td/bin/ufw" "$td/bin/firewall-cmd" "$td/bin/iptables"
 run_fw(){
   local assignments="$1" fn="$2"
   HOME="$td/home" PATH="$td/bin:/usr/bin:/bin" UFW_MOCK_LOG="$td/ufw.log" FWD_MOCK_LOG="$td/fwd.log" UFW_MOCK_STATUS="${UFW_STATUS:-active}" FWD_MOCK_STATE="${FWD_STATE:-running}" IPT_MOCK_BLOCKING="${IPT_BLOCKING:-0}" bash -c '
-    vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; hyp=""; vmp=""; vmt=""; sop="";
-    port_vl_re=""; port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
+    vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; snp=""; hyp=""; vmp=""; vmt=""; sop="";
+    port_vl_re=""; port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_sn=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so="";
     eval "$1"
     source "modules/ufw.sh"
     "$2"

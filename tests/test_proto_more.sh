@@ -110,9 +110,9 @@ cat > "$HOME/agsbx/sb.json" << 'EOF'
 EOF
 # ufw_desired_rules needs the ufw module; source it (functions only)
 . modules/ufw.sh
-vlp=""; vlp2=""; vlpt_more=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; hyp=""; vmp=""; vmt=""; sop=""
+vlp=""; vlp2=""; vlpt_more=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""; nvp=""; tup=""; anp=""; arp=""; ssp=""; snp=""; hyp=""; vmp=""; vmt=""; sop=""
 xhpt_more=""; vxpt_more=""; vwpt_more=""; xupt_more=""; xcpt_more=""; nvpt_more=""; tupt_more=""; anpt_more=""; arpt_more=""; sspt_more=""; hypt_more=""; vmpt_more=""; vmtls_more=""; sopt_more=""
-port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so=""; port_vl_re=""; port_vl_re2=""
+port_xh=""; port_vx=""; port_vw=""; port_xu=""; port_xc=""; port_nv=""; port_tu=""; port_an=""; port_ar=""; port_ss=""; port_sn=""; port_hy2=""; port_vm_ws=""; port_vm_tls=""; port_so=""; port_vl_re=""; port_vl_re2=""
 rules=$(ufw_desired_rules | sort -u)
 echo "$rules" | grep -q "^10002/tcp$" && echo "$rules" | grep -q "^10004/tcp$" && ok "ufw tag scan opens xhpt-2 and sspt-2" || bad "ufw tag scan: $rules"
 # random xhpt port 3 should also be in rules (port file exists, tag exists)

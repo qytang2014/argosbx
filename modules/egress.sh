@@ -88,6 +88,7 @@ egress_inbound_tags(){
     arpt[0-9]*) echo "anyreality-sb-${low#arpt}";;
     sspt) echo "ss-2022";;
     sspt[0-9]*) echo "ss-2022-${low#sspt}";;
+    snpt) echo "snellv";;
     hypt) echo "hy2-xr,hy2-sb";;
     hypt[0-9]*) echo "hy2-xr-${low#hypt},hy2-sb-${low#hypt}";;
     vmpt) echo "vmess-xr,vmess-sb";;
