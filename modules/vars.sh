@@ -58,6 +58,19 @@ vars_save(){
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$f" 2>/dev/null || return 1
 }
+
+# 判定 Argosbx 是否已安装在当前系统（基于落盘配置、服务单元或运行进程）
+agsbx_is_installed(){
+  [ -s "$HOME/agsbx/vars.env" ] || [ -s "$HOME/agsbx/sh.txt" ] || \
+  [ -f "$HOME/agsbx/xr.json" ] || [ -f "$HOME/agsbx/sb.json" ] || \
+  agsbx_is_running
+}
+
+# 判定是否有 Argosbx 相关内核进程（Xray / Sing-box / Cloudflared）在运行中
+agsbx_is_running(){
+  find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x|c)' || \
+  pgrep -f 'agsbx/(s|x|c)' >/dev/null 2>&1
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook on_init vars_merge
   register_hook on_complete vars_save

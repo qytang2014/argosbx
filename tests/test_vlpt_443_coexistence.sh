@@ -244,6 +244,10 @@ echo "=== Test 9: Uninstallation cleanup restores Web port 443 and removes marke
   # Setup mock hook system if not present
   source "$ROOT/modules/hook.sh"
 
+  # Sandbox process controls so tests never stop real host services
+  systemctl() { return 0; }
+  kill() { return 0; }
+
   caddy_dir="$WORK_DIR/caddy_uninstall"
   mkdir -p "$caddy_dir"
   test_caddy="$caddy_dir/Caddyfile"

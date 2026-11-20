@@ -48,6 +48,7 @@ bash tests/test_ufw.sh
 bash tests/test_firewall.sh
 bash tests/test_sub_https.sh
 bash tests/test_backup.sh
+bash tests/test_installed_gate.sh
 bash tests/test_vlpt_443_coexistence.sh
 bash tests/test_check.sh
 bash tests/test_help_audit.sh

@@ -503,6 +503,14 @@ echo "------------------------------------------------------------"
 exit 1'''
     t = replace(t, 'echo "Argosbx脚本进程未启动，安装失败" && exit', startup_diag, "kernel-startup-diagnostics", 1)
 
+    # --- CLI binary installation: prioritize local running script over remote curl ---
+    script_install_cmd = '''if [ -n "$0" ] && [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ] && [ "$0" != "sh" ] && [ -s "$0" ]; then
+cp -f "$0" "$SCRIPT_PATH" 2>/dev/null || (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
+else
+(command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
+fi'''
+    t = replace(t, '(command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")', script_install_cmd, "script-copy-priority", 1)
+
     # --- dead code: remove commented-out upstream private.key/cert.crt download ---
     # The original public private.key was deliberately dropped (it is public,
     # so it is not private); the commented block is dead weight.
@@ -851,7 +859,10 @@ fi
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
     # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
     t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
-                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore) ;; *)', "top-case-exclusion", 1)
+                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)', "top-case-exclusion", 1)
+    # --- installed state gate check: decouple installation state from currently running process ---
+    t = replace(t, "if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then",
+                "if agsbx_is_installed; then", "installed-gate-check", 1)
     # --- certwatch/certrestart subcommands + del cleanup ---
     t = replace(t, 'if [ "$1" = "del" ]; then\ncleandel',
                 'if [ "$1" = "certwatch" ]; then\ncert_watch\nexit\nfi\nif [ "$1" = "certrestart" ]; then\ncert_restart\nexit\nfi\nif [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel', "certwatch-dispatch", 1)
@@ -875,7 +886,7 @@ fi
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
                 'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$xcp\" = yes ]',
-                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
+                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$1\" = \"audit\" ] || [ \"$1\" = \"help\" ] || [ \"$1\" = \"-h\" ] || [ \"$1\" = \"--help\" ] || [ \"$1\" = \"list\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\nrun_hook pre_xrsbout\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
@@ -897,6 +908,136 @@ fi
                 '    "rules": [\n${egress_xr_rules}      {\n        "type": "field",\n        "ip": [ ${xip} ],', "xr-routing-hook", 1)
     t = replace(t, '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n      {\n        "ip_cidr": [ ${sip} ],',
                 '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n${egress_sb_rules}      {\n        "ip_cidr": [ ${sip} ],', "sb-routing-hook", 1)
+
+    # --- status display: alert if configured kernel is stopped/dead ---
+    old_status = """argosbxstatus(){
+echo "=========当前三大内核运行状态========="
+procs=$(find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null)
+if echo "$procs" | grep -Eq 'agsbx/s' || pgrep -f 'agsbx/s' >/dev/null 2>&1; then
+echo "Sing-box (版本V$("$HOME/agsbx/sing-box" version 2>/dev/null | awk '/version/{print $NF}'))：运行中"
+else
+echo "Sing-box：未启用"
+fi
+if echo "$procs" | grep -Eq 'agsbx/x' || pgrep -f 'agsbx/x' >/dev/null 2>&1; then
+echo "Xray (版本V$("$HOME/agsbx/xray" version 2>/dev/null | awk '/^Xray/{print $2}'))：运行中"
+else
+echo "Xray：未启用"
+fi
+if echo "$procs" | grep -Eq 'agsbx/c' || pgrep -f 'agsbx/c' >/dev/null 2>&1; then
+echo "Argo (版本V$("$HOME/agsbx/cloudflared" version 2>/dev/null | awk '{print $3}'))：运行中"
+else
+echo "Argo：未启用"
+fi
+}"""
+    new_status = """argosbxstatus(){
+echo "=========当前三大内核运行状态========="
+local _warn_dead=0
+procs=$(find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null)
+if echo "$procs" | grep -Eq 'agsbx/s' || pgrep -f 'agsbx/s' >/dev/null 2>&1; then
+echo "Sing-box (版本V$("$HOME/agsbx/sing-box" version 2>/dev/null | awk '/version/{print $NF}'))：运行中"
+elif [ -f "$HOME/agsbx/sb.json" ]; then
+echo "Sing-box：⚠️ 已配置但未在运行 (异常/停止)"
+_warn_dead=1
+else
+echo "Sing-box：未启用"
+fi
+if echo "$procs" | grep -Eq 'agsbx/x' || pgrep -f 'agsbx/x' >/dev/null 2>&1; then
+echo "Xray (版本V$("$HOME/agsbx/xray" version 2>/dev/null | awk '/^Xray/{print $2}'))：运行中"
+elif [ -f "$HOME/agsbx/xr.json" ]; then
+echo "Xray：⚠️ 已配置但未在运行 (异常/停止)"
+_warn_dead=1
+else
+echo "Xray：未启用"
+fi
+if echo "$procs" | grep -Eq 'agsbx/c' || pgrep -f 'agsbx/c' >/dev/null 2>&1; then
+echo "Argo (版本V$("$HOME/agsbx/cloudflared" version 2>/dev/null | awk '{print $3}'))：运行中"
+elif [ -e "$HOME/agsbx/sbargotoken.log" ] || [ -e "$HOME/agsbx/argoport.log" ]; then
+echo "Argo：⚠️ 已配置但未在运行 (异常/停止)"
+_warn_dead=1
+else
+echo "Argo：未启用"
+fi
+if [ "$_warn_dead" = "1" ]; then
+echo
+echo "⚠️  【告警】检测到已配置的内核未在运行！"
+echo "👉 可尝试执行 agsbx res 重启内核，或执行 agsbx check 进行深度诊断排查。"
+fi
+}"""
+    t = replace(t, old_status, new_status, "argosbxstatus-enhanced", 1)
+
+    # --- res subcommand: unconditionally restart configured kernels even if dead ---
+    old_res = """elif [ "$1" = "res" ]; then
+for P in /proc/[0-9]*; do
+[ -L "$P/exe" ] || continue
+TARGET=$(readlink -f "$P/exe" 2>/dev/null) || continue
+case "$TARGET" in
+*"/agsbx/s"*)
+kill "$(basename "$P")" 2>/dev/null
+sbrestart
+;;
+*"/agsbx/x"*)
+kill "$(basename "$P")" 2>/dev/null
+xrestart
+;;
+*"/agsbx/c"*)
+kill "$(basename "$P")" 2>/dev/null
+kill -15 $(pgrep -f 'agsbx/c' 2>/dev/null) >/dev/null 2>&1
+if [ -e "$HOME/agsbx/sbargotoken.log" ]; then
+if pidof systemd >/dev/null 2>&1; then
+systemctl restart argo >/dev/null 2>&1
+elif command -v rc-service >/dev/null 2>&1; then
+rc-service argo restart >/dev/null 2>&1
+else
+nohup $HOME/agsbx/cloudflared tunnel --no-autoupdate --edge-ip-version auto --protocol $(cat $HOME/agsbx/cftupr.log 2>/dev/null) run --token $(cat $HOME/agsbx/sbargotoken.log 2>/dev/null) >/dev/null 2>&1 &
+fi
+else
+nohup $HOME/agsbx/cloudflared tunnel --url http://localhost:$(cat $HOME/agsbx/argoport.log 2>/dev/null) --edge-ip-version auto --no-autoupdate --protocol $(cat $HOME/agsbx/cftupr.log 2>/dev/null) > $HOME/agsbx/argo.log 2>&1 &
+fi
+;;
+esac
+done
+sleep 5 && echo "重启完成" && sleep 3 && cip
+exit"""
+    new_res = """elif [ "$1" = "res" ]; then
+for P in /proc/[0-9]*; do
+[ -L "$P/exe" ] || continue
+TARGET=$(readlink -f "$P/exe" 2>/dev/null) || continue
+case "$TARGET" in
+*"/agsbx/s"*|*"/agsbx/x"*|*"/agsbx/c"*)
+kill "$(basename "$P")" 2>/dev/null
+;;
+esac
+done
+if [ -f "$HOME/agsbx/sb.json" ]; then
+sbrestart
+fi
+if [ -f "$HOME/agsbx/xr.json" ]; then
+xrestart
+fi
+if [ -e "$HOME/agsbx/sbargotoken.log" ] || [ -e "$HOME/agsbx/argoport.log" ]; then
+kill -15 $(pgrep -f 'agsbx/c' 2>/dev/null) >/dev/null 2>&1
+if [ -e "$HOME/agsbx/sbargotoken.log" ]; then
+if pidof systemd >/dev/null 2>&1; then
+systemctl restart argo >/dev/null 2>&1
+elif command -v rc-service >/dev/null 2>&1; then
+rc-service argo restart >/dev/null 2>&1
+else
+nohup "$HOME/agsbx/cloudflared" tunnel --no-autoupdate --edge-ip-version auto --protocol $(cat "$HOME/agsbx/cftupr.log" 2>/dev/null) run --token $(cat "$HOME/agsbx/sbargotoken.log" 2>/dev/null) >/dev/null 2>&1 &
+fi
+else
+nohup "$HOME/agsbx/cloudflared" tunnel --url http://localhost:$(cat "$HOME/agsbx/argoport.log" 2>/dev/null) --edge-ip-version auto --no-autoupdate --protocol $(cat "$HOME/agsbx/cftupr.log" 2>/dev/null) > "$HOME/agsbx/argo.log" 2>&1 &
+fi
+fi
+sleep 5 && echo "重启完成" && sleep 3 && cip
+exit"""
+    t = replace(t, old_res, new_res, "res-deterministic-restart", 1)
+
+    # --- install flow gate: only run install/wipe when not installed or explicit rep/add/protocol vars ---
+    old_install_gate = """fi
+if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then"""
+    new_install_gate = """fi
+if ! agsbx_is_installed || [ "$1" = "rep" ] || [ "$1" = "add" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]; then"""
+    t = replace(t, old_install_gate, new_install_gate, "install-flow-gate", 1)
 
     # --- Reality address: domain (ym) when set, IP otherwise; SNI stays reym ---
     reality_addr = read("modules/reality-addr.sh")
