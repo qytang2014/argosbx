@@ -33,9 +33,13 @@ agsbx_update(){
   fi
 
   # 获取版本信息
+  local cur_bin="${SCRIPT_PATH:-$HOME/bin/agsbx}"
+  if [ ! -s "$cur_bin" ] && [ -n "$0" ] && [ -f "$0" ]; then
+    cur_bin="$0"
+  fi
   local old_ver new_ver
-  old_ver=$(grep -m 1 "当前版本" "${SCRIPT_PATH:-$HOME/bin/agsbx}" 2>/dev/null | sed -e 's/.*当前版本[：:][[:space:]]*//' -e 's/["'\'' ]*$//' || echo "")
-  new_ver=$(grep -m 1 "当前版本" "$tmp_file" 2>/dev/null | sed -e 's/.*当前版本[：:][[:space:]]*//' -e 's/["'\'' ]*$//' || echo "")
+  old_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$cur_bin" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
+  new_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$tmp_file" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
 
   chmod +x "$tmp_file"
   local updated=0
@@ -49,21 +53,27 @@ agsbx_update(){
     ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true
   fi
 
-  # 如果当前执行脚本本身是本地文件且非 $HOME/bin/agsbx，也同步更新
-  if [ -n "$0" ] && [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ] && [ "$0" != "sh" ]; then
-    local canon_0 canon_bin
-    canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
-    canon_bin=$(readlink -f "$HOME/bin/agsbx" 2>/dev/null || echo "$HOME/bin/agsbx")
-    if [ "$canon_0" != "$canon_bin" ]; then
-      cp -f "$tmp_file" "$0" 2>/dev/null || true
-      chmod +x "$0" 2>/dev/null || true
-    fi
+  # 如果当前执行脚本本身是本地 argosbx.sh 且非 $HOME/bin/agsbx，也同步更新
+  if [ -n "$0" ] && [ -f "$0" ]; then
+    local b0
+    b0=$(basename "$0" 2>/dev/null || echo "")
+    case "$b0" in
+      argosbx.sh|agsbx)
+        local canon_0 canon_bin
+        canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
+        canon_bin=$(readlink -f "$HOME/bin/agsbx" 2>/dev/null || echo "$HOME/bin/agsbx")
+        if [ "$canon_0" != "$canon_bin" ]; then
+          cp -f "$tmp_file" "$0" 2>/dev/null || true
+          chmod +x "$0" 2>/dev/null || true
+        fi
+        ;;
+    esac
   fi
   rm -f "$tmp_file" 2>/dev/null || true
 
   if [ "$updated" = "1" ]; then
     echo "🎉 Argosbx 脚本更新成功！"
-    [ -n "$new_ver" ] && echo "最新版本：$new_ver (原版本：${old_ver:-未知})"
+    [ -n "$new_ver" ] && echo "最新版本: $new_ver (原版本: ${old_ver:-未知})"
     echo "可直接在终端使用 agsbx 体验最新功能。"
     return 0
   else
