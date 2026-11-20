@@ -103,10 +103,21 @@ agsbx_is_running(){
   find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x|c)' || \
   pgrep -f 'agsbx/(s|x|c)' >/dev/null 2>&1
 }
+
+# 判定当前运行是否属于协议安装/重置/增量配置流程（非只读子命令、非纯菜单查看）
+_is_install_run(){
+  if [ "$1" = "rep" ] || [ "$1" = "add" ]; then return 0; fi
+  case "$1" in del|list|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore|audit|help|-h|--help) return 1 ;; esac
+  if ! agsbx_is_installed; then return 0; fi
+  if [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]; then
+    return 0
+  fi
+  return 1
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook on_init vars_merge
   register_hook on_complete vars_save
-}
+} || true
 # proxy-script.sh: Helper functions for managing caddy_proxy.sh and nginx_proxy.sh
 
 # ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
@@ -1709,6 +1720,79 @@ if [ -z "${vlpt+x}" ] && [ -z "${hypt+x}" ] && [ -z "${tupt+x}" ] && \
   fi
 fi
 fi
+# update.sh: 一键更新 Argosbx 主脚本（agsbx up / update）
+# 从项目仓库拉取最新 argosbx.sh，执行语法校验与完整性检查后热替换 CLI
+
+agsbx_update(){
+  echo "正在检查并更新 Argosbx 脚本至最新版本..."
+  local tmp_file
+  tmp_file=$(mktemp) 2>/dev/null || tmp_file="/tmp/agsbx_update.$$"
+  local dl_ok=0
+  local target_url="${agsbxurl:-https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh}"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -sL "$target_url" -o "$tmp_file" && dl_ok=1
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tmp_file" "$target_url" && dl_ok=1
+  fi
+
+  if [ "$dl_ok" != "1" ] || [ ! -s "$tmp_file" ]; then
+    echo "❌ 脚本下载失败，请检查网络连接！"
+    rm -f "$tmp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  # 语法与完整性校验：必须包含主标识且语法检测无报错
+  if ! head -n 30 "$tmp_file" | grep -q "agsbx"; then
+    echo "❌ 下载的文件格式无效或内容损坏，更新中止！"
+    rm -f "$tmp_file" 2>/dev/null || true
+    return 1
+  fi
+  if ! bash -n "$tmp_file" 2>/dev/null; then
+    echo "❌ 下载的脚本语法校验未通过，更新中止！"
+    rm -f "$tmp_file" 2>/dev/null || true
+    return 1
+  fi
+
+  # 获取版本信息
+  local old_ver new_ver
+  old_ver=$(grep -m 1 "当前版本" "${SCRIPT_PATH:-$HOME/bin/agsbx}" 2>/dev/null | sed -e 's/.*当前版本[：:][[:space:]]*//' -e 's/["'\'' ]*$//' || echo "")
+  new_ver=$(grep -m 1 "当前版本" "$tmp_file" 2>/dev/null | sed -e 's/.*当前版本[：:][[:space:]]*//' -e 's/["'\'' ]*$//' || echo "")
+
+  chmod +x "$tmp_file"
+  local updated=0
+  mkdir -p "$HOME/bin" 2>/dev/null || true
+  if cp -f "$tmp_file" "$HOME/bin/agsbx" 2>/dev/null; then
+    chmod +x "$HOME/bin/agsbx" 2>/dev/null || true
+    updated=1
+  fi
+
+  if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then
+    ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true
+  fi
+
+  # 如果当前执行脚本本身是本地文件且非 $HOME/bin/agsbx，也同步更新
+  if [ -n "$0" ] && [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ] && [ "$0" != "sh" ]; then
+    local canon_0 canon_bin
+    canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
+    canon_bin=$(readlink -f "$HOME/bin/agsbx" 2>/dev/null || echo "$HOME/bin/agsbx")
+    if [ "$canon_0" != "$canon_bin" ]; then
+      cp -f "$tmp_file" "$0" 2>/dev/null || true
+      chmod +x "$0" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$tmp_file" 2>/dev/null || true
+
+  if [ "$updated" = "1" ]; then
+    echo "🎉 Argosbx 脚本更新成功！"
+    [ -n "$new_ver" ] && echo "最新版本：$new_ver (原版本：${old_ver:-未知})"
+    echo "可直接在终端使用 agsbx 体验最新功能。"
+    return 0
+  else
+    echo "❌ 写入脚本失败，请检查文件写入权限！"
+    return 1
+  fi
+}
 # audit.sh: 安全审计（只读，不修改系统）
 #
 # 用法：agsbx audit
@@ -1866,6 +1950,8 @@ argosbx 一键无交互小钢炮脚本💣  项目地址：github.com/qytang2014
   vlpt=10001 bash argosbx.sh          安装（vlpt 为示例，按需换协议变量）
   bash argosbx.sh rep                  重置协议（用 sh.txt 的变量重装）
   bash argosbx.sh add                  增量更新（只改给出的变量，其余继承）
+  agsbx update / up                    一键更新主脚本至最新版本
+  agsbx upx / ups / upa                更新 Xray / Sing-box / Argo 内核
   bash argosbx.sh del                  卸载清理
 
 查看：
@@ -3702,7 +3788,7 @@ command -v register_hook >/dev/null 2>&1 && {
   register_hook on_uninstall fw_cleanup
 }
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
-case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)
+case "${*##* }" in list|del|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)
 cmd=""
 for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk agqc warp name oap ym alns certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add cfip hyjpt ippz sub subid subpt web_port; do
 [ -n "${!v+x}" ] && cmd+="$v=\"${!v}\" "
@@ -3732,7 +3818,7 @@ if [ "$1" = "rep" ]; then
 [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：rep重置协议时，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 else
-[ "$1" = "del" ] || [ "$1" = "backup" ] || [ "$1" = "check" ] || [ "$1" = "restore" ] || [ "$1" = "audit" ] || [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "list" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
+[ "$1" = "del" ] || [ "$1" = "backup" ] || [ "$1" = "check" ] || [ "$1" = "restore" ] || [ "$1" = "audit" ] || [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "up" ] || [ "$1" = "update" ] || [ "$1" = "list" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ] || { echo "提示：未安装argosbx脚本，请在脚本前至少设置一个协议变量哦，再见！💣"; exit; }
 fi
 # vlpt comma list (private module, runs at top level, before exports).
 # The generator now has only one vlpt field: its value is a comma list.
@@ -3810,10 +3896,10 @@ export port_so=${sopt:-''}
 export port_nv=${nvpt:-''}
 export port_xu=${xupt:-''}
 export port_xc=${xcpt:-''}
-case "$1" in del|list|upx|ups|upa|res) ;; *) vlpt_coexistence_check ;; esac
+if _is_install_run "$1"; then vlpt_coexistence_check; fi
 export ym_vl_re=${reym:-$ym}
 if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi
-if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi
+if _is_install_run "$1" && [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
 export alns=${alns:-''}
@@ -4285,7 +4371,8 @@ echo "Argosbx脚本一键SSH命令生器在线网址：https://qytang2014.github
 echo "主脚本：bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh) 或 bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)"
 echo "显示节点信息命令：agsbx list 【或者】 主脚本 list"
 echo "重置变量组命令：自定义各种协议变量组 agsbx rep 【或者】 自定义各种协议变量组 主脚本 rep"
-echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"
+echo "更新主脚本命令：agsbx update 或 agsbx up 【或者】 主脚本 update"
+echo "更新配置变量命令：原已安装的自定义各种协议变量组 主脚本 rep"
 echo "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"
 echo "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"
 echo "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"
@@ -9213,6 +9300,10 @@ if [ "$1" = "audit" ]; then
 agsbx_audit
 exit
 fi
+if [ "$1" = "up" ] || [ "$1" = "update" ]; then
+agsbx_update
+exit
+fi
 if [ "$1" = "backup" ]; then
 shift
 agsbx_backup "$@"
@@ -9278,7 +9369,7 @@ for P in /proc/[0-9]*; do
 [ -L "$P/exe" ] || continue
 TARGET=$(readlink -f "$P/exe" 2>/dev/null) || continue
 case "$TARGET" in
-*"/agsbx/s"*|*"/agsbx/x"*|*"/agsbx/c"*)
+*"$HOME/agsbx/s"*|*"$HOME/agsbx/x"*|*"$HOME/agsbx/c"*)
 kill "$(basename "$P")" 2>/dev/null
 ;;
 esac
@@ -9306,7 +9397,7 @@ fi
 sleep 5 && echo "重启完成" && sleep 3 && cip
 exit
 fi
-if ! agsbx_is_installed || [ "$1" = "rep" ] || [ "$1" = "add" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]; then
+if _is_install_run "$1"; then
 for P in /proc/[0-9]*; do if [ -L "$P/exe" ]; then TARGET=$(readlink -f "$P/exe" 2>/dev/null); if echo "$TARGET" | grep -qE '/agsbx/c|/agsbx/s|/agsbx/x'; then PID=$(basename "$P"); kill "$PID" 2>/dev/null && echo "Killed $PID ($TARGET)" || echo "Could not kill $PID ($TARGET)"; fi; fi; done
 kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/c' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1
 if [ -z "$( (command -v curl >/dev/null 2>&1 && curl -s4m5 -k "$v46url" 2>/dev/null) || (command -v wget >/dev/null 2>&1 && timeout 3 wget -4 -qO- --tries=2 "$v46url" 2>/dev/null) )" ]; then

@@ -16,12 +16,32 @@ MOCKBIN="$TMP/mockbin"
 mkdir -p "$MOCKBIN"
 export PATH="$MOCKBIN:$PATH"
 
-# Mock curl, wget, pgrep
+# Mock curl, wget, pgrep, find, readlink (isolate from host running processes)
 cat > "$MOCKBIN/pgrep" <<'EOF'
 #!/bin/bash
 exit 1
 EOF
 chmod +x "$MOCKBIN/pgrep"
+
+cat > "$MOCKBIN/find" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"/proc/"* ]]; then
+  exit 0
+fi
+exec /usr/bin/find "$@"
+EOF
+chmod +x "$MOCKBIN/find"
+
+cat > "$MOCKBIN/readlink" <<'EOF'
+#!/bin/bash
+for arg in "$@"; do
+  if [[ "$arg" == *"/proc/"* ]]; then
+    exit 1
+  fi
+done
+exec /usr/bin/readlink "$@"
+EOF
+chmod +x "$MOCKBIN/readlink"
 
 cat > "$MOCKBIN/curl" <<'EOF'
 #!/bin/bash

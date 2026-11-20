@@ -13,6 +13,8 @@ argosbx 一键无交互小钢炮脚本💣  项目地址：github.com/qytang2014
   vlpt=10001 bash argosbx.sh          安装（vlpt 为示例，按需换协议变量）
   bash argosbx.sh rep                  重置协议（用 sh.txt 的变量重装）
   bash argosbx.sh add                  增量更新（只改给出的变量，其余继承）
+  agsbx update / up                    一键更新主脚本至最新版本
+  agsbx upx / ups / upa                更新 Xray / Sing-box / Argo 内核
   bash argosbx.sh del                  卸载清理
 
 查看：

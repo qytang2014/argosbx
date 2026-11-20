@@ -164,7 +164,7 @@ echo "PASS: Test 5"
 echo "=== Test 6: Built argosbx.sh contains coexistence logic and fallback ports ==="
 (
   built_script="$ROOT/argosbx.sh"
-  grep -Fq 'case "$1" in del|list|upx|ups|upa|res) ;; *) vlpt_coexistence_check ;; esac' "$built_script" || {
+  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' "$built_script" || {
     echo "FAIL: vlpt_coexistence_check invocation missing in built script"; exit 1;
   }
   grep -Fq 'export ym_vl_fb_port="${web_port:-443}"' "$built_script" || {

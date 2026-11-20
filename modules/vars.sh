@@ -71,7 +71,18 @@ agsbx_is_running(){
   find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x|c)' || \
   pgrep -f 'agsbx/(s|x|c)' >/dev/null 2>&1
 }
+
+# 判定当前运行是否属于协议安装/重置/增量配置流程（非只读子命令、非纯菜单查看）
+_is_install_run(){
+  if [ "$1" = "rep" ] || [ "$1" = "add" ]; then return 0; fi
+  case "$1" in del|list|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|check|backup|restore|audit|help|-h|--help) return 1 ;; esac
+  if ! agsbx_is_installed; then return 0; fi
+  if [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]; then
+    return 0
+  fi
+  return 1
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook on_init vars_merge
   register_hook on_complete vars_save
-}
+} || true

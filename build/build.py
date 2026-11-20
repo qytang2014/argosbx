@@ -436,6 +436,7 @@ def main():
     check_mod = read("modules/check.sh")
     help_mod = read("modules/help.sh")
     audit_mod = read("modules/audit.sh")
+    update_mod = read("modules/update.sh")
     repinherit_mod = read("modules/rep-inherit.sh")
     ports_mod = read("modules/ports.sh")
     webserver_mod = read("modules/web-server.sh")
@@ -559,6 +560,9 @@ fi'''
     # --- audit module (top level, functions only; subcommand) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      audit_mod, "audit-module-anchor")
+    # --- update module (top level, functions only; subcommand) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     update_mod, "update-module-anchor")
     # --- rep-inherit module (rep without protocols inherits from vars.env) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      repinherit_mod, "rep-inherit-anchor")
@@ -780,7 +784,12 @@ fi
     t = insert_after(t, "export cdnym=${cdnym:-''}\n", cert, "cert-module-anchor")
     # --- cert-watch module (right after cert module) ---
     t = t.replace(cert, cert + cert_watch, 1)
-    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"', 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"\necho "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\necho "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"\necho "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"', "showmode-add-line", 1)
+    t = replace(t, 'echo "更新脚本命令：原已安装的自定义各种协议变量组 主脚本 rep"',
+                'echo "更新主脚本命令：agsbx update 或 agsbx up 【或者】 主脚本 update"\n'
+                'echo "更新配置变量命令：原已安装的自定义各种协议变量组 主脚本 rep"\n'
+                'echo "增量更新命令：只传新增/修改的协议变量组 主脚本 add（未传的变量沿用上次安装，删协议仍用 rep）"\n'
+                'echo "防火墙同步命令：开启防火墙后运行 agsbx fwsync 重新同步节点端口（ufwsync 为旧别名），运行 agsbx fwstatus 查看防火墙状态"\n'
+                'echo "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
                      "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")
@@ -859,7 +868,7 @@ fi
         t = t.replace("\nxrsbout(){", "\n" + egress + "\nxrsbout(){", 1)
     # --- top command-save exclusion: certwatch/certrestart must not overwrite sh.txt ---
     t = replace(t, 'case "${*##* }" in list|del|upx|ups|upa|res) ;; *)',
-                'case "${*##* }" in list|del|upx|ups|upa|res|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)', "top-case-exclusion", 1)
+                'case "${*##* }" in list|del|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)', "top-case-exclusion", 1)
     # --- installed state gate check: decouple installation state from currently running process ---
     t = replace(t, "if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then",
                 "if agsbx_is_installed; then", "installed-gate-check", 1)
@@ -883,10 +892,13 @@ fi
     # --- audit subcommand ---
     t = replace(t, 'agsbx_help\nexit\nfi',
                 'agsbx_help\nexit\nfi\nif [ "$1" = "audit" ]; then\nagsbx_audit\nexit\nfi', "audit-dispatch", 1)
+    # --- update subcommand ---
+    t = replace(t, 'agsbx_audit\nexit\nfi',
+                'agsbx_audit\nexit\nfi\nif [ "$1" = "up" ] || [ "$1" = "update" ]; then\nagsbx_update\nexit\nfi', "update-dispatch", 1)
     t = replace(t, 'if [ "$1" = "del" ]; then\ncert_remove_watch\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"',
                 'if [ "$1" = "del" ]; then\nrun_hook on_uninstall\ncleandel\nrm -rf sbx_update "$HOME/agsbx" "$HOME/websbx"', "ufw-del-cleanup", 1)
     t = replace(t, '[ \"$1\" = \"del\" ] || [ \"$xcp\" = yes ]',
-                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$1\" = \"audit\" ] || [ \"$1\" = \"help\" ] || [ \"$1\" = \"-h\" ] || [ \"$1\" = \"--help\" ] || [ \"$1\" = \"list\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
+                '[ \"$1\" = \"del\" ] || [ \"$1\" = \"backup\" ] || [ \"$1\" = \"check\" ] || [ \"$1\" = \"restore\" ] || [ \"$1\" = \"audit\" ] || [ \"$1\" = \"help\" ] || [ \"$1\" = \"-h\" ] || [ \"$1\" = \"--help\" ] || [ \"$1\" = \"up\" ] || [ \"$1\" = \"update\" ] || [ \"$1\" = \"list\" ] || [ \"$xcp\" = yes ]', "backup-check-bypass", 1)
     t = replace(t, 'xrsbout(){\nif [ -e "$HOME/agsbx/xr.json" ]; then',
                 'xrsbout(){\nrun_hook pre_xrsbout\nif [ -e "$HOME/agsbx/xr.json" ]; then', "egress-init-call", 1)
     t = replace(t, '  "route": {\n    "rules": [\n       {\n          "action": "sniff"',
@@ -1003,7 +1015,7 @@ for P in /proc/[0-9]*; do
 [ -L "$P/exe" ] || continue
 TARGET=$(readlink -f "$P/exe" 2>/dev/null) || continue
 case "$TARGET" in
-*"/agsbx/s"*|*"/agsbx/x"*|*"/agsbx/c"*)
+*"$HOME/agsbx/s"*|*"$HOME/agsbx/x"*|*"$HOME/agsbx/c"*)
 kill "$(basename "$P")" 2>/dev/null
 ;;
 esac
@@ -1036,7 +1048,7 @@ exit"""
     old_install_gate = """fi
 if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then"""
     new_install_gate = """fi
-if ! agsbx_is_installed || [ "$1" = "rep" ] || [ "$1" = "add" ] || [ "$xcp" = yes ] || [ "$xup" = yes ] || [ "$nvp" = yes ] || [ "$vwp" = yes ] || [ "$sop" = yes ] || [ "$vxp" = yes ] || [ "$ssp" = yes ] || [ "$vlp" = yes ] || [ "$vmp" = yes ] || [ "$vmt" = yes ] || [ "$hyp" = yes ] || [ "$tup" = yes ] || [ "$xhp" = yes ] || [ "$anp" = yes ] || [ "$arp" = yes ]; then"""
+if _is_install_run "$1"; then"""
     t = replace(t, old_install_gate, new_install_gate, "install-flow-gate", 1)
 
     # --- Reality address: domain (ym) when set, IP otherwise; SNI stays reym ---
@@ -1238,10 +1250,10 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # When reym == ym, the SNI is the user's own domain: probes fall back to
     # the local web server (127.0.0.1:443) instead of the external domain.
     _rfb_old = 'export ym_vl_re=${reym:-' + chr(39)*2 + '}' + chr(10)
-    _rfb_new = 'case "$1" in del|list|upx|ups|upa|res) ;; *) vlpt_coexistence_check ;; esac' + chr(10) + \
+    _rfb_new = 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' + chr(10) + \
                'export ym_vl_re=${reym:-$ym}' + chr(10) + \
                'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi' + chr(10) + \
-               'if [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
+               'if _is_install_run "$1" && [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
     t = replace(t, _rfb_old, _rfb_new, "reality-fb-var", 1)
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",

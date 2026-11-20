@@ -52,5 +52,6 @@ bash tests/test_installed_gate.sh
 bash tests/test_vlpt_443_coexistence.sh
 bash tests/test_check.sh
 bash tests/test_help_audit.sh
+bash tests/test_update.sh
 python3 tests/test_index.py
 echo "ALL TESTS PASS"
