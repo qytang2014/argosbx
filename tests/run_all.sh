@@ -14,6 +14,7 @@ EOF
   export PATH="$SHUF_DIR:$PATH"
 fi
 bash tests/test_build.sh
+bash tests/test_anchors.sh
 bash tests/test_hook.sh
 bash tests/test_hook_once.sh
 bash tests/test_egress.sh
