@@ -49,6 +49,7 @@ def build_all(check=False):
     ctx["ports_mod"] = read("modules/ports.sh")
     ctx["webserver_mod"] = read("modules/web-server.sh")
     ctx["vlpt_coexistence_mod"] = read("modules/vlpt-coexistence.sh")
+    ctx["auto_sni_mod"] = read("modules/auto-sni.sh")
     ctx["hook_mod"] = read("modules/hook.sh")
     ctx["proxy_script_mod"] = read("modules/proxy-script.sh")
     for area, mod in PATCHES:

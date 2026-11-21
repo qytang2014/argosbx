@@ -1,6 +1,6 @@
 # 锚点分类表（第 3 步，2026-11-21）
 
-上游基线：`yonggekkk/argosbx main@7497089`。运行时锚点总数 **242**（`python3 build/build.py --check-anchors`）。
+上游基线：`yonggekkk/argosbx main@7497089`。运行时锚点总数 **238**（`python3 build/build.py --check-anchors`）。
 
 类别定义：
 
@@ -13,11 +13,11 @@
 
 | 类别 | 数量 | 决定 |
 | --- | --- | --- |
-| A 模块插入 | 53 | 全部保留 |
+| A 模块插入 | 55 | 全部保留 |
 | B 直接内容 patch | 169 | 全部保留 |
 | C 可转 hook | 19 | 迁移 7（分发链），保留 12（订阅/分组列表，见原因） |
 | D 其他 | 1 | 保留 |
-| **合计** | **242** | **迁移后 236**（7 个分发锚点 → 1 个 `dispatch-hook`） |
+| **合计** | **244** | **迁移后 238**（7 个分发锚点 → 1 个 `dispatch-hook`；auto-sni 2026-11-21 加 2 个 A 锚点） |
 
 第 3 步第 1 批（已做，见下）：子命令分发 7 个锚点 → 1 个 `run_hook dispatch` 调用锚点 + 9 个 handler（写进对应 `modules/*.sh`，`register_hook dispatch` 注册）。`BUDGET` 由 242 改为 236。
 
@@ -41,7 +41,7 @@
 | kernel-startup-diagnostics | B | 保留：整段诊断替换上游一行报错 |
 | script-copy-priority | B | 保留：安装命令改本地优先 |
 
-## topmods（22：A 13，B 9）
+## topmods（23：A 14，B 9）
 
 | 名字 | 类别 | 决定 |
 | --- | --- | --- |
@@ -65,16 +65,18 @@
 | ports-module-anchor | A | 保留：模块插入 |
 | webserver-module-anchor | A | 保留：模块插入 |
 | vlpt-coexistence-module-anchor | A | 保留：模块插入 |
+| auto-sni-module-anchor | A | 保留：auto-sni.sh 模块插入（调用点在 vlpt 区的 auto-sni-call） |
 | camouflage-module-anchor | A | 保留：模块插入 |
 | export-list | B | 保留：上游 export 循环加私有变量 |
 
-## vlpt（25：A 7，B 13，C 4，D 1）
+## vlpt（26：A 8，B 13，C 4，D 1）
 
 | 名字 | 类别 | 决定 |
 | --- | --- | --- |
 | vmtls-inbound | A | 保留：vmtls.sh 模块插入 |
 | recovery-line | B | 保留：恢复行 export 加私有变量 |
 | vlpt-on-compute | A | 保留：vlpt_on 计算块插 ins() 顶部 |
+| auto-sni-call | A | 保留：ins() 内调 auto_sni_resolve 一次（vlpt_on 算完、installxray/installsb 之前）；ins() 内无 hook 点，无法转 hook |
 | vlpt-ins-xray-only | B | 保留：ins() 分支条件改 vlpt_on |
 | vlpt-ins-sb-only | B | 保留：同上 |
 | vlpt-sb-only-targo | B | 保留：Argo 变量赋值条件改 vlpt_on |

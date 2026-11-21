@@ -28,7 +28,7 @@ def build_index():
     if '        <div class="row"><label>Reality 域名' not in h:
         print("BUILD FAIL: anchor missing: index-cert-ui", file=sys.stderr); sys.exit(1)
     h = h.replace('        <div class="row"><label>Reality 域名', cert_ui + '        <div class="row"><label>Reality 域名', 1)
-    h = replace(h, '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com" disabled/>', '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com；填自有域名且与 ym 相同→探测回落本机443" disabled/>', "index-reym-hint", 1)
+    h = replace(h, '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空默认apple.com" disabled/>', '<input id="reym" type="text" placeholder="选择Reality相关协议后可用，留空自动探测；填自有域名且与 ym 相同→探测回落本机443" disabled/>', "index-reym-hint", 1)
     h = replace(h, '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名IP证书TLS)</option>',
                 '<option value="y">开启 (HY2/TUIC/Naive/Anytls/Xhttp-tls为域名证书TLS，需配合节点域名 ym)</option>', "index-alns-text", 1)
     # alns closed option in upstream omits Naive while the enabled

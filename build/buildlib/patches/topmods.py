@@ -16,6 +16,7 @@ def apply(t, ctx):
     update_mod = ctx["update_mod"]
     vars_mod = ctx["vars_mod"]
     vlpt_coexistence_mod = ctx["vlpt_coexistence_mod"]
+    auto_sni_mod = ctx["auto_sni_mod"]
     webserver_mod = ctx["webserver_mod"]
     # --- vmess-ws-tls (private): new protocol flag vmtls, internal flag vmt ---
     # Top variable list, flag handling, rep/install guards, port export,
@@ -75,6 +76,10 @@ def apply(t, ctx):
     # --- vlpt-coexistence module ---
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      vlpt_coexistence_mod, "vlpt-coexistence-module-anchor")
+    # --- auto-sni module (Reality SNI auto-detect; called once from
+    # ins(), see the auto-sni-call anchor in patches/vlpt.py) ---
+    t = insert_after(t, 'run_hook on_init "$1"\n',
+                     auto_sni_mod, "auto-sni-module-anchor")
     # --- camouflage blog module (functions only; called manually or from
     # own-domain setup, not on every install) ---
     t = insert_after(t, 'run_hook on_init "$1"\n',

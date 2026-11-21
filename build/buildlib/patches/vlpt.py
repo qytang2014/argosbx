@@ -47,6 +47,22 @@ fi
 '''
     t = replace(t, "ins(){\nif [ \"$nvp\" != yes ]",
                 "ins(){\n" + vlpt_on + "if [ \"$nvp\" != yes ]", "vlpt-on-compute", 1)
+    # --- auto-sni call (private): resolve the Reality SNI when neither
+    # reym nor ym is set and a Reality protocol is being installed. Runs
+    # once at the top of ins(), after vlpt_on is computed and before any
+    # installxray/installsb branch. The guard is the trigger (reym/ym
+    # empty + any Reality flag); auto_sni_resolve itself is idempotent
+    # (returns 0 at once if ym_vl_re is already set), so rep/add never
+    # re-detect. Failure aborts the install (exit 1).
+    # This is a call insertion inside ins(), an upstream function, so it
+    # is a new anchor (A); there is no hook point inside ins() to hang
+    # it on (see build/ANCHORS.md).
+    t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then',
+                '# Reality 伪装域名自动探测：reym/ym 都未指定且装 Reality 协议时才探测，失败即停装（见 modules/auto-sni.sh）\n'
+                'if [ -z "${ym_vl_re:-}" ] && { [ "$vlp" = yes ] || [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ] || [ "$arp" = yes ]; }; then\n'
+                '  auto_sni_resolve || exit 1\n'
+                'fi\n'
+                'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then', "auto-sni-call", 1)
     t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then',
                 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; then', "vlpt-ins-xray-only", 1)
     t = replace(t, 'elif [ "$xhp" != yes ] && [ "$vlp" != yes ] && [ "$vxp" != yes ] && [ "$vwp" != yes ] && [ "$xup" != yes ] && [ "$xcp" != yes ]; then',
