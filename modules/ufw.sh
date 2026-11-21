@@ -434,7 +434,15 @@ fw_status(){
   fw_print_cloud_checklist
   return 0
 }
+# dispatch handler (step 3): ufwsync / fwsync / fwstatus subcommands.
+# Verbatim move of the old build.py dispatch blocks.
+dispatch_fw(){
+  if [ "$1" = "ufwsync" ]; then fw_apply_saved; exit; fi
+  if [ "$1" = "fwsync" ]; then fw_apply_saved; exit; fi
+  if [ "$1" = "fwstatus" ]; then fw_status; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook post_start fw_sync
   register_hook on_uninstall fw_cleanup
+  register_hook dispatch dispatch_fw
 }

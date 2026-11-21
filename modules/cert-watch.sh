@@ -79,6 +79,14 @@ cert_remove_watch(){
   crontab "$tmp" 2>/dev/null || true
   rm -f "$tmp"
 }
+# dispatch handler (step 3): certwatch / certrestart subcommands.
+# Verbatim move of the old build.py dispatch blocks; exit status is
+# preserved (bare `exit` = cert_watch/cert_restart's status).
+dispatch_cert(){
+  if [ "$1" = "certwatch" ]; then cert_watch; exit; fi
+  if [ "$1" = "certrestart" ]; then cert_restart; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook on_uninstall cert_remove_watch
+  register_hook dispatch dispatch_cert
 }

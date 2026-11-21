@@ -376,3 +376,27 @@ agsbx_restore(){
   AGSBX_RESTORE_READY=1
   return 0
 }
+
+# dispatch handlers (step 3): backup / restore subcommands.
+# Verbatim move of the old build.py dispatch blocks. restore is the
+# only handler that does NOT exit on success: the old block did
+# `set --` to clear the script args and fall through to install,
+# which a function cannot do for its caller, so it sets
+# _agsbx_restore_done=1 and the dispatch call site does the `set --`.
+dispatch_backup(){
+  if [ "$1" = "backup" ]; then shift; agsbx_backup "$@"; exit; fi
+}
+dispatch_restore(){
+  if [ "$1" = "restore" ]; then
+    AGSBX_RESTORE_READY=0
+    shift
+    agsbx_restore "$@"
+    rc=$?
+    if [ "$rc" -ne 0 ] || [ "$AGSBX_RESTORE_READY" != "1" ]; then exit "$rc"; fi
+    _agsbx_restore_done=1
+  fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_backup
+  register_hook dispatch dispatch_restore
+} || true

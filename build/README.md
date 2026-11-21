@@ -1,8 +1,19 @@
 # 构建说明（第 1 阶段：argosbx.sh 分层，第 2 步起含容器）
 
+## 第 1 步重构后（2026-11-21，build.py 拆包 + 锚点注册表）
+
+本节优先于下面过时的说法（下面仍称 `build/build.py` 为"锚点替换清单"、上游为 08c5416 的地方已过期）。
+
+- 布局：`build/build.py` 是 49 行瘦入口（参数解析 + 调包）；`build/buildlib/` 是包——`util.py`（ROOT/read/replace/insert_after + 锚点注册表）、`compose.py`（流水线）、`index.py`（生成器）、`container.py`（容器）、`patches/`（每区一个 `apply(t, ctx)`，core/topmods/vlpt/comma/cert/egress/subcmds/display/address/links，compose 按原顺序调用）。不要在入口加 patch。
+- **第 2 步规则：新功能不新增锚点。** 按顺序选手段，能用前面的就不用后面的：① hook（`register_hook <事件> <函数>`，事件见 modules/hook.sh：on_init、pre_xrsbout、post_start、on_complete、on_uninstall、dispatch（子命令分发，第 3 步）；新协议的订阅/显示条目优先走 hook）；② 变量覆盖（只改变量清单与对应的 ufw/rep-inherit/egress 登记）；③ 锚点（只有必须改上游函数中间时才加，要短、落函数边界或稳定行、有名字、有 expected 计数）。
+- 锚点注册表：每次 `replace()` / `insert_after()` 都登记（名字、区、期望数、实际数），`UPSTREAM_VERIFIED`（buildlib/util.py）记本次验证过的上游 HEAD 短 SHA，**每次同步上游时更新它**。检查：`python3 build/build.py --check-anchors`（不写文件，输出每锚点状态表，全 OK exit 0，有 STALE exit 1）。
+- 锚点预算：`tests/test_anchor_budget.sh` 是棘轮，当前上限 236 个（第 3 步把 7 个子命令分发锚点转成 1 个 `run_hook dispatch` 调用后）。分类见 `build/ANCHORS.md`：A 模块插入 53、B 直接内容 patch 169、C 可转 hook 19（已迁移 7，订阅/分组列表 12 个因交错顺序无法用追加 hook 复现而保留）、D 其他 1。之后再加锚点必须先转 hook，实在转不了才改上限并在提交信息里写理由。
+- 局限：少数内联 BUILD FAIL 检查（index-layout-swap、vmtls-call、ca.log、pin-clash 等）不走注册表，check 模式下它们直接 exit 1、不打印表；链式锚点（模式串由前一个 replace 产生）前置失败时会连带报 STALE，先看每区第一个失败的。
+- 同步上游：换 `upstream/` → `--check-anchors` 看表修 STALE → 更新 `UPSTREAM_VERIFIED` → `python3 build/build.py` → `bash tests/run_all.sh` 连跑两遍 → push 前按站立规则先说明、等 QUINN 点确认再 push，推完 git fetch/log 复核 HEAD；同步后单独再推 upstream 文件（push 清单排除 upstream/*，漏推会断 GHCR 构建）。
+
 ## 不要手改的文件
 - `argosbx.sh`、`index.html`（根目录）、`container/nodejs/start.sh`：**构建产物**，由 `build/build.py` 生成，手改下次构建会被覆盖。
-- `upstream/argosbx.sh`、`upstream/index.html`、`upstream/container/nodejs/start.sh`：**上游原版**，现在是 `yonggekkk/argosbx main@08c5416`，不要在里面加私有内容。注意上游 index.html 是 CRLF，构建时会统一转成 LF。容器原版与之前私有版只差项目链接一行（yonggekkk → qytang2014）。
+- `upstream/argosbx.sh`、`upstream/index.html`、`upstream/container/nodejs/start.sh`：**上游原版**，现在是 `yonggekkk/argosbx main@7497089`，不要在里面加私有内容。注意上游 index.html 是 CRLF，构建时会统一转成 LF。容器原版与之前私有版只差项目链接一行（yonggekkk → qytang2014）。
 
 ## 可以改的文件
 - `modules/cert.sh`：证书 / Caddy / acme 功能。
@@ -10,7 +21,7 @@
 - `modules/cert-main.sh`：主流程里证书那一段的替换块（上游原来是调用外部 acme-yg 脚本）。
 - `modules/index-cert.html`：页面里的证书 UI（ym / certmode / certsrc 三行）。
 - `modules/index-egress.html`：页面里的出口 UI（egress_nodes / egress_bind / egress_rules 三行）。
-- `build/build.py`：锚点替换清单。加新功能时，先加模块文件，再在清单里加锚点，不要直接改生成文件。
+- `build/buildlib/`：锚点替换清单（按区拆在 `patches/`）。加新功能时，先加模块文件，再按上面"第 2 步规则"选手段（hook 优先），不要直接改生成文件。
 
 ## 构建
 ```
@@ -27,7 +38,7 @@ bash -n container/nodejs/start.sh
 
 ## 加新功能（以后）
 1. 新建 `modules/<功能>.sh`，只写自己的函数和变量。
-2. 在 `build/build.py` 里加插入锚点和钩子（如果需要）。
+2. 按上面"第 2 步规则"选手段：hook / 变量覆盖优先，锚点是最后手段（并受锚点预算测试约束）。
 3. 跑构建和测试，不要直接改 `argosbx.sh`，不要改 `upstream/argosbx.sh`。
 
 ## 容器（第 2 步证书 + 域名地址，第 3 步后补 egress 对齐）

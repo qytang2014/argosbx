@@ -81,3 +81,12 @@ agsbx_update(){
     return 1
   fi
 }
+
+# dispatch handler (step 3): up / update subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_update(){
+  if [ "$1" = "up" ] || [ "$1" = "update" ]; then agsbx_update; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_update
+} || true

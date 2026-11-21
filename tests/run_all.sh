@@ -15,8 +15,10 @@ EOF
 fi
 bash tests/test_build.sh
 bash tests/test_anchors.sh
+bash tests/test_anchor_budget.sh
 bash tests/test_hook.sh
 bash tests/test_hook_once.sh
+bash tests/test_dispatch.sh
 bash tests/test_egress.sh
 bash tests/test_egress_v2.sh
 bash tests/test_cert.sh

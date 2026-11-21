@@ -57,3 +57,12 @@ argosbx 一键无交互小钢炮脚本💣  项目地址：github.com/qytang2014
 HELP_EOF
 return 0
 }
+
+# dispatch handler (step 3): --help / -h / help subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_help(){
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then agsbx_help; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_help
+} || true

@@ -272,3 +272,12 @@ agsbx_check(){
   echo "结果：$CHECK_PASS 通过，$CHECK_WARN 警告，$CHECK_FAIL 失败"
   [ "$CHECK_FAIL" = "0" ]
 }
+
+# dispatch handler (step 3): check subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_check(){
+  if [ "$1" = "check" ]; then agsbx_check; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_check
+} || true

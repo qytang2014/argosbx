@@ -696,7 +696,13 @@ sub_https_display(){
   fi
   return 0
 }
+# dispatch handler (step 3): subhttpsync subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_subhttpsync(){
+  if [ "$1" = "subhttpsync" ]; then sub_https_sync; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook post_start sub_https_sync
   register_hook on_uninstall sub_https_stop
+  register_hook dispatch dispatch_subhttpsync
 }

@@ -11,17 +11,23 @@ import re, sys
 t = open(sys.argv[1]).read()
 start = t.find("_camouflage_personas() {")
 assert start >= 0, "camouflage module not found"
-# Find end: closing brace of deploy_camouflage_blog (line with just "}")
-# The module ends right before the next top-level comment
-m = re.search(r'\n\}\n# HTTPS domain subscription', t[start:])
-assert m, "module end not found"
-open(sys.argv[2] + "/module.sh", "w").write(t[start:start + m.start() + 3])
+# End: everything up to the next top-level comment (# HTTPS domain
+# subscription starts the upstream subscription section after all
+# inserted modules). Do NOT match the exact line before the comment:
+# it is the last inserted module's closing line, whose form varies
+# (e.g. `}` vs `} || true` after the step-3 registration guards).
+cmt = t.find('\n# HTTPS domain subscription', start)
+assert cmt >= 0, "module end not found"
+open(sys.argv[2] + "/module.sh", "w").write(t[start:cmt] + "\n")
 PY
 
 # Deploy twice, verify determinism and completeness
-bash -c "source $TMP/module.sh && deploy_camouflage_blog $TMP/out1" > "$TMP/log1" 2>&1
+# (source hook.sh first: the extracted range also covers other modules'
+# register_hook blocks, which need the engine defined for `source` to
+# return 0; since step 3 the range ends with a registration block)
+bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out1" > "$TMP/log1" 2>&1
 P1=$(grep -o "人设：.*" "$TMP/log1" | head -1)
-bash -c "source $TMP/module.sh && deploy_camouflage_blog $TMP/out2" > "$TMP/log2" 2>&1
+bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out2" > "$TMP/log2" 2>&1
 P2=$(grep -o "人设：.*" "$TMP/log2" | head -1)
 [ "$P1" = "$P2" ] || { echo "FAIL: persona not deterministic: $P1 vs $P2"; exit 1; }
 echo "persona deterministic: $P1"

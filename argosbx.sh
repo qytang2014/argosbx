@@ -1803,6 +1803,15 @@ agsbx_update(){
     return 1
   fi
 }
+
+# dispatch handler (step 3): up / update subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_update(){
+  if [ "$1" = "up" ] || [ "$1" = "update" ]; then agsbx_update; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_update
+} || true
 # audit.sh: 安全审计（只读，不修改系统）
 #
 # 用法：agsbx audit
@@ -1945,6 +1954,15 @@ agsbx_audit(){
   echo "结果：$AUDIT_PASS 通过，$AUDIT_WARN 警告，$AUDIT_FAIL 失败"
   [ "$AUDIT_FAIL" = "0" ]
 }
+
+# dispatch handler (step 3): audit subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_audit(){
+  if [ "$1" = "audit" ]; then agsbx_audit; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_audit
+} || true
 # help.sh: 顶层帮助（agsbx --help / -h / help）
 # 列出所有子命令及用法。不修改系统。
 
@@ -2004,6 +2022,15 @@ argosbx 一键无交互小钢炮脚本💣  项目地址：github.com/qytang2014
 HELP_EOF
 return 0
 }
+
+# dispatch handler (step 3): --help / -h / help subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_help(){
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then agsbx_help; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_help
+} || true
 # check.sh: 一键自检（只读，不修改系统）
 #
 # 用法：agsbx check
@@ -2278,6 +2305,15 @@ agsbx_check(){
   echo "结果：$CHECK_PASS 通过，$CHECK_WARN 警告，$CHECK_FAIL 失败"
   [ "$CHECK_FAIL" = "0" ]
 }
+
+# dispatch handler (step 3): check subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_check(){
+  if [ "$1" = "check" ]; then agsbx_check; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_check
+} || true
 # backup.sh: 备份与恢复（含 WebDAV 云存储 + OpenSSL 加密）
 #
 # 设计原则：备份只存"配置"（vars.env），不存"身份"。
@@ -2656,6 +2692,30 @@ agsbx_restore(){
   AGSBX_RESTORE_READY=1
   return 0
 }
+
+# dispatch handlers (step 3): backup / restore subcommands.
+# Verbatim move of the old build.py dispatch blocks. restore is the
+# only handler that does NOT exit on success: the old block did
+# `set --` to clear the script args and fall through to install,
+# which a function cannot do for its caller, so it sets
+# _agsbx_restore_done=1 and the dispatch call site does the `set --`.
+dispatch_backup(){
+  if [ "$1" = "backup" ]; then shift; agsbx_backup "$@"; exit; fi
+}
+dispatch_restore(){
+  if [ "$1" = "restore" ]; then
+    AGSBX_RESTORE_READY=0
+    shift
+    agsbx_restore "$@"
+    rc=$?
+    if [ "$rc" -ne 0 ] || [ "$AGSBX_RESTORE_READY" != "1" ]; then exit "$rc"; fi
+    _agsbx_restore_done=1
+  fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_backup
+  register_hook dispatch dispatch_restore
+} || true
 # HTTPS domain subscription (private module, main script only).
 # Current subscription is plain HTTP on a random port, served from
 # $HOME/websbx/<token>/, protected only by the token in the URL.
@@ -3354,9 +3414,15 @@ sub_https_display(){
   fi
   return 0
 }
+# dispatch handler (step 3): subhttpsync subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_subhttpsync(){
+  if [ "$1" = "subhttpsync" ]; then sub_https_sync; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook post_start sub_https_sync
   register_hook on_uninstall sub_https_stop
+  register_hook dispatch dispatch_subhttpsync
 }
 # ufw firewall sync (private module, main script only).
 # Rule: only when ufw is already active. This module NEVER turns
@@ -3794,9 +3860,17 @@ fw_status(){
   fw_print_cloud_checklist
   return 0
 }
+# dispatch handler (step 3): ufwsync / fwsync / fwstatus subcommands.
+# Verbatim move of the old build.py dispatch blocks.
+dispatch_fw(){
+  if [ "$1" = "ufwsync" ]; then fw_apply_saved; exit; fi
+  if [ "$1" = "fwsync" ]; then fw_apply_saved; exit; fi
+  if [ "$1" = "fwstatus" ]; then fw_status; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook post_start fw_sync
   register_hook on_uninstall fw_cleanup
+  register_hook dispatch dispatch_fw
 }
 url='https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh'
 case "${*##* }" in list|del|upx|ups|upa|res|up|update|certwatch|certrestart|ufwsync|fwsync|fwstatus|subhttpsync|audit|help|-h|--help|check|backup|restore) ;; *)
@@ -4361,8 +4435,16 @@ cert_remove_watch(){
   crontab "$tmp" 2>/dev/null || true
   rm -f "$tmp"
 }
+# dispatch handler (step 3): certwatch / certrestart subcommands.
+# Verbatim move of the old build.py dispatch blocks; exit status is
+# preserved (bare `exit` = cert_watch/cert_restart's status).
+dispatch_cert(){
+  if [ "$1" = "certwatch" ]; then cert_watch; exit; fi
+  if [ "$1" = "certrestart" ]; then cert_restart; exit; fi
+}
 command -v register_hook >/dev/null 2>&1 && {
   register_hook on_uninstall cert_remove_watch
+  register_hook dispatch dispatch_cert
 }
 export argo=${argo:-''}
 export ARGO_DOMAIN=${agn:-''}
@@ -9494,59 +9576,8 @@ else
 nohup $HOME/agsbx/sing-box run -c $HOME/agsbx/sb.json >/dev/null 2>&1 &
 fi
 }
-if [ "$1" = "certwatch" ]; then
-cert_watch
-exit
-fi
-if [ "$1" = "certrestart" ]; then
-cert_restart
-exit
-fi
-if [ "$1" = "ufwsync" ]; then
-fw_apply_saved
-exit
-fi
-if [ "$1" = "fwsync" ]; then
-fw_apply_saved
-exit
-fi
-if [ "$1" = "fwstatus" ]; then
-fw_status
-exit
-fi
-if [ "$1" = "subhttpsync" ]; then
-sub_https_sync
-exit
-fi
-if [ "$1" = "check" ]; then
-agsbx_check
-exit
-fi
-if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ "$1" = "help" ]; then
-agsbx_help
-exit
-fi
-if [ "$1" = "audit" ]; then
-agsbx_audit
-exit
-fi
-if [ "$1" = "up" ] || [ "$1" = "update" ]; then
-agsbx_update
-exit
-fi
-if [ "$1" = "backup" ]; then
-shift
-agsbx_backup "$@"
-exit
-fi
-if [ "$1" = "restore" ]; then
-AGSBX_RESTORE_READY=0
-shift
-agsbx_restore "$@"
-rc=$?
-if [ "$rc" -ne 0 ] || [ "$AGSBX_RESTORE_READY" != "1" ]; then exit $rc; fi
-set --
-fi
+run_hook dispatch "$@"
+if [ "$_agsbx_restore_done" = "1" ]; then set --; fi
 if [ "$1" = "del" ]; then
 run_hook on_uninstall
 cleandel

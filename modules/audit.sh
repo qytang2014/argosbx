@@ -140,3 +140,12 @@ agsbx_audit(){
   echo "结果：$AUDIT_PASS 通过，$AUDIT_WARN 警告，$AUDIT_FAIL 失败"
   [ "$AUDIT_FAIL" = "0" ]
 }
+
+# dispatch handler (step 3): audit subcommand.
+# Verbatim move of the old build.py dispatch block.
+dispatch_audit(){
+  if [ "$1" = "audit" ]; then agsbx_audit; exit; fi
+}
+command -v register_hook >/dev/null 2>&1 && {
+  register_hook dispatch dispatch_audit
+} || true
