@@ -18,8 +18,9 @@
 # generator already converts egress textareas to ';' separated lines),
 # and are written with %q so special characters survive a round trip.
 vars_merge(){
-  local line _vn
+  local line _vn _cli_reym_set=0
   case "$1" in add|rep) ;; *) return 0;; esac
+  [ -n "${reym+x}" ] && _cli_reym_set=1
   if [ ! -s "$HOME/agsbx/vars.env" ]; then
     if [ "$1" = "add" ]; then
       echo "增量更新失败：未找到上次安装的变量记录 $HOME/agsbx/vars.env，请先用完整命令安装，或用 rep 全量重置"
@@ -41,6 +42,14 @@ vars_merge(){
     fi
     if [ -z "${!_vn+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
+  # rep/add 未显式传 reym= 时，若 vars.env 中 reym 缺失或为空，兜底复用上次探测落盘的 ym_vl_re（除非是早期默认 apple.com）
+  if [ "$_cli_reym_set" = "0" ] && [ -z "${reym:-}" ] && [ -s "$HOME/agsbx/ym_vl_re" ]; then
+    local _prev_reym
+    _prev_reym=$(tr -d ' \t\r\n' < "$HOME/agsbx/ym_vl_re" 2>/dev/null || true)
+    if [ -n "$_prev_reym" ] && [ "$_prev_reym" != "apple.com" ]; then
+      reym="$_prev_reym"
+    fi
+  fi
   if [ "$1" = "rep" ]; then return 0; fi
   for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt snpt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0

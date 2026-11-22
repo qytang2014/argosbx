@@ -51,14 +51,19 @@ ensure_web_server(){
     "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
 
     _webroot="${webroot:-/var/www/html}"
-    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+    local proxy_target="${web_proxy:-}"
+    local custom_root=0
+    if [[ "$proxy_target" == /* ]]; then
+      _webroot="$proxy_target"
+      proxy_target=""
+      custom_root=1
+    fi
+
+    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ -z "$proxy_target" ] && [ "$custom_root" = "0" ] && [ ! -f "$_webroot/index.html" ]; }; then
       if command -v deploy_camouflage_blog >/dev/null 2>&1; then
         deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
       fi
     fi
-
-    # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
-    local proxy_target="${web_proxy:-}"
 
     if [ -n "$proxy_target" ]; then
       "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true

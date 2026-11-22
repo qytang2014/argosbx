@@ -196,15 +196,19 @@ run_case 0 www.example.ac.uk "tier1 same-state beats faster same-country"
 # 2. no region: same-country only, fastest wins
 FAKE_GEO_FILE="$TMP/geo-gb-noregion.json"
 run_case 0 www.ed.ac.uk "tier1 same-country fastest wins"
-# 3. tier 1 has no H2 -> tier 2
+# 3. tier 1 has no H2 -> tier 2 (de-popularized direct origin beats tier 3)
 FAKE_GEO_FILE="$TMP/geo-gb-eng.json"
-mk_h2 learn.microsoft.com swscan.apple.com
-mk_lat "learn.microsoft.com 0.070" "swscan.apple.com 0.090"
-run_case 0 learn.microsoft.com "tier2 fallback"
-# 4. tiers 1-2 have no H2 -> tier 3 (swscan, last resort)
+mk_h2 git.kernel.org learn.microsoft.com swscan.apple.com
+mk_lat "git.kernel.org 0.070" "learn.microsoft.com 0.050" "swscan.apple.com 0.040"
+run_case 0 git.kernel.org "tier2 fallback beats tier3 tutorial domains"
+# 4. tiers 1-2 have no H2 -> tier 3 (swscan/learn.microsoft.com, last resort)
 mk_h2 swscan.apple.com
 mk_lat "swscan.apple.com 0.090"
 run_case 0 swscan.apple.com "tier3 swscan last resort"
+# 4b. root university domain works when www.<univ> fails/is on CDN
+mk_h2 example.ac.uk
+mk_lat "example.ac.uk 0.065"
+run_case 0 example.ac.uk "tier1 root university domain fallback when www fails"
 # 5. nothing passes -> fail (install must stop)
 mk_h2
 mk_lat
@@ -234,9 +238,9 @@ run_case 0 www.ed.ac.uk "GFW-blocked winner excluded"
 FAKE_GFW_FILE="$TMP/gfw-empty.txt"
 # 9. geo lookup fails -> country lists skipped, tier 2 still works
 FAKE_GEO_FILE="$TMP/geo-empty.json"
-mk_h2 learn.microsoft.com swscan.apple.com
-mk_lat "learn.microsoft.com 0.070" "swscan.apple.com 0.090"
-run_case 0 learn.microsoft.com "geo failure falls back to tier 2"
+mk_h2 git.kernel.org swscan.apple.com
+mk_lat "git.kernel.org 0.070" "swscan.apple.com 0.090"
+run_case 0 git.kernel.org "geo failure falls back to tier 2"
 # 10. idempotent: reym already set -> no curl calls at all
 FAKE_GEO_FILE="$TMP/geo-gb-eng.json"
 FAKE_CURL_LOG="$TMP/curl.log"; : > "$FAKE_CURL_LOG"

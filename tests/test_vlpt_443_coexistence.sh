@@ -480,4 +480,114 @@ EOF
 )
 echo "PASS: Test 12"
 
+echo "=== Test 13: caddy_proxy.sh set-port with 443 L4 SNI routing (--sni & --sni-target) ==="
+(
+  caddy_dir="$WORK_DIR/caddy_l4"
+  mkdir -p "$caddy_dir"
+  test_caddy="$caddy_dir/Caddyfile"
+  cat > "$test_caddy" << 'EOF'
+{
+    email admin@example.com
+}
+
+(security) {
+    header {
+        Server "Protected"
+    }
+}
+
+example.com {
+    root * /var/www/html
+    file_server
+}
+EOF
+
+  CADDY_DIR="$caddy_dir" CADDYFILE="$test_caddy" bash "$ROOT/../software_config/caddy_proxy.sh" set-port 8443 --sni www.stanford.edu --sni-target 8444
+
+  [ -f "$caddy_dir/sni_router" ] || { echo "FAIL: caddy sni_router file not created"; exit 1; }
+  [ "$(cat "$caddy_dir/sni_router")" = "www.stanford.edu|127.0.0.1:8444" ] || { echo "FAIL: sni_router content mismatch"; exit 1; }
+  grep -q 'https_port 8443' "$test_caddy" || { echo "FAIL: https_port 8443 missing"; exit 1; }
+  grep -q 'layer4 {' "$test_caddy" || { echo "FAIL: layer4 block missing"; exit 1; }
+  grep -q '@reality_sni tls sni www.stanford.edu' "$test_caddy" || { echo "FAIL: @reality_sni matcher missing"; exit 1; }
+  grep -q 'proxy 127.0.0.1:8444' "$test_caddy" || { echo "FAIL: proxy 127.0.0.1:8444 missing"; exit 1; }
+  grep -q 'proxy 127.0.0.1:8443' "$test_caddy" || { echo "FAIL: default proxy 127.0.0.1:8443 missing"; exit 1; }
+
+  # Idempotent re-run without --sni retains persisted sni_router and does not duplicate layer4
+  CADDY_DIR="$caddy_dir" CADDYFILE="$test_caddy" bash "$ROOT/../software_config/caddy_proxy.sh" set-port 8443
+  [ "$(grep -c 'layer4 {' "$test_caddy")" = "1" ] || { echo "FAIL: duplicate layer4 block"; exit 1; }
+
+  # Revert to 443 removes layer4 and sni_router
+  CADDY_DIR="$caddy_dir" CADDYFILE="$test_caddy" bash "$ROOT/../software_config/caddy_proxy.sh" set-port 443
+  [ ! -f "$caddy_dir/sni_router" ] || { echo "FAIL: sni_router not removed on 443 revert"; exit 1; }
+  ! grep -q 'layer4' "$test_caddy" || { echo "FAIL: layer4 block not removed on 443 revert"; exit 1; }
+)
+echo "PASS: Test 13"
+
+echo "=== Test 14: nginx_proxy.sh set-port with 443 stream SNI routing (--sni & --sni-target) ==="
+(
+  nginx_dir="$WORK_DIR/nginx_l4"
+  conf_dir="$nginx_dir/conf.d"
+  mkdir -p "$conf_dir"
+  cat > "$nginx_dir/nginx.conf" << 'EOF'
+events { worker_connections 128; }
+http {
+    include conf.d/*.conf;
+}
+EOF
+  cat > "$conf_dir/site.conf" << 'EOF'
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+}
+EOF
+
+  NGINX_DIR="$nginx_dir" NGINX_CONF_DIR="$conf_dir" bash "$ROOT/../software_config/nginx_proxy.sh" set-port 8443 --sni www.stanford.edu --sni-target 8444
+
+  [ -f "$nginx_dir/sni_router" ] || { echo "FAIL: nginx sni_router file not created"; exit 1; }
+  [ -f "$nginx_dir/stream.d/reality_sni.conf" ] || { echo "FAIL: stream.d/reality_sni.conf not created"; exit 1; }
+  grep -q 'www.stanford.edu  127.0.0.1:8444;' "$nginx_dir/stream.d/reality_sni.conf" || { echo "FAIL: SNI map entry missing"; exit 1; }
+  grep -q 'default     127.0.0.1:8443;' "$nginx_dir/stream.d/reality_sni.conf" || { echo "FAIL: default map entry missing"; exit 1; }
+  grep -q 'stream {' "$nginx_dir/nginx.conf" || { echo "FAIL: stream block not injected into nginx.conf"; exit 1; }
+
+  # Revert to 443 removes stream.d/reality_sni.conf and sni_router
+  NGINX_DIR="$nginx_dir" NGINX_CONF_DIR="$conf_dir" bash "$ROOT/../software_config/nginx_proxy.sh" set-port 443
+  [ ! -f "$nginx_dir/sni_router" ] || { echo "FAIL: nginx sni_router not removed on 443 revert"; exit 1; }
+  [ ! -f "$nginx_dir/stream.d/reality_sni.conf" ] || { echo "FAIL: reality_sni.conf not removed on 443 revert"; exit 1; }
+)
+echo "PASS: Test 14"
+
+echo "=== Test 15: vlpt_coexistence_sync_sni homogeneous engine selection & reality_port allocation ==="
+(
+  export HOME="$WORK_DIR/home_sync"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  log_file="$WORK_DIR/sync_sni_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "caddy:\$*" >> "$log_file"
+EOF
+  cat > "$HOME/.local/bin/nginx_proxy.sh" << EOF
+#!/bin/bash
+echo "nginx:\$*" >> "$log_file"
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
+
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  vlpt_coexistence_sync_sni "www.stanford.edu"
+
+  [ "${vlpt_listen_addr:-}" = "127.0.0.1" ] || { echo "FAIL: vlpt_listen_addr should be 127.0.0.1, got ${vlpt_listen_addr:-}"; exit 1; }
+  [ "${vlpt_listen_port:-}" = "8444" ] || { echo "FAIL: vlpt_listen_port should be 8444, got ${vlpt_listen_port:-}"; exit 1; }
+  grep -q "caddy:set-port 8443 --sni www.stanford.edu --sni-target 8444" "$log_file" || { echo "FAIL: expected caddy set-port with --sni, got $(cat "$log_file")"; exit 1; }
+  ! grep -q "nginx:" "$log_file" || { echo "FAIL: nginx_proxy.sh should not be called when engine is caddy"; exit 1; }
+)
+echo "PASS: Test 15"
+
 echo "ALL TESTS PASSED!"

@@ -11,21 +11,22 @@ set -euo pipefail
 # 失败（未筛出符合条件的域名，或本机 curl 不支持 HTTP/2）时 stdout
 # 为空且 exit 1。
 #
-# 筛选：geo 定位 → 候选（三档）→ GFW 列表过滤 → 在线 TLS 1.3 + H2
-#   探测（不看 HTTP 状态码，Reality 只看握手）→ 档内按握手延迟排序。
-#   一档：大学/镜像/机构（最冷，优先；大学优先同州/同省，不够退同国）
-#   二档：大厂冷门功能子域名
-#   三档：swscan.apple.com（最后手段，一、二档筛空才用）
+# 筛选：geo 定位 → 候选（三档，按当地国家/州精细化加载）→ GFW 列表过滤 →
+#   在线 TLS 1.3 + H2 探测（防 DNS 污染/回环 IP + 排除主流 CDN）→ 档内按握手延迟排序。
+#   一档：当地大学/开源镜像站/博物馆/科研机构（最冷，优先同州/同省，次选同国）
+#   二档：第三方高带宽冷门大厂与开源基础设施直连源站（剔除教程泛滥域名）
+#   三档：经典大厂高可用兜底池（learn.microsoft.com / configuration.apple.com / swscan.apple.com，一、二档筛空才用）
 # 硬要求：TLS 1.3 + HTTP/2 + 合法证书。本机 curl 无 HTTP/2 支持时
 #   直接报错停止，不降级、不静默跳过。
 
-_AUTO_SNI_MAX_TEST_DOMAINS=45
-_AUTO_SNI_MAX_UNIV=12
+_AUTO_SNI_MAX_TEST_DOMAINS=15
+_AUTO_SNI_MAX_UNIV=8
 _AUTO_SNI_IPINFO_URL="https://ipinfo.io/json"
 _AUTO_SNI_UNIV_URL="https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json"
 _AUTO_SNI_GFW_URL="https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/gfw.txt"
 _AUTO_SNI_TMP=""
 _AUTO_SNI_RESULTS=""
+_AUTO_SNI_SELF_IP=""
 
 # 通用 CNAME 查询（dig / host / DoH 兜底）
 _auto_sni_lookup_cname() {
@@ -42,6 +43,21 @@ _auto_sni_lookup_cname() {
   fi
 }
 
+# 校验解析出的目标 IP 是否为有效公网 IP（排除回环、内网保留地址及本机自身 IP，防 DNS 污染与自环握手）
+_auto_sni_valid_remote_ip() {
+  local ip="$1"
+  [ -n "$ip" ] || return 1
+  if [ -n "${_AUTO_SNI_SELF_IP:-}" ] && [ "$ip" = "$_AUTO_SNI_SELF_IP" ]; then
+    return 1
+  fi
+  case "$ip" in
+    0.*|127.*|10.*|192.168.*|169.254.*|224.*|240.*|255.*) return 1 ;;
+    172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 1 ;;
+    100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*) return 1 ;;
+  esac
+  return 0
+}
+
 # 单域名探测（由 xargs -P 并行调用）：通过则写一行
 # "tier|sub|握手ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
 # 状态码只记录、不过滤（Reality 只看握手）。
@@ -51,10 +67,10 @@ _auto_sni_probe_one() {
   hdr_file=$(mktemp "$_AUTO_SNI_TMP/hdr.XXXXXX") || return 0
   # 1. CNAME CDN 过滤
   cname=$(_auto_sni_lookup_cname "$domain")
-  if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|cdn)"; then
+  if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|edgecast|bunnycdn|gcore|cdn77|azion|cdn)"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测
+  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
   metrics=$(curl -4 -sS -I -o /dev/null \
     --tlsv1.3 --tls-max 1.3 \
     --http2 \
@@ -67,12 +83,16 @@ _auto_sni_probe_one() {
   http_code=$(printf '%s' "$metrics" | cut -d'|' -f1)
   t_app=$(printf '%s' "$metrics" | cut -d'|' -f3)
   remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f4)
-  # 3. 确认 H2（硬要求）
+  # 3. 校验远端 IP 合法性（防 DNS 污染与本机回环假阳性）
+  if ! _auto_sni_valid_remote_ip "$remote_ip"; then
+    rm -f "$hdr_file"; return 0
+  fi
+  # 4. 确认 H2（硬要求）
   if ! head -n 1 "$hdr_file" | grep -q "^HTTP/2"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 4. 排除主流 CDN 响应头
-  if grep -Eiq "^(server:.*cloudflare|cf-ray:|cf-cache-status:|x-amz-cf-id:|x-akamai-|x-fastly-request-id:|x-served-by:.*cache|x-azure-ref:|x-iinfo:|via:.*1\.1 google)" "$hdr_file"; then
+  # 5. 排除主流 CDN 响应头
+  if grep -Eiq "^(server:.*(cloudflare|akamaighost|cloudfront|fastly|bunnycdn|gcore)|cf-ray:|cf-cache-status:|x-amz-cf-id:|x-akamai-|x-fastly-request-id:|x-served-by:.*cache|x-azure-ref:|x-iinfo:|via:.*1\.1 google)" "$hdr_file"; then
     rm -f "$hdr_file"; return 0
   fi
   total_ms=$(awk -v a="$t_app" 'BEGIN { printf "%.1f", a * 1000 }')
@@ -129,25 +149,67 @@ PYEOF
   ' "$json"
 }
 
-# 机构候选（国家级补充）：$1=国家码，输出 "1|2|域名" 行。
+# 当地大学/博物馆/开源镜像站候选（按具体国家码 $1 与州/地区 $2 精细化加载，拒绝跨国大区盲测）：
+# 输出 "1|sub|域名" 行（sub=1 为本州/强本地，sub=2 为本国/邻近区）。
 _auto_sni_institutions() {
-  case "$1" in
-    US|CA)
-      printf '%s\n' ftp.osuosl.org mirrors.mit.edu mirrors.ocf.berkeley.edu mirror.umd.edu mirrors.rit.edu www.si.edu www.getty.edu www.loc.gov www.nist.gov www.ucla.edu www.usc.edu www.caltech.edu www.stanford.edu www.berkeley.edu www.washington.edu www.umich.edu www.utexas.edu www.nyu.edu www.columbia.edu www.metmuseum.org www.moma.org www.utoronto.ca www.ubc.ca
+  local cc="$1" region="${2:-}"
+  case "$cc" in
+    US)
+      case "$region" in
+        California|Washington|Oregon|Nevada|Arizona|Utah|Colorado)
+          printf '1|2|%s\n' ftp.osuosl.org mirrors.ocf.berkeley.edu www.ucla.edu www.usc.edu www.caltech.edu www.stanford.edu www.berkeley.edu www.washington.edu www.getty.edu
+          ;;
+        Texas|Illinois|Michigan|Minnesota|Ohio|Wisconsin|Indiana|Missouri)
+          printf '1|2|%s\n' www.umich.edu www.utexas.edu www.uchicago.edu www.purdue.edu www.wisc.edu ftp.osuosl.org
+          ;;
+        *)
+          printf '1|2|%s\n' mirrors.mit.edu mirror.umd.edu mirrors.rit.edu ftp.osuosl.org www.si.edu www.loc.gov www.nist.gov www.nyu.edu www.columbia.edu www.metmuseum.org www.moma.org www.stanford.edu www.berkeley.edu www.umich.edu
+          ;;
+      esac
       ;;
-    NL|DE|BE|FR|GB|CH|SE|AT|DK|NO|FI|PL|ES|IT)
-      printf '%s\n' ftp.nluug.nl mirror.nl.leaseweb.net ftp.snt.utwente.nl ftp.fau.de ftp.halifax.rwth-aachen.de mirror.init7.net www.uva.nl www.tudelft.nl www.uu.nl www.rug.nl www.leidenuniv.nl www.rijksmuseum.nl www.tum.de www.lmu.de www.mpg.de www.ox.ac.uk www.cam.ac.uk www.britishmuseum.org ethz.ch www.kth.se
+    CA)
+      printf '1|2|%s\n' www.utoronto.ca www.ubc.ca www.mcgill.ca www.uwaterloo.ca mirror.its.dal.ca www.rom.on.ca
       ;;
     JP)
-      printf '%s\n' ftp.jaist.ac.jp ftp.riken.jp linux.yz.yamagata-u.ac.jp ftp.kddilabs.jp ftp.iij.ad.jp www.u-tokyo.ac.jp www.kyoto-u.ac.jp www.osaka-u.ac.jp www.tohoku.ac.jp www.titech.ac.jp www.waseda.jp www.keio.ac.jp www.tnm.jp www.kahaku.go.jp
+      printf '1|2|%s\n' ftp.jaist.ac.jp ftp.riken.jp linux.yz.yamagata-u.ac.jp ftp.kddilabs.jp ftp.iij.ad.jp www.u-tokyo.ac.jp www.kyoto-u.ac.jp www.osaka-u.ac.jp www.tohoku.ac.jp www.titech.ac.jp www.waseda.jp www.keio.ac.jp www.tnm.jp www.kahaku.go.jp
       ;;
-    SG|HK|TW|KR)
-      printf '%s\n' download.nus.edu.sg mirror.xtom.com.hk ftp.twaren.net ftp.kaist.ac.kr www.nus.edu.sg www.ntu.edu.sg www.hku.hk www.cuhk.edu.hk www.ust.hk www.ntu.edu.tw www.sinica.edu.tw www.snu.ac.kr www.kaist.ac.kr
+    SG)
+      printf '1|2|%s\n' download.nus.edu.sg www.nus.edu.sg www.ntu.edu.sg www.smu.edu.sg mirror.xtom.com.hk
+      ;;
+    HK)
+      printf '1|2|%s\n' mirror.xtom.com.hk www.hku.hk www.cuhk.edu.hk www.ust.hk www.polyu.edu.hk www.cityu.edu.hk
+      ;;
+    TW)
+      printf '1|2|%s\n' ftp.twaren.net opensource.nchc.org.tw www.ntu.edu.tw www.sinica.edu.tw www.nycu.edu.tw www.nthu.edu.tw www.npm.gov.tw
+      ;;
+    KR)
+      printf '1|2|%s\n' ftp.kaist.ac.kr www.snu.ac.kr www.kaist.ac.kr www.yonsei.ac.kr www.korea.ac.kr www.museum.go.kr
+      ;;
+    DE)
+      printf '1|2|%s\n' ftp.fau.de ftp.halifax.rwth-aachen.de ftp.gwdg.de www.tum.de www.lmu.de www.mpg.de www.uni-heidelberg.de www.kit.edu
+      ;;
+    NL)
+      printf '1|2|%s\n' ftp.nluug.nl mirror.nl.leaseweb.net ftp.snt.utwente.nl www.uva.nl www.tudelft.nl www.uu.nl www.rug.nl www.leidenuniv.nl www.rijksmuseum.nl
+      ;;
+    GB)
+      printf '1|2|%s\n' www.ox.ac.uk www.cam.ac.uk www.ed.ac.uk www.imperial.ac.uk www.ucl.ac.uk www.manchester.ac.uk www.britishmuseum.org
+      ;;
+    FR)
+      printf '1|2|%s\n' mirrors.ircam.fr ftp.lip6.fr www.polytechnique.edu www.sorbonne-universite.fr www.inria.fr www.cnrs.fr
+      ;;
+    CH)
+      printf '1|2|%s\n' mirror.init7.net ethz.ch www.epfl.ch www.uzh.ch www.cern.ch
+      ;;
+    SE|NO|FI|DK)
+      printf '1|2|%s\n' ftp.acc.umu.se www.kth.se www.uu.se www.lu.se www.ntnu.no www.uio.no www.helsinki.fi www.aalto.fi www.ku.dk
+      ;;
+    AT|BE|PL|ES|IT|IE)
+      printf '1|2|%s\n' www.univie.ac.at www.tuwien.ac.at www.kuleuven.be www.ugent.be ftp.icm.edu.pl www.uw.edu.pl www.ucm.es www.polimi.it ftp.heanet.ie www.tcd.ie
       ;;
     AU|NZ)
-      printf '%s\n' mirror.aarnet.edu.au ftp.swin.edu.au www.unimelb.edu.au www.sydney.edu.au www.anu.edu.au www.uq.edu.au www.auckland.ac.nz
+      printf '1|2|%s\n' mirror.aarnet.edu.au ftp.swin.edu.au www.unimelb.edu.au www.sydney.edu.au www.anu.edu.au www.uq.edu.au www.auckland.ac.nz
       ;;
-  esac | awk '{ print "1|2|" $0 }'
+  esac
 }
 
 # 候选组装：$1=输出文件，$2=国家码（可空），$3=州/省（可空）。
@@ -158,47 +220,63 @@ _auto_sni_candidates() {
   local out="$1" cc="$2" region="$3"
   local univ_json tmp_univ
   : > "$out"
-  # --- 一档：大学（Hipo 库，同州/省优先）+ 机构（国家级列表）---
+  # --- 一档：当地大学（Hipo 库，仅提取本国 $cc，同州/省优先，同时兼容 www. 与根域名）+ 当地机构/博物馆/开源镜像站 ---
   if [ -n "$cc" ]; then
     univ_json="$_AUTO_SNI_TMP/univ.json"
-    if curl -4 -sL --max-time 8 "$_AUTO_SNI_UNIV_URL" -o "$univ_json" 2>/dev/null && [ -s "$univ_json" ]; then
+    if curl -4 -sL --max-time 6 "$_AUTO_SNI_UNIV_URL" -o "$univ_json" 2>/dev/null && [ -s "$univ_json" ]; then
       tmp_univ="$_AUTO_SNI_TMP/univ.txt"
       _auto_sni_univ_extract "$univ_json" "$cc" "$region" > "$tmp_univ" 2>/dev/null || true
       if [ -s "$tmp_univ" ]; then
-        # 同州/省优先：先取 sub=1 的随机顺序，不够再用 sub=2 补齐，最多 12 所
-        { grep '^1|' "$tmp_univ" 2>/dev/null | shuf; grep '^2|' "$tmp_univ" 2>/dev/null | shuf; } | head -n "$_AUTO_SNI_MAX_UNIV" | awk -F'|' '{ print "1|" $1 "|www." $2 }' >> "$out" || true
+        # 同州/省优先：先取 sub=1 的随机顺序，不够再用 sub=2 补齐，最多 _AUTO_SNI_MAX_UNIV 所；
+        # 同时输出 www.<domain> 与根域名 <domain>（防 www 挂 CDN 而根域在校园网自建被误杀）
+        { grep '^1|' "$tmp_univ" 2>/dev/null | shuf; grep '^2|' "$tmp_univ" 2>/dev/null | shuf; } | head -n "$_AUTO_SNI_MAX_UNIV" | awk -F'|' '{
+          d = $2
+          if (d ~ /^www\./) {
+            print "1|" $1 "|" d
+          } else {
+            print "1|" $1 "|www." d
+            print "1|" $1 "|" d
+          }
+        }' >> "$out" || true
       fi
     else
-      echo "自动探测：高校库拉取失败，跳过大学候选"
+      echo "自动探测：高校库拉取失败，使用内置当地机构与镜像站候选"
     fi
-    _auto_sni_institutions "$cc" >> "$out"
+    _auto_sni_institutions "$cc" "$region" >> "$out"
   fi
-  # --- 二档：大厂冷门功能子域名（不含 swscan.apple.com）---
+  # --- 二档：高带宽冷门大厂与开源基础设施直连源站（已剔除公开教程泛滥域名）---
   cat <<'EOF' | awk '{ print "2|1|" $0 }' >> "$out"
-configuration.apple.com
-gspe1-ssl.ls.apple.com
-xp.apple.com
-learn.microsoft.com
-visualstudio.microsoft.com
-dotnet.microsoft.com
-shop.tesla.com
 git.kernel.org
+mirrors.kernel.org
 www.debian.org
+deb.debian.org
 www.freebsd.org
+download.freebsd.org
 www.openbsd.org
 www.archlinux.org
 www.gentoo.org
 www.postgresql.org
 www.sqlite.org
 www.gnu.org
+ftp.gnu.org
 www.nginx.org
+hg.nginx.org
 www.blender.org
+download.blender.org
 www.videolan.org
 cran.r-project.org
 ctan.org
+www.wireshark.org
+www.cmake.org
+xp.apple.com
 EOF
-  # --- 三档：swscan.apple.com（最后手段）---
-  echo "3|1|swscan.apple.com" >> "$out"
+  # --- 三档：经典高可用大厂兜底池（最后手段，仅当一、二档全部筛空时才启用）---
+  cat <<'EOF' | awk '{ print "3|1|" $0 }' >> "$out"
+learn.microsoft.com
+configuration.apple.com
+gspe1-ssl.ls.apple.com
+swscan.apple.com
+EOF
   if [ -n "${_AUTO_SNI_EXTRA_FILE:-}" ] && [ -f "$_AUTO_SNI_EXTRA_FILE" ]; then
     cat "$_AUTO_SNI_EXTRA_FILE" >> "$out"
   fi
@@ -214,7 +292,7 @@ EOF
 # GFW 列表过滤：$1=候选文件（原地过滤）。拉取失败则跳过并告警。
 _auto_sni_gfw_filter() {
   local cands="$1" gfw="$_AUTO_SNI_TMP/gfw.txt"
-  if ! curl -4 -sL --max-time 8 "$_AUTO_SNI_GFW_URL" -o "$gfw" 2>/dev/null || [ ! -s "$gfw" ]; then
+  if ! curl -4 -sL --max-time 6 "$_AUTO_SNI_GFW_URL" -o "$gfw" 2>/dev/null || [ ! -s "$gfw" ]; then
     echo "自动探测：GFW 规则库拉取失败，跳过阻断比对"
     return 0
   fi
@@ -240,26 +318,27 @@ _auto_sni_gfw_filter() {
 }
 
 # 单档探测：$1=档位，$2=候选文件，$3=本档测试文件。
-# 同 sub 内随机、sub=1 优先，最多测 _AUTO_SNI_MAX_TEST_DOMAINS 个。
+# 同 sub 内随机、sub=1 优先，最多抽样测 _AUTO_SNI_MAX_TEST_DOMAINS 个当地候选。
 # 返回 0 且结果文件非空表示本档有通过者。
 _auto_sni_probe_tier() {
   local tier="$1" cands="$2" test_file="$3"
   : > "$_AUTO_SNI_RESULTS"
   { awk -F'|' -v t="$tier" '$1==t && $2==1' "$cands" | shuf; awk -F'|' -v t="$tier" '$1==t && $2==2' "$cands" | shuf; } | head -n "$_AUTO_SNI_MAX_TEST_DOMAINS" > "$test_file" 2>/dev/null || true
   [ -s "$test_file" ] || return 1
-  export _AUTO_SNI_TMP _AUTO_SNI_RESULTS
-  export -f _auto_sni_probe_one _auto_sni_lookup_cname
-  xargs -P 5 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; sleep 0.$((RANDOM % 4 + 1)); _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
+  export _AUTO_SNI_TMP _AUTO_SNI_RESULTS _AUTO_SNI_SELF_IP
+  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip
+  xargs -P 8 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
   [ -s "$_AUTO_SNI_RESULTS" ]
 }
 
 # 主流程（由 auto_sni_resolve 包一层临时目录管理后调用）。
-# 成功：写 reym + ym_vl_re，返回 0；失败：报错，返回 1。
+# 成功：写 reym + ym_vl_re，同步回落变量与 443 四层 SNI 分流，返回 0；失败：报错，返回 1。
 _auto_sni_run() {
   local cc="" region="" city="" org="" ip_json=""
   local cands="$_AUTO_SNI_TMP/candidates.txt"
   local tier test_file best best_ms
   ip_json=$(curl -4 -s --max-time 5 "$_AUTO_SNI_IPINFO_URL" 2>/dev/null || true)
+  _AUTO_SNI_SELF_IP=$(printf '%s' "$ip_json" | grep -oE '"ip": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   cc=$(printf '%s' "$ip_json" | grep -oE '"country": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   region=$(printf '%s' "$ip_json" | grep -oE '"region": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   city=$(printf '%s' "$ip_json" | grep -oE '"city": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
@@ -285,6 +364,14 @@ _auto_sni_run() {
       best_ms=$(printf '%s' "$best" | cut -d'|' -f3)
       reym=$(printf '%s' "$best" | cut -d'|' -f4)
       export ym_vl_re="$reym"
+      if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym:-}" ]; then
+        export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"
+      else
+        export ym_vl_fb=""; export ym_vl_fb_port="443"
+      fi
+      if command -v vlpt_coexistence_sync_sni >/dev/null 2>&1; then
+        vlpt_coexistence_sync_sni "$reym" || true
+      fi
       echo "自动探测：Reality 伪装域名 $reym（第 $tier 档，握手 ${best_ms} ms）"
       return 0
     fi
@@ -314,7 +401,7 @@ auto_sni_resolve() {
   rc=0
   _auto_sni_run || rc=$?
   rm -rf "$_AUTO_SNI_TMP"
-  _AUTO_SNI_TMP=""; _AUTO_SNI_RESULTS=""
+  _AUTO_SNI_TMP=""; _AUTO_SNI_RESULTS=""; _AUTO_SNI_SELF_IP=""
   return $rc
 }
 

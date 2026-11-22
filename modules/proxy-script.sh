@@ -45,13 +45,13 @@ ensure_proxy_script(){
   elif [ "$script_name" = "caddy_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null; then
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null; then
       is_old=1
     fi
   elif [ "$script_name" = "nginx_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null; then
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null; then
       is_old=1
     fi
   fi

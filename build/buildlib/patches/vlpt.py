@@ -121,8 +121,8 @@ fi
                 ],
                 "decryption": "${dekey}"''',
                 '''            "tag":"reality-vision",
-            "listen": "::",
-            "port": $port_vl_re,
+            "listen": "${vlpt_listen_addr:-::}",
+            "port": ${vlpt_listen_port:-$port_vl_re},
             "protocol": "vless",
             "settings": {
                 "clients": [

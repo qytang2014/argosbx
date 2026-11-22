@@ -280,11 +280,18 @@ subhttps_merge_reload(){
   systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1
 }
 subhttps_merge_verify(){
-  # 本机回环验证订阅地址返回 200
-  local ym_c="$1" token="$2" code=""
+  # 本机回环验证订阅地址返回 200（443 共存模式下 Caddy HTTPS 实际监听在 web_port，如 8443）
+  local ym_c="$1" token="$2" code="" wp=""
   command -v curl >/dev/null 2>&1 || return 1
-  code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
-  [ "$code" = "200" ]
+  wp="${web_port:-$(subhttps_read "$HOME/agsbx/web_port")}"
+  case "$wp" in ''|*[!0-9]*) wp="443" ;; esac
+  code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:$wp:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c:$wp/$token/clmi.yaml" 2>/dev/null)
+  [ "$code" = "200" ] && return 0
+  if [ "$wp" != "443" ]; then
+    code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+    [ "$code" = "200" ] && return 0
+  fi
+  return 1
 }
 subhttps_merge_system_caddy(){
   # 编排：已合并（token 一致）直接成功；否则优先 caddy_proxy 追加，保底插入→全量校验→reload→回环验证；

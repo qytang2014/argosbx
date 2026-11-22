@@ -137,9 +137,10 @@ RUN
 bash "$TMP/run_valid.sh" "$TMP"
 # ensure_caddy_download: GitHub Release direct download (generic releases repo), no private-server auth
 grep -q 'https://github.com/qytang2014/software/releases/download/${caddy_ver}' "$ROOT/argosbx.sh" || { echo "FAIL: caddy download URL"; exit 1; }
-grep -q 'caddy_ver="${CADDY_VER:-caddy-v2.11.7}"' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_VER default"; exit 1; }
+grep -q 'caddy_ver="${CADDY_VER:-caddy-v2.11.9}"' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_VER default"; exit 1; }
 grep -q '缺少 Coraza WAF 模块，拒绝替换' "$ROOT/argosbx.sh" || { echo "FAIL: coraza waf hard check should be back"; exit 1; }
 grep -q 'http.handlers.waf' "$ROOT/argosbx.sh" || { echo "FAIL: waf module id check missing"; exit 1; }
+grep -q '缺少 layer4 四层分流模块，拒绝替换' "$ROOT/argosbx.sh" || { echo "FAIL: layer4 module check missing"; exit 1; }
 ! grep -q 'files.quinn.de5.net' "$ROOT/argosbx.sh" || { echo "FAIL: old caddy server should be gone"; exit 1; }
 ! grep -q 'CADDY_DOWNLOAD_PASS' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_DOWNLOAD_PASS should be gone"; exit 1; }
 ! grep -q 'netrc-file' "$ROOT/argosbx.sh" || { echo "FAIL: netrc should be gone"; exit 1; }
@@ -156,7 +157,7 @@ check_url() {
   cpu="$1"; rm -f "$CURL_ARGS"
   unset CADDY_DOWNLOAD_URL
   ensure_caddy_download >/dev/null 2>&1
-  grep -q "https://github.com/qytang2014/software/releases/download/caddy-v2.11.7/$2" "$CURL_ARGS" || { echo "FAIL: $3 got: $(cat "$CURL_ARGS" 2>/dev/null)"; exit 1; }
+  grep -q "https://github.com/qytang2014/software/releases/download/caddy-v2.11.9/$2" "$CURL_ARGS" || { echo "FAIL: $3 got: $(cat "$CURL_ARGS" 2>/dev/null)"; exit 1; }
   ! grep -q "netrc" "$CURL_ARGS" || { echo "FAIL: $3 should not use netrc"; exit 1; }
 }
 check_url amd64 "caddy-linux-amd64" "amd64 url"

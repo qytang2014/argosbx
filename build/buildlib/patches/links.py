@@ -121,7 +121,7 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     _rfb_new = 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' + chr(10) + \
                'export ym_vl_re=${reym:-$ym}' + chr(10) + \
                'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi' + chr(10) + \
-               'if _is_install_run "$1" && [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
+               'if _is_install_run "$1" && [ -n "$ym" ]; then ensure_web_server "$ym" || true; fi' + chr(10)
     t = replace(t, _rfb_old, _rfb_new, "reality-fb-var", 1)
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",

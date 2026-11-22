@@ -50,8 +50,9 @@ run_hook(){
 # generator already converts egress textareas to ';' separated lines),
 # and are written with %q so special characters survive a round trip.
 vars_merge(){
-  local line _vn
+  local line _vn _cli_reym_set=0
   case "$1" in add|rep) ;; *) return 0;; esac
+  [ -n "${reym+x}" ] && _cli_reym_set=1
   if [ ! -s "$HOME/agsbx/vars.env" ]; then
     if [ "$1" = "add" ]; then
       echo "增量更新失败：未找到上次安装的变量记录 $HOME/agsbx/vars.env，请先用完整命令安装，或用 rep 全量重置"
@@ -73,6 +74,14 @@ vars_merge(){
     fi
     if [ -z "${!_vn+x}" ]; then eval "$line"; fi
   done < "$HOME/agsbx/vars.env"
+  # rep/add 未显式传 reym= 时，若 vars.env 中 reym 缺失或为空，兜底复用上次探测落盘的 ym_vl_re（除非是早期默认 apple.com）
+  if [ "$_cli_reym_set" = "0" ] && [ -z "${reym:-}" ] && [ -s "$HOME/agsbx/ym_vl_re" ]; then
+    local _prev_reym
+    _prev_reym=$(tr -d ' \t\r\n' < "$HOME/agsbx/ym_vl_re" 2>/dev/null || true)
+    if [ -n "$_prev_reym" ] && [ "$_prev_reym" != "apple.com" ]; then
+      reym="$_prev_reym"
+    fi
+  fi
   if [ "$1" = "rep" ]; then return 0; fi
   for v in vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt snpt sopt nvpt xupt xcpt; do
     [ -n "${!v+x}" ] && return 0
@@ -165,13 +174,13 @@ ensure_proxy_script(){
   elif [ "$script_name" = "caddy_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null; then
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null; then
       is_old=1
     fi
   elif [ "$script_name" = "nginx_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null; then
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null; then
       is_old=1
     fi
   fi
@@ -1311,22 +1320,23 @@ CAMOUFLAGE_TPL_EOF
 #   reym 未指定（有 ym 也探测，除非 reym 已填）且任一 Reality 协议在装时，
 #   调 auto_sni_resolve 一次。成功写 reym + ym_vl_re（reym 已在
 #   vars_save 清单，rep/add 复用，不重筛）；失败返回 1，调用方 exit 1 停装。
-# 筛选：geo 定位 → 候选（三档）→ GFW 列表过滤 → 在线 TLS 1.3 + H2
-#   探测（不看 HTTP 状态码，Reality 只看握手）→ 档内按握手延迟排序。
-#   一档：大学/镜像/机构（最冷，优先；大学优先同州/同省，不够退同国）
-#   二档：大厂冷门功能子域名
-#   三档：swscan.apple.com（最后手段，一、二档筛空才用）
+# 筛选：geo 定位 → 候选（三档，按当地国家/州精细化加载）→ GFW 列表过滤 →
+#   在线 TLS 1.3 + H2 探测（防 DNS 污染/回环 IP + 排除主流 CDN）→ 档内按握手延迟排序。
+#   一档：当地大学/开源镜像站/博物馆/科研机构（最冷，优先同州/同省，次选同国）
+#   二档：第三方高带宽冷门大厂与开源基础设施直连源站（剔除教程泛滥域名）
+#   三档：经典大厂高可用兜底池（learn.microsoft.com / configuration.apple.com / swscan.apple.com，一、二档筛空才用）
 # 硬要求：TLS 1.3 + HTTP/2 + 合法证书。本机 curl 无 HTTP/2 支持时
 #   直接报错停止，不降级、不静默跳过。
 # 注意：本文件被 source 进主脚本，只定义函数与常量，顶层不执行任何命令。
 
-_AUTO_SNI_MAX_TEST_DOMAINS=45
-_AUTO_SNI_MAX_UNIV=12
+_AUTO_SNI_MAX_TEST_DOMAINS=15
+_AUTO_SNI_MAX_UNIV=8
 _AUTO_SNI_IPINFO_URL="https://ipinfo.io/json"
 _AUTO_SNI_UNIV_URL="https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json"
 _AUTO_SNI_GFW_URL="https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/gfw.txt"
 _AUTO_SNI_TMP=""
 _AUTO_SNI_RESULTS=""
+_AUTO_SNI_SELF_IP=""
 
 # 通用 CNAME 查询（dig / host / DoH 兜底）
 _auto_sni_lookup_cname() {
@@ -1343,6 +1353,21 @@ _auto_sni_lookup_cname() {
   fi
 }
 
+# 校验解析出的目标 IP 是否为有效公网 IP（排除回环、内网保留地址及本机自身 IP，防 DNS 污染与自环握手）
+_auto_sni_valid_remote_ip() {
+  local ip="$1"
+  [ -n "$ip" ] || return 1
+  if [ -n "${_AUTO_SNI_SELF_IP:-}" ] && [ "$ip" = "$_AUTO_SNI_SELF_IP" ]; then
+    return 1
+  fi
+  case "$ip" in
+    0.*|127.*|10.*|192.168.*|169.254.*|224.*|240.*|255.*) return 1 ;;
+    172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 1 ;;
+    100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*) return 1 ;;
+  esac
+  return 0
+}
+
 # 单域名探测（由 xargs -P 并行调用）：通过则写一行
 # "tier|sub|握手ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
 # 状态码只记录、不过滤（Reality 只看握手）。
@@ -1352,10 +1377,10 @@ _auto_sni_probe_one() {
   hdr_file=$(mktemp "$_AUTO_SNI_TMP/hdr.XXXXXX") || return 0
   # 1. CNAME CDN 过滤
   cname=$(_auto_sni_lookup_cname "$domain")
-  if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|cdn)"; then
+  if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|edgecast|bunnycdn|gcore|cdn77|azion|cdn)"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测
+  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
   metrics=$(curl -4 -sS -I -o /dev/null \
     --tlsv1.3 --tls-max 1.3 \
     --http2 \
@@ -1368,12 +1393,16 @@ _auto_sni_probe_one() {
   http_code=$(printf '%s' "$metrics" | cut -d'|' -f1)
   t_app=$(printf '%s' "$metrics" | cut -d'|' -f3)
   remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f4)
-  # 3. 确认 H2（硬要求）
+  # 3. 校验远端 IP 合法性（防 DNS 污染与本机回环假阳性）
+  if ! _auto_sni_valid_remote_ip "$remote_ip"; then
+    rm -f "$hdr_file"; return 0
+  fi
+  # 4. 确认 H2（硬要求）
   if ! head -n 1 "$hdr_file" | grep -q "^HTTP/2"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 4. 排除主流 CDN 响应头
-  if grep -Eiq "^(server:.*cloudflare|cf-ray:|cf-cache-status:|x-amz-cf-id:|x-akamai-|x-fastly-request-id:|x-served-by:.*cache|x-azure-ref:|x-iinfo:|via:.*1\.1 google)" "$hdr_file"; then
+  # 5. 排除主流 CDN 响应头
+  if grep -Eiq "^(server:.*(cloudflare|akamaighost|cloudfront|fastly|bunnycdn|gcore)|cf-ray:|cf-cache-status:|x-amz-cf-id:|x-akamai-|x-fastly-request-id:|x-served-by:.*cache|x-azure-ref:|x-iinfo:|via:.*1\.1 google)" "$hdr_file"; then
     rm -f "$hdr_file"; return 0
   fi
   total_ms=$(awk -v a="$t_app" 'BEGIN { printf "%.1f", a * 1000 }')
@@ -1430,25 +1459,67 @@ PYEOF
   ' "$json"
 }
 
-# 机构候选（国家级补充）：$1=国家码，输出 "1|2|域名" 行。
+# 当地大学/博物馆/开源镜像站候选（按具体国家码 $1 与州/地区 $2 精细化加载，拒绝跨国大区盲测）：
+# 输出 "1|sub|域名" 行（sub=1 为本州/强本地，sub=2 为本国/邻近区）。
 _auto_sni_institutions() {
-  case "$1" in
-    US|CA)
-      printf '%s\n' ftp.osuosl.org mirrors.mit.edu mirrors.ocf.berkeley.edu mirror.umd.edu mirrors.rit.edu www.si.edu www.getty.edu www.loc.gov www.nist.gov www.ucla.edu www.usc.edu www.caltech.edu www.stanford.edu www.berkeley.edu www.washington.edu www.umich.edu www.utexas.edu www.nyu.edu www.columbia.edu www.metmuseum.org www.moma.org www.utoronto.ca www.ubc.ca
+  local cc="$1" region="${2:-}"
+  case "$cc" in
+    US)
+      case "$region" in
+        California|Washington|Oregon|Nevada|Arizona|Utah|Colorado)
+          printf '1|2|%s\n' ftp.osuosl.org mirrors.ocf.berkeley.edu www.ucla.edu www.usc.edu www.caltech.edu www.stanford.edu www.berkeley.edu www.washington.edu www.getty.edu
+          ;;
+        Texas|Illinois|Michigan|Minnesota|Ohio|Wisconsin|Indiana|Missouri)
+          printf '1|2|%s\n' www.umich.edu www.utexas.edu www.uchicago.edu www.purdue.edu www.wisc.edu ftp.osuosl.org
+          ;;
+        *)
+          printf '1|2|%s\n' mirrors.mit.edu mirror.umd.edu mirrors.rit.edu ftp.osuosl.org www.si.edu www.loc.gov www.nist.gov www.nyu.edu www.columbia.edu www.metmuseum.org www.moma.org www.stanford.edu www.berkeley.edu www.umich.edu
+          ;;
+      esac
       ;;
-    NL|DE|BE|FR|GB|CH|SE|AT|DK|NO|FI|PL|ES|IT)
-      printf '%s\n' ftp.nluug.nl mirror.nl.leaseweb.net ftp.snt.utwente.nl ftp.fau.de ftp.halifax.rwth-aachen.de mirror.init7.net www.uva.nl www.tudelft.nl www.uu.nl www.rug.nl www.leidenuniv.nl www.rijksmuseum.nl www.tum.de www.lmu.de www.mpg.de www.ox.ac.uk www.cam.ac.uk www.britishmuseum.org ethz.ch www.kth.se
+    CA)
+      printf '1|2|%s\n' www.utoronto.ca www.ubc.ca www.mcgill.ca www.uwaterloo.ca mirror.its.dal.ca www.rom.on.ca
       ;;
     JP)
-      printf '%s\n' ftp.jaist.ac.jp ftp.riken.jp linux.yz.yamagata-u.ac.jp ftp.kddilabs.jp ftp.iij.ad.jp www.u-tokyo.ac.jp www.kyoto-u.ac.jp www.osaka-u.ac.jp www.tohoku.ac.jp www.titech.ac.jp www.waseda.jp www.keio.ac.jp www.tnm.jp www.kahaku.go.jp
+      printf '1|2|%s\n' ftp.jaist.ac.jp ftp.riken.jp linux.yz.yamagata-u.ac.jp ftp.kddilabs.jp ftp.iij.ad.jp www.u-tokyo.ac.jp www.kyoto-u.ac.jp www.osaka-u.ac.jp www.tohoku.ac.jp www.titech.ac.jp www.waseda.jp www.keio.ac.jp www.tnm.jp www.kahaku.go.jp
       ;;
-    SG|HK|TW|KR)
-      printf '%s\n' download.nus.edu.sg mirror.xtom.com.hk ftp.twaren.net ftp.kaist.ac.kr www.nus.edu.sg www.ntu.edu.sg www.hku.hk www.cuhk.edu.hk www.ust.hk www.ntu.edu.tw www.sinica.edu.tw www.snu.ac.kr www.kaist.ac.kr
+    SG)
+      printf '1|2|%s\n' download.nus.edu.sg www.nus.edu.sg www.ntu.edu.sg www.smu.edu.sg mirror.xtom.com.hk
+      ;;
+    HK)
+      printf '1|2|%s\n' mirror.xtom.com.hk www.hku.hk www.cuhk.edu.hk www.ust.hk www.polyu.edu.hk www.cityu.edu.hk
+      ;;
+    TW)
+      printf '1|2|%s\n' ftp.twaren.net opensource.nchc.org.tw www.ntu.edu.tw www.sinica.edu.tw www.nycu.edu.tw www.nthu.edu.tw www.npm.gov.tw
+      ;;
+    KR)
+      printf '1|2|%s\n' ftp.kaist.ac.kr www.snu.ac.kr www.kaist.ac.kr www.yonsei.ac.kr www.korea.ac.kr www.museum.go.kr
+      ;;
+    DE)
+      printf '1|2|%s\n' ftp.fau.de ftp.halifax.rwth-aachen.de ftp.gwdg.de www.tum.de www.lmu.de www.mpg.de www.uni-heidelberg.de www.kit.edu
+      ;;
+    NL)
+      printf '1|2|%s\n' ftp.nluug.nl mirror.nl.leaseweb.net ftp.snt.utwente.nl www.uva.nl www.tudelft.nl www.uu.nl www.rug.nl www.leidenuniv.nl www.rijksmuseum.nl
+      ;;
+    GB)
+      printf '1|2|%s\n' www.ox.ac.uk www.cam.ac.uk www.ed.ac.uk www.imperial.ac.uk www.ucl.ac.uk www.manchester.ac.uk www.britishmuseum.org
+      ;;
+    FR)
+      printf '1|2|%s\n' mirrors.ircam.fr ftp.lip6.fr www.polytechnique.edu www.sorbonne-universite.fr www.inria.fr www.cnrs.fr
+      ;;
+    CH)
+      printf '1|2|%s\n' mirror.init7.net ethz.ch www.epfl.ch www.uzh.ch www.cern.ch
+      ;;
+    SE|NO|FI|DK)
+      printf '1|2|%s\n' ftp.acc.umu.se www.kth.se www.uu.se www.lu.se www.ntnu.no www.uio.no www.helsinki.fi www.aalto.fi www.ku.dk
+      ;;
+    AT|BE|PL|ES|IT|IE)
+      printf '1|2|%s\n' www.univie.ac.at www.tuwien.ac.at www.kuleuven.be www.ugent.be ftp.icm.edu.pl www.uw.edu.pl www.ucm.es www.polimi.it ftp.heanet.ie www.tcd.ie
       ;;
     AU|NZ)
-      printf '%s\n' mirror.aarnet.edu.au ftp.swin.edu.au www.unimelb.edu.au www.sydney.edu.au www.anu.edu.au www.uq.edu.au www.auckland.ac.nz
+      printf '1|2|%s\n' mirror.aarnet.edu.au ftp.swin.edu.au www.unimelb.edu.au www.sydney.edu.au www.anu.edu.au www.uq.edu.au www.auckland.ac.nz
       ;;
-  esac | awk '{ print "1|2|" $0 }'
+  esac
 }
 
 # 候选组装：$1=输出文件，$2=国家码（可空），$3=州/省（可空）。
@@ -1459,47 +1530,63 @@ _auto_sni_candidates() {
   local out="$1" cc="$2" region="$3"
   local univ_json tmp_univ
   : > "$out"
-  # --- 一档：大学（Hipo 库，同州/省优先）+ 机构（国家级列表）---
+  # --- 一档：当地大学（Hipo 库，仅提取本国 $cc，同州/省优先，同时兼容 www. 与根域名）+ 当地机构/博物馆/开源镜像站 ---
   if [ -n "$cc" ]; then
     univ_json="$_AUTO_SNI_TMP/univ.json"
-    if curl -4 -sL --max-time 8 "$_AUTO_SNI_UNIV_URL" -o "$univ_json" 2>/dev/null && [ -s "$univ_json" ]; then
+    if curl -4 -sL --max-time 6 "$_AUTO_SNI_UNIV_URL" -o "$univ_json" 2>/dev/null && [ -s "$univ_json" ]; then
       tmp_univ="$_AUTO_SNI_TMP/univ.txt"
       _auto_sni_univ_extract "$univ_json" "$cc" "$region" > "$tmp_univ" 2>/dev/null || true
       if [ -s "$tmp_univ" ]; then
-        # 同州/省优先：先取 sub=1 的随机顺序，不够再用 sub=2 补齐，最多 12 所
-        { grep '^1|' "$tmp_univ" 2>/dev/null | shuf; grep '^2|' "$tmp_univ" 2>/dev/null | shuf; } | head -n "$_AUTO_SNI_MAX_UNIV" | awk -F'|' '{ print "1|" $1 "|www." $2 }' >> "$out" || true
+        # 同州/省优先：先取 sub=1 的随机顺序，不够再用 sub=2 补齐，最多 _AUTO_SNI_MAX_UNIV 所；
+        # 同时输出 www.<domain> 与根域名 <domain>（防 www 挂 CDN 而根域在校园网自建被误杀）
+        { grep '^1|' "$tmp_univ" 2>/dev/null | shuf; grep '^2|' "$tmp_univ" 2>/dev/null | shuf; } | head -n "$_AUTO_SNI_MAX_UNIV" | awk -F'|' '{
+          d = $2
+          if (d ~ /^www\./) {
+            print "1|" $1 "|" d
+          } else {
+            print "1|" $1 "|www." d
+            print "1|" $1 "|" d
+          }
+        }' >> "$out" || true
       fi
     else
-      echo "自动探测：高校库拉取失败，跳过大学候选"
+      echo "自动探测：高校库拉取失败，使用内置当地机构与镜像站候选"
     fi
-    _auto_sni_institutions "$cc" >> "$out"
+    _auto_sni_institutions "$cc" "$region" >> "$out"
   fi
-  # --- 二档：大厂冷门功能子域名（不含 swscan.apple.com）---
+  # --- 二档：高带宽冷门大厂与开源基础设施直连源站（已剔除公开教程泛滥域名）---
   cat <<'EOF' | awk '{ print "2|1|" $0 }' >> "$out"
-configuration.apple.com
-gspe1-ssl.ls.apple.com
-xp.apple.com
-learn.microsoft.com
-visualstudio.microsoft.com
-dotnet.microsoft.com
-shop.tesla.com
 git.kernel.org
+mirrors.kernel.org
 www.debian.org
+deb.debian.org
 www.freebsd.org
+download.freebsd.org
 www.openbsd.org
 www.archlinux.org
 www.gentoo.org
 www.postgresql.org
 www.sqlite.org
 www.gnu.org
+ftp.gnu.org
 www.nginx.org
+hg.nginx.org
 www.blender.org
+download.blender.org
 www.videolan.org
 cran.r-project.org
 ctan.org
+www.wireshark.org
+www.cmake.org
+xp.apple.com
 EOF
-  # --- 三档：swscan.apple.com（最后手段）---
-  echo "3|1|swscan.apple.com" >> "$out"
+  # --- 三档：经典高可用大厂兜底池（最后手段，仅当一、二档全部筛空时才启用）---
+  cat <<'EOF' | awk '{ print "3|1|" $0 }' >> "$out"
+learn.microsoft.com
+configuration.apple.com
+gspe1-ssl.ls.apple.com
+swscan.apple.com
+EOF
   if [ -n "${_AUTO_SNI_EXTRA_FILE:-}" ] && [ -f "$_AUTO_SNI_EXTRA_FILE" ]; then
     cat "$_AUTO_SNI_EXTRA_FILE" >> "$out"
   fi
@@ -1515,7 +1602,7 @@ EOF
 # GFW 列表过滤：$1=候选文件（原地过滤）。拉取失败则跳过并告警。
 _auto_sni_gfw_filter() {
   local cands="$1" gfw="$_AUTO_SNI_TMP/gfw.txt"
-  if ! curl -4 -sL --max-time 8 "$_AUTO_SNI_GFW_URL" -o "$gfw" 2>/dev/null || [ ! -s "$gfw" ]; then
+  if ! curl -4 -sL --max-time 6 "$_AUTO_SNI_GFW_URL" -o "$gfw" 2>/dev/null || [ ! -s "$gfw" ]; then
     echo "自动探测：GFW 规则库拉取失败，跳过阻断比对"
     return 0
   fi
@@ -1541,26 +1628,27 @@ _auto_sni_gfw_filter() {
 }
 
 # 单档探测：$1=档位，$2=候选文件，$3=本档测试文件。
-# 同 sub 内随机、sub=1 优先，最多测 _AUTO_SNI_MAX_TEST_DOMAINS 个。
+# 同 sub 内随机、sub=1 优先，最多抽样测 _AUTO_SNI_MAX_TEST_DOMAINS 个当地候选。
 # 返回 0 且结果文件非空表示本档有通过者。
 _auto_sni_probe_tier() {
   local tier="$1" cands="$2" test_file="$3"
   : > "$_AUTO_SNI_RESULTS"
   { awk -F'|' -v t="$tier" '$1==t && $2==1' "$cands" | shuf; awk -F'|' -v t="$tier" '$1==t && $2==2' "$cands" | shuf; } | head -n "$_AUTO_SNI_MAX_TEST_DOMAINS" > "$test_file" 2>/dev/null || true
   [ -s "$test_file" ] || return 1
-  export _AUTO_SNI_TMP _AUTO_SNI_RESULTS
-  export -f _auto_sni_probe_one _auto_sni_lookup_cname
-  xargs -P 5 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; sleep 0.$((RANDOM % 4 + 1)); _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
+  export _AUTO_SNI_TMP _AUTO_SNI_RESULTS _AUTO_SNI_SELF_IP
+  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip
+  xargs -P 8 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
   [ -s "$_AUTO_SNI_RESULTS" ]
 }
 
 # 主流程（由 auto_sni_resolve 包一层临时目录管理后调用）。
-# 成功：写 reym + ym_vl_re，返回 0；失败：报错，返回 1。
+# 成功：写 reym + ym_vl_re，同步回落变量与 443 四层 SNI 分流，返回 0；失败：报错，返回 1。
 _auto_sni_run() {
   local cc="" region="" city="" org="" ip_json=""
   local cands="$_AUTO_SNI_TMP/candidates.txt"
   local tier test_file best best_ms
   ip_json=$(curl -4 -s --max-time 5 "$_AUTO_SNI_IPINFO_URL" 2>/dev/null || true)
+  _AUTO_SNI_SELF_IP=$(printf '%s' "$ip_json" | grep -oE '"ip": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   cc=$(printf '%s' "$ip_json" | grep -oE '"country": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   region=$(printf '%s' "$ip_json" | grep -oE '"region": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
   city=$(printf '%s' "$ip_json" | grep -oE '"city": *"[^"]+"' | cut -d'"' -f4 2>/dev/null || true)
@@ -1586,6 +1674,14 @@ _auto_sni_run() {
       best_ms=$(printf '%s' "$best" | cut -d'|' -f3)
       reym=$(printf '%s' "$best" | cut -d'|' -f4)
       export ym_vl_re="$reym"
+      if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym:-}" ]; then
+        export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"
+      else
+        export ym_vl_fb=""; export ym_vl_fb_port="443"
+      fi
+      if command -v vlpt_coexistence_sync_sni >/dev/null 2>&1; then
+        vlpt_coexistence_sync_sni "$reym" || true
+      fi
       echo "自动探测：Reality 伪装域名 $reym（第 $tier 档，握手 ${best_ms} ms）"
       return 0
     fi
@@ -1615,7 +1711,7 @@ auto_sni_resolve() {
   rc=0
   _auto_sni_run || rc=$?
   rm -rf "$_AUTO_SNI_TMP"
-  _AUTO_SNI_TMP=""; _AUTO_SNI_RESULTS=""
+  _AUTO_SNI_TMP=""; _AUTO_SNI_RESULTS=""; _AUTO_SNI_SELF_IP=""
   return $rc
 }
 # vlpt-coexistence.sh: VLESS-Reality 443 port coexistence with local Web servers (Caddy / Nginx)
@@ -1690,28 +1786,116 @@ web_port_find_available(){
   shuf -i 10000-65535 -n 1
 }
 
+reality_port_is_available_or_self(){
+  local port="$1"
+  local avoid="${2:-8443}"
+  [ -n "$port" ] || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+  [ "$port" != "443" ] && [ "$port" != "$avoid" ] || return 1
+
+  local out=""
+  if command -v ss >/dev/null 2>&1; then
+    out=$(ss -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v netstat >/dev/null 2>&1; then
+    out=$(netstat -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v lsof >/dev/null 2>&1; then
+    out=$(lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)
+  fi
+
+  if [ -z "$out" ]; then
+    return 0
+  fi
+  if echo "$out" | grep -qE '("xray"|"sing-box"|agsbx/x|agsbx/s)'; then
+    return 0
+  fi
+  local known_rp=""
+  [ -f "$HOME/agsbx/reality_port" ] && known_rp=$(cat "$HOME/agsbx/reality_port" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$known_rp" ] && [ "$known_rp" = "$port" ]; then
+    return 0
+  fi
+  return 1
+}
+
+reality_port_find_available(){
+  local preferred="${1:-}"
+  local wp="${2:-8443}"
+  if [ -n "$preferred" ] && reality_port_is_available_or_self "$preferred" "$wp"; then
+    printf '%s' "$preferred"
+    return 0
+  fi
+  local port=$((wp + 1))
+  local i=0
+  while [ $i -lt 20 ]; do
+    if reality_port_is_available_or_self "$port" "$wp"; then
+      printf '%s' "$port"
+      return 0
+    fi
+    port=$((port + 1))
+    i=$((i + 1))
+  done
+  shuf -i 10000-65535 -n 1
+}
+
+_detect_coexistence_web_engine(){
+  if [ "${certsrc:-}" = "caddy" ]; then echo "caddy"; return 0; fi
+  if [ "${certsrc:-}" = "acme" ] || [ "${certsrc:-}" = "nginx" ]; then echo "nginx"; return 0; fi
+  if [ -f "$HOME/agsbx/certsrc" ]; then
+    local saved_cs
+    saved_cs=$(cat "$HOME/agsbx/certsrc" 2>/dev/null | tr -d '[:space:]')
+    [ "$saved_cs" = "caddy" ] && { echo "caddy"; return 0; }
+    [ "$saved_cs" = "acme" ] && { echo "nginx"; return 0; }
+  fi
+  if [ -n "${ym:-}" ]; then
+    local mem_kb=""
+    mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || true)
+    if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then
+      echo "nginx"; return 0
+    fi
+    echo "caddy"; return 0
+  fi
+  if (command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null) || pgrep -x caddy >/dev/null 2>&1 || [ -s "${CADDYFILE:-/etc/caddy/Caddyfile}" ]; then
+    echo "caddy"; return 0
+  fi
+  if (command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null) || pgrep -x nginx >/dev/null 2>&1 || [ -d "${NGINX_CONF_DIR:-/etc/nginx/conf.d}" ]; then
+    echo "nginx"; return 0
+  fi
+  echo ""
+}
+
 web_server_migrate_to_port(){
   local target_port="$1"
+  local sni_dom="${2:-}"
+  local sni_tgt="${3:-}"
+  local engine="${4:-}"
   [ -n "$target_port" ] || return 0
 
   # 委托 caddy_proxy.sh / nginx_proxy.sh 执行 set-port
   local caddy_bin="$HOME/.local/bin/caddy_proxy.sh"
   local nginx_bin="$HOME/.local/bin/nginx_proxy.sh"
   if command -v ensure_proxy_script >/dev/null 2>&1; then
-    ensure_proxy_script "caddy_proxy.sh" || true
-    ensure_proxy_script "nginx_proxy.sh" || true
+    [ -z "$engine" ] || [ "$engine" = "caddy" ] && { ensure_proxy_script "caddy_proxy.sh" || true; }
+    [ -z "$engine" ] || [ "$engine" = "nginx" ] && { ensure_proxy_script "nginx_proxy.sh" || true; }
   fi
 
-  if [ -x "$caddy_bin" ]; then
-    "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+  if [ -x "$caddy_bin" ] && { [ -z "$engine" ] || [ "$engine" = "caddy" ]; }; then
+    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: caddy_proxy.sh set-port 失败"
+    else
+      "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+    fi
   fi
 
-  if [ -x "$nginx_bin" ]; then
-    "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+  if [ -x "$nginx_bin" ] && { [ -z "$engine" ] || [ "$engine" = "nginx" ]; }; then
+    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: nginx_proxy.sh set-port 失败"
+    else
+      "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+    fi
   fi
 
-  # 等待 443 释放（仅在迁移至非 443 端口时需要等待 443 端口腾空）
-  if [ "$target_port" != "443" ]; then
+  # 等待 443 释放（仅在未启用 L4 SNI 分流且迁移至非 443 端口时需要等待 443 端口腾空）
+  if [ "$target_port" != "443" ] && [ -z "$sni_dom" ]; then
     local waited=0
     while [ $waited -lt 5 ]; do
       local occupied=0
@@ -1725,6 +1909,44 @@ web_server_migrate_to_port(){
       waited=$((waited + 1))
     done
   fi
+  return 0
+}
+
+# vlpt_coexistence_sync_sni: 当 reym (无论是显式指定还是 auto_sni_resolve 自动探测得出) 确定后，
+# 同步配置 443 四层 SNI 分流（Caddy layer4 或 Nginx stream），并将 Reality 内部监听端口绑定到 reality_port
+vlpt_coexistence_sync_sni(){
+  local sni_dom="${1:-${ym_vl_re:-${reym:-}}}"
+  local p="${port_vl_re:-${vlpt:-}}"
+  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+    p=$(port_get "vl_re" 2>/dev/null || true)
+  fi
+  [ "$p" = "443" ] || return 0
+  [ -n "$sni_dom" ] || return 0
+
+  local wp="${web_port:-}"
+  [ -z "$wp" ] && [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$wp" ] && [ "$wp" != "443" ] || return 0
+
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  [ -n "$engine" ] || return 0
+
+  local existing_rp=""
+  if command -v port_get >/dev/null 2>&1; then
+    existing_rp=$(port_get "reality_port" 2>/dev/null || true)
+  fi
+  [ -z "$existing_rp" ] && [ -f "$HOME/agsbx/reality_port" ] && existing_rp=$(cat "$HOME/agsbx/reality_port" 2>/dev/null | tr -d '[:space:]')
+
+  local rp
+  rp=$(reality_port_find_available "$existing_rp" "$wp")
+  export reality_port="$rp"
+  export vlpt_listen_addr="127.0.0.1"
+  export vlpt_listen_port="$rp"
+  mkdir -p "$HOME/agsbx" 2>/dev/null || true
+  echo "$rp" > "$HOME/agsbx/reality_port" 2>/dev/null || true
+  command -v port_set >/dev/null 2>&1 && port_set "reality_port" "$rp"
+
+  web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine"
   return 0
 }
 
@@ -1792,7 +2014,13 @@ vlpt_coexistence_check(){
   echo "$wp" > "$HOME/agsbx/web_port" 2>/dev/null || true
   command -v port_set >/dev/null 2>&1 && port_set "web_port" "$wp"
 
-  web_server_migrate_to_port "$wp"
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  if [ -n "${reym:-}" ] && [ -n "$engine" ]; then
+    vlpt_coexistence_sync_sni "$reym"
+  else
+    web_server_migrate_to_port "$wp" "" "" "$engine"
+  fi
   export ym_vl_fb_port="$wp"
   return 0
 }
@@ -1818,11 +2046,42 @@ vlpt_coexistence_cleanup(){
     kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
     web_server_migrate_to_port 443
   fi
-  rm -f "$HOME/agsbx/web_port" "$cport_file" "$nport_file" 2>/dev/null || true
+  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" "$cport_file" "$nport_file" 2>/dev/null || true
   return 0
 }
 
+vlpt_coexistence_post_start(){
+  local p="${port_vl_re:-${vlpt:-}}"
+  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+    p=$(port_get "vl_re" 2>/dev/null || true)
+  fi
+  if [ "$p" = "443" ]; then
+    local sni_dom="${ym_vl_re:-${reym:-}}"
+    [ -z "$sni_dom" ] && [ -f "$HOME/agsbx/reym" ] && sni_dom=$(cat "$HOME/agsbx/reym" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$sni_dom" ]; then
+      vlpt_coexistence_sync_sni "$sni_dom"
+    fi
+  fi
+  [ -f "$HOME/agsbx/reality_port" ] || return 0
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  if [ "$engine" = "caddy" ] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+      systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
+    else
+      systemctl start caddy >/dev/null 2>&1 || true
+    fi
+  elif [ "$engine" = "nginx" ] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+    else
+      systemctl start nginx >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 if command -v register_hook >/dev/null 2>&1; then
+  register_hook post_start vlpt_coexistence_post_start
   register_hook on_uninstall vlpt_coexistence_cleanup
 fi
 # web-server.sh: ensure a web server listens on 443 when ym (own domain) is set.
@@ -1878,14 +2137,19 @@ ensure_web_server(){
     "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
 
     _webroot="${webroot:-/var/www/html}"
-    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
+    local proxy_target="${web_proxy:-}"
+    local custom_root=0
+    if [[ "$proxy_target" == /* ]]; then
+      _webroot="$proxy_target"
+      proxy_target=""
+      custom_root=1
+    fi
+
+    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ -z "$proxy_target" ] && [ "$custom_root" = "0" ] && [ ! -f "$_webroot/index.html" ]; }; then
       if command -v deploy_camouflage_blog >/dev/null 2>&1; then
         deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
       fi
     fi
-
-    # web_proxy 为空时直接读 webroot 静态文件，不起本地 HTTP 服务；只有用户明确指定后端时才反代
-    local proxy_target="${web_proxy:-}"
 
     if [ -n "$proxy_target" ]; then
       "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
@@ -3313,11 +3577,18 @@ subhttps_merge_reload(){
   systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1
 }
 subhttps_merge_verify(){
-  # 本机回环验证订阅地址返回 200
-  local ym_c="$1" token="$2" code=""
+  # 本机回环验证订阅地址返回 200（443 共存模式下 Caddy HTTPS 实际监听在 web_port，如 8443）
+  local ym_c="$1" token="$2" code="" wp=""
   command -v curl >/dev/null 2>&1 || return 1
-  code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
-  [ "$code" = "200" ]
+  wp="${web_port:-$(subhttps_read "$HOME/agsbx/web_port")}"
+  case "$wp" in ''|*[!0-9]*) wp="443" ;; esac
+  code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:$wp:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c:$wp/$token/clmi.yaml" 2>/dev/null)
+  [ "$code" = "200" ] && return 0
+  if [ "$wp" != "443" ]; then
+    code=$(curl -sk --noproxy '*' --max-time 10 --resolve "$ym_c:443:127.0.0.1" -o /dev/null -w "%{http_code}" "https://$ym_c/$token/clmi.yaml" 2>/dev/null)
+    [ "$code" = "200" ] && return 0
+  fi
+  return 1
 }
 subhttps_merge_system_caddy(){
   # 编排：已合并（token 一致）直接成功；否则优先 caddy_proxy 追加，保底插入→全量校验→reload→回环验证；
@@ -4301,7 +4572,7 @@ export port_sn=${snpt:-''}
 if _is_install_run "$1"; then vlpt_coexistence_check; fi
 export ym_vl_re=${reym:-$ym}
 if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi
-if _is_install_run "$1" && [ "$ym_vl_fb" = "127.0.0.1" ]; then ensure_web_server "$ym" || true; fi
+if _is_install_run "$1" && [ -n "$ym" ]; then ensure_web_server "$ym" || true; fi
 export cdnym=${cdnym:-''}
 export ym=${ym:-''}
 export alns=${alns:-''}
@@ -4350,16 +4621,26 @@ cert_setup_caddy_proxy(){
     return 1
   fi
 
-  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF 和 DNS 模块的最新版
+  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF、DNS 和 layer4 模块的最新版
   if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
-    ensure_caddy_download || true
+    if ! command -v caddy >/dev/null 2>&1 || ! caddy list-modules 2>/dev/null | grep -q "^layer4$" || ! caddy list-modules 2>/dev/null | grep -q "http.handlers.waf" || ! caddy list-modules 2>/dev/null | grep -q "cloudflare"; then
+      ensure_caddy_download || true
+    fi
   fi
 
   local force_flag=""
   force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
   "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
 
-  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
+  # web_proxy 智能识别：以 / 开头视为已部署的本地静态服务目录，否则视为反代后端地址，留空则默认部署伪装博客
+  local custom_root=0
+  if [[ "$proxy_backend" == /* ]]; then
+    webroot_dir="$proxy_backend"
+    proxy_backend=""
+    custom_root=1
+  fi
+
+  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ -z "$proxy_backend" ] && [ "$custom_root" = "0" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
     if command -v deploy_camouflage_blog >/dev/null 2>&1; then
       deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
     fi
@@ -4549,12 +4830,12 @@ ensure_acme(){
   echo "acme.sh 已自动安装：$HOME/.acme.sh/acme.sh"
   return 0
 }
-# ensure_caddy_download：Caddy 不存在时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
-# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.7），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.7，升级 Caddy 时传新 release 并改这个默认值即可。
-# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza 模块）才替换，验不过用备份恢复。
+# ensure_caddy_download：Caddy 不存在或缺少模块时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS + caddy-l4 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
+# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.9），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.9，升级 Caddy 时传新 release 并改这个默认值即可。
+# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza + layer4 模块）才替换，验不过用备份恢复。
 ensure_caddy_download(){
   [ "$(id -u 2>/dev/null)" = "0" ] || { echo "下载 Caddy 需要 root 权限（写 /usr/bin 与 /etc/caddy）"; return 1; }
-  local caddy_ver="${CADDY_VER:-caddy-v2.11.7}"
+  local caddy_ver="${CADDY_VER:-caddy-v2.11.9}"
   local base_url="${CADDY_DOWNLOAD_URL:-https://github.com/qytang2014/software/releases/download/${caddy_ver}}"
   local caddy_bin=""
   case "$cpu" in amd64) caddy_bin="caddy-linux-amd64";; arm64) caddy_bin="caddy-linux-arm64";; *) echo "不支持的架构：$cpu"; return 1;; esac
@@ -4569,6 +4850,7 @@ ensure_caddy_download(){
   if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "cloudflare"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Cloudflare 模块，拒绝替换"; return 1; fi
   # coraza-caddy v2 注册的模块名为 http.handlers.waf（模块 ID 里不带 coraza 字样）
   if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "http.handlers.waf"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza WAF 模块，拒绝替换"; return 1; fi
+  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "^layer4$"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 layer4 四层分流模块，拒绝替换"; return 1; fi
   if command -v systemctl >/dev/null 2>&1; then systemctl stop caddy 2>/dev/null || true; fi
   if [ -f /usr/bin/caddy ]; then cp /usr/bin/caddy /usr/bin/caddy.bak 2>/dev/null || true; fi
   if ! mv -f "$tmpdir/caddy" /usr/bin/caddy; then rm -rf "$tmpdir"; echo "替换 /usr/bin/caddy 失败"; return 1; fi
@@ -5203,8 +5485,8 @@ echo "Vless-tcp-reality-enc端口：$port_vl_re"
 cat >> "$HOME/agsbx/xr.json" <<EOF
         {
             "tag":"reality-vision",
-            "listen": "::",
-            "port": $port_vl_re,
+            "listen": "${vlpt_listen_addr:-::}",
+            "port": ${vlpt_listen_port:-$port_vl_re},
             "protocol": "vless",
             "settings": {
                 "clients": [
@@ -5767,8 +6049,8 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
     {
         "type": "vless",
         "tag": "vl-reality-sb",
-        "listen": "::",
-        "listen_port": ${port_vl_re},
+        "listen": "${vlpt_listen_addr:-::}",
+        "listen_port": ${vlpt_listen_port:-$port_vl_re},
         "users": [
             {
                 "uuid": "${uuid}",

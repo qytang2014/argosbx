@@ -45,16 +45,26 @@ cert_setup_caddy_proxy(){
     return 1
   fi
 
-  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF 和 DNS 模块的最新版
+  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF、DNS 和 layer4 模块的最新版
   if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
-    ensure_caddy_download || true
+    if ! command -v caddy >/dev/null 2>&1 || ! caddy list-modules 2>/dev/null | grep -q "^layer4$" || ! caddy list-modules 2>/dev/null | grep -q "http.handlers.waf" || ! caddy list-modules 2>/dev/null | grep -q "cloudflare"; then
+      ensure_caddy_download || true
+    fi
   fi
 
   local force_flag=""
   force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
   "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
 
-  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
+  # web_proxy 智能识别：以 / 开头视为已部署的本地静态服务目录，否则视为反代后端地址，留空则默认部署伪装博客
+  local custom_root=0
+  if [[ "$proxy_backend" == /* ]]; then
+    webroot_dir="$proxy_backend"
+    proxy_backend=""
+    custom_root=1
+  fi
+
+  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ -z "$proxy_backend" ] && [ "$custom_root" = "0" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
     if command -v deploy_camouflage_blog >/dev/null 2>&1; then
       deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
     fi
@@ -244,12 +254,12 @@ ensure_acme(){
   echo "acme.sh 已自动安装：$HOME/.acme.sh/acme.sh"
   return 0
 }
-# ensure_caddy_download：Caddy 不存在时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
-# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.7），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.7，升级 Caddy 时传新 release 并改这个默认值即可。
-# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza 模块）才替换，验不过用备份恢复。
+# ensure_caddy_download：Caddy 不存在或缺少模块时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS + caddy-l4 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
+# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.9），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.9，升级 Caddy 时传新 release 并改这个默认值即可。
+# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza + layer4 模块）才替换，验不过用备份恢复。
 ensure_caddy_download(){
   [ "$(id -u 2>/dev/null)" = "0" ] || { echo "下载 Caddy 需要 root 权限（写 /usr/bin 与 /etc/caddy）"; return 1; }
-  local caddy_ver="${CADDY_VER:-caddy-v2.11.7}"
+  local caddy_ver="${CADDY_VER:-caddy-v2.11.9}"
   local base_url="${CADDY_DOWNLOAD_URL:-https://github.com/qytang2014/software/releases/download/${caddy_ver}}"
   local caddy_bin=""
   case "$cpu" in amd64) caddy_bin="caddy-linux-amd64";; arm64) caddy_bin="caddy-linux-arm64";; *) echo "不支持的架构：$cpu"; return 1;; esac
@@ -264,6 +274,7 @@ ensure_caddy_download(){
   if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "cloudflare"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Cloudflare 模块，拒绝替换"; return 1; fi
   # coraza-caddy v2 注册的模块名为 http.handlers.waf（模块 ID 里不带 coraza 字样）
   if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "http.handlers.waf"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza WAF 模块，拒绝替换"; return 1; fi
+  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "^layer4$"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 layer4 四层分流模块，拒绝替换"; return 1; fi
   if command -v systemctl >/dev/null 2>&1; then systemctl stop caddy 2>/dev/null || true; fi
   if [ -f /usr/bin/caddy ]; then cp /usr/bin/caddy /usr/bin/caddy.bak 2>/dev/null || true; fi
   if ! mv -f "$tmpdir/caddy" /usr/bin/caddy; then rm -rf "$tmpdir"; echo "替换 /usr/bin/caddy 失败"; return 1; fi

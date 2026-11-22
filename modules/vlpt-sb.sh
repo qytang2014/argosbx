@@ -38,8 +38,8 @@ cat >> "$HOME/agsbx/sb.json" <<EOF
     {
         "type": "vless",
         "tag": "vl-reality-sb",
-        "listen": "::",
-        "listen_port": ${port_vl_re},
+        "listen": "${vlpt_listen_addr:-::}",
+        "listen_port": ${vlpt_listen_port:-$port_vl_re},
         "users": [
             {
                 "uuid": "${uuid}",

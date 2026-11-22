@@ -70,28 +70,116 @@ web_port_find_available(){
   shuf -i 10000-65535 -n 1
 }
 
+reality_port_is_available_or_self(){
+  local port="$1"
+  local avoid="${2:-8443}"
+  [ -n "$port" ] || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+  [ "$port" != "443" ] && [ "$port" != "$avoid" ] || return 1
+
+  local out=""
+  if command -v ss >/dev/null 2>&1; then
+    out=$(ss -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v netstat >/dev/null 2>&1; then
+    out=$(netstat -tlnp 2>/dev/null | grep -E ":${port}\s" || true)
+  elif command -v lsof >/dev/null 2>&1; then
+    out=$(lsof -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)
+  fi
+
+  if [ -z "$out" ]; then
+    return 0
+  fi
+  if echo "$out" | grep -qE '("xray"|"sing-box"|agsbx/x|agsbx/s)'; then
+    return 0
+  fi
+  local known_rp=""
+  [ -f "$HOME/agsbx/reality_port" ] && known_rp=$(cat "$HOME/agsbx/reality_port" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$known_rp" ] && [ "$known_rp" = "$port" ]; then
+    return 0
+  fi
+  return 1
+}
+
+reality_port_find_available(){
+  local preferred="${1:-}"
+  local wp="${2:-8443}"
+  if [ -n "$preferred" ] && reality_port_is_available_or_self "$preferred" "$wp"; then
+    printf '%s' "$preferred"
+    return 0
+  fi
+  local port=$((wp + 1))
+  local i=0
+  while [ $i -lt 20 ]; do
+    if reality_port_is_available_or_self "$port" "$wp"; then
+      printf '%s' "$port"
+      return 0
+    fi
+    port=$((port + 1))
+    i=$((i + 1))
+  done
+  shuf -i 10000-65535 -n 1
+}
+
+_detect_coexistence_web_engine(){
+  if [ "${certsrc:-}" = "caddy" ]; then echo "caddy"; return 0; fi
+  if [ "${certsrc:-}" = "acme" ] || [ "${certsrc:-}" = "nginx" ]; then echo "nginx"; return 0; fi
+  if [ -f "$HOME/agsbx/certsrc" ]; then
+    local saved_cs
+    saved_cs=$(cat "$HOME/agsbx/certsrc" 2>/dev/null | tr -d '[:space:]')
+    [ "$saved_cs" = "caddy" ] && { echo "caddy"; return 0; }
+    [ "$saved_cs" = "acme" ] && { echo "nginx"; return 0; }
+  fi
+  if [ -n "${ym:-}" ]; then
+    local mem_kb=""
+    mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || true)
+    if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then
+      echo "nginx"; return 0
+    fi
+    echo "caddy"; return 0
+  fi
+  if (command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null) || pgrep -x caddy >/dev/null 2>&1 || [ -s "${CADDYFILE:-/etc/caddy/Caddyfile}" ]; then
+    echo "caddy"; return 0
+  fi
+  if (command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null) || pgrep -x nginx >/dev/null 2>&1 || [ -d "${NGINX_CONF_DIR:-/etc/nginx/conf.d}" ]; then
+    echo "nginx"; return 0
+  fi
+  echo ""
+}
+
 web_server_migrate_to_port(){
   local target_port="$1"
+  local sni_dom="${2:-}"
+  local sni_tgt="${3:-}"
+  local engine="${4:-}"
   [ -n "$target_port" ] || return 0
 
   # 委托 caddy_proxy.sh / nginx_proxy.sh 执行 set-port
   local caddy_bin="$HOME/.local/bin/caddy_proxy.sh"
   local nginx_bin="$HOME/.local/bin/nginx_proxy.sh"
   if command -v ensure_proxy_script >/dev/null 2>&1; then
-    ensure_proxy_script "caddy_proxy.sh" || true
-    ensure_proxy_script "nginx_proxy.sh" || true
+    [ -z "$engine" ] || [ "$engine" = "caddy" ] && { ensure_proxy_script "caddy_proxy.sh" || true; }
+    [ -z "$engine" ] || [ "$engine" = "nginx" ] && { ensure_proxy_script "nginx_proxy.sh" || true; }
   fi
 
-  if [ -x "$caddy_bin" ]; then
-    "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+  if [ -x "$caddy_bin" ] && { [ -z "$engine" ] || [ "$engine" = "caddy" ]; }; then
+    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: caddy_proxy.sh set-port 失败"
+    else
+      "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+    fi
   fi
 
-  if [ -x "$nginx_bin" ]; then
-    "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+  if [ -x "$nginx_bin" ] && { [ -z "$engine" ] || [ "$engine" = "nginx" ]; }; then
+    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: nginx_proxy.sh set-port 失败"
+    else
+      "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+    fi
   fi
 
-  # 等待 443 释放（仅在迁移至非 443 端口时需要等待 443 端口腾空）
-  if [ "$target_port" != "443" ]; then
+  # 等待 443 释放（仅在未启用 L4 SNI 分流且迁移至非 443 端口时需要等待 443 端口腾空）
+  if [ "$target_port" != "443" ] && [ -z "$sni_dom" ]; then
     local waited=0
     while [ $waited -lt 5 ]; do
       local occupied=0
@@ -105,6 +193,44 @@ web_server_migrate_to_port(){
       waited=$((waited + 1))
     done
   fi
+  return 0
+}
+
+# vlpt_coexistence_sync_sni: 当 reym (无论是显式指定还是 auto_sni_resolve 自动探测得出) 确定后，
+# 同步配置 443 四层 SNI 分流（Caddy layer4 或 Nginx stream），并将 Reality 内部监听端口绑定到 reality_port
+vlpt_coexistence_sync_sni(){
+  local sni_dom="${1:-${ym_vl_re:-${reym:-}}}"
+  local p="${port_vl_re:-${vlpt:-}}"
+  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+    p=$(port_get "vl_re" 2>/dev/null || true)
+  fi
+  [ "$p" = "443" ] || return 0
+  [ -n "$sni_dom" ] || return 0
+
+  local wp="${web_port:-}"
+  [ -z "$wp" ] && [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$wp" ] && [ "$wp" != "443" ] || return 0
+
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  [ -n "$engine" ] || return 0
+
+  local existing_rp=""
+  if command -v port_get >/dev/null 2>&1; then
+    existing_rp=$(port_get "reality_port" 2>/dev/null || true)
+  fi
+  [ -z "$existing_rp" ] && [ -f "$HOME/agsbx/reality_port" ] && existing_rp=$(cat "$HOME/agsbx/reality_port" 2>/dev/null | tr -d '[:space:]')
+
+  local rp
+  rp=$(reality_port_find_available "$existing_rp" "$wp")
+  export reality_port="$rp"
+  export vlpt_listen_addr="127.0.0.1"
+  export vlpt_listen_port="$rp"
+  mkdir -p "$HOME/agsbx" 2>/dev/null || true
+  echo "$rp" > "$HOME/agsbx/reality_port" 2>/dev/null || true
+  command -v port_set >/dev/null 2>&1 && port_set "reality_port" "$rp"
+
+  web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine"
   return 0
 }
 
@@ -172,7 +298,13 @@ vlpt_coexistence_check(){
   echo "$wp" > "$HOME/agsbx/web_port" 2>/dev/null || true
   command -v port_set >/dev/null 2>&1 && port_set "web_port" "$wp"
 
-  web_server_migrate_to_port "$wp"
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  if [ -n "${reym:-}" ] && [ -n "$engine" ]; then
+    vlpt_coexistence_sync_sni "$reym"
+  else
+    web_server_migrate_to_port "$wp" "" "" "$engine"
+  fi
   export ym_vl_fb_port="$wp"
   return 0
 }
@@ -198,10 +330,41 @@ vlpt_coexistence_cleanup(){
     kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
     web_server_migrate_to_port 443
   fi
-  rm -f "$HOME/agsbx/web_port" "$cport_file" "$nport_file" 2>/dev/null || true
+  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" "$cport_file" "$nport_file" 2>/dev/null || true
   return 0
 }
 
+vlpt_coexistence_post_start(){
+  local p="${port_vl_re:-${vlpt:-}}"
+  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+    p=$(port_get "vl_re" 2>/dev/null || true)
+  fi
+  if [ "$p" = "443" ]; then
+    local sni_dom="${ym_vl_re:-${reym:-}}"
+    [ -z "$sni_dom" ] && [ -f "$HOME/agsbx/reym" ] && sni_dom=$(cat "$HOME/agsbx/reym" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$sni_dom" ]; then
+      vlpt_coexistence_sync_sni "$sni_dom"
+    fi
+  fi
+  [ -f "$HOME/agsbx/reality_port" ] || return 0
+  local engine
+  engine=$(_detect_coexistence_web_engine)
+  if [ "$engine" = "caddy" ] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+      systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
+    else
+      systemctl start caddy >/dev/null 2>&1 || true
+    fi
+  elif [ "$engine" = "nginx" ] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+    else
+      systemctl start nginx >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 if command -v register_hook >/dev/null 2>&1; then
+  register_hook post_start vlpt_coexistence_post_start
   register_hook on_uninstall vlpt_coexistence_cleanup
 fi
