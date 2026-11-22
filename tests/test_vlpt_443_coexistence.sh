@@ -590,4 +590,156 @@ EOF
 )
 echo "PASS: Test 15"
 
+echo "=== Test 16: xhpt=443 moves only xhpt (vlpt on a high port stays) ==="
+(
+  export HOME="$WORK_DIR/home_xhpt"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  log_file="$WORK_DIR/xhpt_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "caddy:\$*" >> "$log_file"
+EOF
+  cat > "$HOME/.local/bin/nginx_proxy.sh" << EOF
+#!/bin/bash
+echo "nginx:\$*" >> "$log_file"
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
+
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_xh="443"
+  export port_vl_re="12345"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  vlpt_coexistence_sync_sni "www.stanford.edu"
+
+  [ "${xhpt_listen_addr:-}" = "127.0.0.1" ] || { echo "FAIL: xhpt_listen_addr should be 127.0.0.1, got ${xhpt_listen_addr:-}"; exit 1; }
+  [ "${xhpt_listen_port:-}" = "8444" ] || { echo "FAIL: xhpt_listen_port should be 8444, got ${xhpt_listen_port:-}"; exit 1; }
+  [ -z "${vlpt_listen_addr:-}" ] || { echo "FAIL: vlpt_listen_addr should stay unset (vlpt is on a high port), got ${vlpt_listen_addr:-}"; exit 1; }
+  [ -z "${vlpt_listen_port:-}" ] || { echo "FAIL: vlpt_listen_port should stay unset (vlpt is on a high port), got ${vlpt_listen_port:-}"; exit 1; }
+  grep -q "caddy:set-port 8443 --sni www.stanford.edu --sni-target 8444" "$log_file" || { echo "FAIL: expected caddy set-port with --sni, got $(cat "$log_file")"; exit 1; }
+  ! grep -q "nginx:" "$log_file" || { echo "FAIL: nginx_proxy.sh should not be called when engine is caddy"; exit 1; }
+)
+echo "PASS: Test 16"
+
+echo "=== Test 17: arpt=443 (sing-box) moves only arpt ==="
+(
+  export HOME="$WORK_DIR/home_arpt"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  log_file="$WORK_DIR/arpt_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "caddy:\$*" >> "$log_file"
+EOF
+  cat > "$HOME/.local/bin/nginx_proxy.sh" << EOF
+#!/bin/bash
+echo "nginx:\$*" >> "$log_file"
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
+
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_ar="443"
+  export port_vl_re="12345"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  vlpt_coexistence_sync_sni "www.stanford.edu"
+
+  [ "${arpt_listen_addr:-}" = "127.0.0.1" ] || { echo "FAIL: arpt_listen_addr should be 127.0.0.1, got ${arpt_listen_addr:-}"; exit 1; }
+  [ "${arpt_listen_port:-}" = "8444" ] || { echo "FAIL: arpt_listen_port should be 8444, got ${arpt_listen_port:-}"; exit 1; }
+  [ -z "${vlpt_listen_addr:-}" ] || { echo "FAIL: vlpt_listen_addr should stay unset (vlpt is on a high port), got ${vlpt_listen_addr:-}"; exit 1; }
+  [ -z "${vlpt_listen_port:-}" ] || { echo "FAIL: vlpt_listen_port should stay unset (vlpt is on a high port), got ${vlpt_listen_port:-}"; exit 1; }
+  grep -q "caddy:set-port 8443 --sni www.stanford.edu --sni-target 8444" "$log_file" || { echo "FAIL: expected caddy set-port with --sni, got $(cat "$log_file")"; exit 1; }
+)
+echo "PASS: Test 17"
+
+echo "=== Test 18: Two Reality protocols on 443 = loud error, no silent pick ==="
+(
+  export port_vl_re="443" port_xh="443"
+  rc=0
+  out=$(reality_443_proto 2>&1) || rc=$?
+  [ "$rc" = "2" ] || { echo "FAIL: reality_443_proto should return 2 on conflict, got $rc (out: $out)"; exit 1; }
+  echo "$out" | grep -q "vlpt" || { echo "FAIL: conflict error should name vlpt, got: $out"; exit 1; }
+  echo "$out" | grep -q "xhpt" || { echo "FAIL: conflict error should name xhpt, got: $out"; exit 1; }
+)
+echo "PASS: Test 18a"
+(
+  # vlpt_coexistence_check must exit 1 (stop the install) on conflict
+  export port_vl_re="443" port_xh="443" FORCE_NONINTERACTIVE=1
+  if ( vlpt_coexistence_check ); then
+    echo "FAIL: vlpt_coexistence_check should exit 1 on conflict"; exit 1
+  fi
+)
+echo "PASS: Test 18b"
+
+echo "=== Test 19: vlpt=443 regression (vlpt moves, xhpt on a high port stays) ==="
+(
+  export HOME="$WORK_DIR/home_vlpt_reg"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  log_file="$WORK_DIR/vlpt_reg_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "caddy:\$*" >> "$log_file"
+EOF
+  cat > "$HOME/.local/bin/nginx_proxy.sh" << EOF
+#!/bin/bash
+echo "nginx:\$*" >> "$log_file"
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
+
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export port_xh="12345"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  vlpt_coexistence_sync_sni "www.stanford.edu"
+
+  [ "${vlpt_listen_addr:-}" = "127.0.0.1" ] || { echo "FAIL: vlpt_listen_addr should be 127.0.0.1, got ${vlpt_listen_addr:-}"; exit 1; }
+  [ "${vlpt_listen_port:-}" = "8444" ] || { echo "FAIL: vlpt_listen_port should be 8444, got ${vlpt_listen_port:-}"; exit 1; }
+  [ -z "${xhpt_listen_addr:-}" ] || { echo "FAIL: xhpt_listen_addr should stay unset (xhpt is on a high port), got ${xhpt_listen_addr:-}"; exit 1; }
+  [ -z "${xhpt_listen_port:-}" ] || { echo "FAIL: xhpt_listen_port should stay unset (xhpt is on a high port), got ${xhpt_listen_port:-}"; exit 1; }
+  grep -q "caddy:set-port 8443 --sni www.stanford.edu --sni-target 8444" "$log_file" || { echo "FAIL: expected caddy set-port with --sni, got $(cat "$log_file")"; exit 1; }
+)
+echo "PASS: Test 19"
+
+echo "=== Test 20: Built argosbx.sh has conditional listen/port for all 7 Reality inbounds ==="
+(
+  built_script="$ROOT/argosbx.sh"
+  # Xray: xhpt / vxpt / xupt / xcpt / vwpt (vlpt regression below)
+  grep -Fq '"listen": "${xhpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: xhpt conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${xhpt_listen_port:-$port_xh},' "$built_script" || { echo "FAIL: xhpt conditional port missing"; exit 1; }
+  grep -Fq '"listen": "${vxpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: vxpt conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${vxpt_listen_port:-$port_vx},' "$built_script" || { echo "FAIL: vxpt conditional port missing"; exit 1; }
+  grep -Fq '"listen": "${xupt_listen_addr:-::}",' "$built_script" || { echo "FAIL: xupt conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${xupt_listen_port:-$port_xu},' "$built_script" || { echo "FAIL: xupt conditional port missing"; exit 1; }
+  grep -Fq '"listen": "${xcpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: xcpt conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${xcpt_listen_port:-$port_xc},' "$built_script" || { echo "FAIL: xcpt conditional port missing"; exit 1; }
+  grep -Fq '"listen": "${vwpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: vwpt conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${vwpt_listen_port:-$port_vw},' "$built_script" || { echo "FAIL: vwpt conditional port missing"; exit 1; }
+  # sing-box: arpt
+  grep -Fq '"listen":"${arpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: arpt conditional listen missing"; exit 1; }
+  grep -Fq '"listen_port":${arpt_listen_port:-$port_ar},' "$built_script" || { echo "FAIL: arpt conditional port missing"; exit 1; }
+  # vlpt regression (Xray + sing-box, unchanged)
+  grep -Fq '"listen": "${vlpt_listen_addr:-::}",' "$built_script" || { echo "FAIL: vlpt Xray conditional listen missing"; exit 1; }
+  grep -Fq '"port": ${vlpt_listen_port:-$port_vl_re},' "$built_script" || { echo "FAIL: vlpt Xray conditional port missing"; exit 1; }
+  grep -Fq '"listen_port": ${vlpt_listen_port:-$port_vl_re},' "$built_script" || { echo "FAIL: vlpt sing-box conditional port missing"; exit 1; }
+)
+echo "PASS: Test 20"
+
 echo "ALL TESTS PASSED!"

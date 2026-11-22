@@ -1,6 +1,6 @@
 # 锚点分类表（第 3 步，2026-11-21）
 
-上游基线：`yonggekkk/argosbx main@7497089`。运行时锚点总数 **238**（`python3 build/build.py --check-anchors`）。
+上游基线：`yonggekkk/argosbx main@7497089`。运行时锚点总数 **244**（`python3 build/build.py --check-anchors`）。
 
 类别定义：
 
@@ -14,10 +14,10 @@
 | 类别 | 数量 | 决定 |
 | --- | --- | --- |
 | A 模块插入 | 55 | 全部保留 |
-| B 直接内容 patch | 169 | 全部保留 |
+| B 直接内容 patch | 175 | 全部保留 |
 | C 可转 hook | 19 | 迁移 7（分发链），保留 12（订阅/分组列表，见原因） |
 | D 其他 | 1 | 保留 |
-| **合计** | **244** | **迁移后 238**（7 个分发锚点 → 1 个 `dispatch-hook`；auto-sni 2026-11-21 加 2 个 A 锚点） |
+| **合计** | **250** | **迁移后 244**（7 个分发锚点 → 1 个 `dispatch-hook`；auto-sni 2026-11-21 加 2 个 A 锚点；Reality-443 泛化 2026-11-22 加 6 个 B 锚点） |
 
 第 3 步第 1 批（已做，见下）：子命令分发 7 个锚点 → 1 个 `run_hook dispatch` 调用锚点 + 9 个 handler（写进对应 `modules/*.sh`，`register_hook dispatch` 注册）。`BUDGET` 由 242 改为 236。
 
@@ -69,7 +69,7 @@
 | camouflage-module-anchor | A | 保留：模块插入 |
 | export-list | B | 保留：上游 export 循环加私有变量 |
 
-## vlpt（26：A 8，B 13，C 4，D 1）
+## vlpt（32：A 8，B 19，C 4，D 1）
 
 | 名字 | 类别 | 决定 |
 | --- | --- | --- |
@@ -88,6 +88,12 @@
 | vlpt-link-pbk | B | 保留：vlpt 链接 pbk/sid 改内核感知变量 |
 | vlpt-link-name-vision | B | 保留：链接名 reality-enc 改回 vision |
 | vlpt-inbound-decryption-none | B | 保留：入站 JSON decryption 改 none |
+| xhpt-inbound-listen-443 | B | 保留：xhttp-reality 入站 listen/port 改条件变量（443 分流时移内网；入站 JSON 内无 hook 点） |
+| vxpt-inbound-listen-443 | B | 保留：vless-xhttp 入站同上 |
+| xupt-inbound-listen-443 | B | 保留：xhttp-h3 入站同上 |
+| xcpt-inbound-listen-443 | B | 保留：xhttp-h23 入站同上 |
+| vwpt-inbound-listen-443 | B | 保留：vless-ws 入站同上 |
+| arpt-inbound-listen-443 | B | 保留：sing-box anyreality-sb 入站 listen/listen_port 改条件变量（同上） |
 | sbvlpt-restore | A | 保留：sbvlpt-restore.sh 模块插入 |
 | vlpt-clash-pbk | B | 保留：Clash 条目 pbk/sid 改变量 |
 | vlpt-display-guard-tighten | B | 保留：显示守卫改精确 tag 匹配 |

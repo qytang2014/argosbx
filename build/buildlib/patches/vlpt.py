@@ -132,6 +132,53 @@ fi
                     }
                 ],
                 "decryption": "none"''', "vlpt-inbound-decryption-none", 1)
+    # Reality 443 coexistence (private): the other Reality inbounds
+    # get the same conditional listen/port as vlpt above, each with its
+    # OWN variable pair (xhpt_listen_addr/xhpt_listen_port, ...). A
+    # shared pair would move every installed Reality inbound to the
+    # same internal port and break the high-port ones, so per-protocol
+    # pairs are the only correct shape. The coexistence module
+    # (modules/vlpt-coexistence.sh) exports exactly one pair -- the
+    # protocol whose port is 443. The 5 Xray inbounds live in upstream
+    # (installxray xr.json); arpt (sing-box anyreality-sb) lives in
+    # upstream installsb sb.json. These are B anchors (direct content
+    # patch, no hook point inside the inbound JSON).
+    t = replace(t, '''      "tag":"xhttp-reality",
+      "listen": "::",
+      "port": ${port_xh},''',
+                '''      "tag":"xhttp-reality",
+      "listen": "${xhpt_listen_addr:-::}",
+      "port": ${xhpt_listen_port:-$port_xh},''', "xhpt-inbound-listen-443", 1)
+    t = replace(t, '''      "tag":"vless-xhttp",
+      "listen": "::",
+      "port": ${port_vx},''',
+                '''      "tag":"vless-xhttp",
+      "listen": "${vxpt_listen_addr:-::}",
+      "port": ${vxpt_listen_port:-$port_vx},''', "vxpt-inbound-listen-443", 1)
+    t = replace(t, '''  "tag": "xhttp-h3",
+  "listen": "::",
+  "port": ${port_xu},''',
+                '''  "tag": "xhttp-h3",
+  "listen": "${xupt_listen_addr:-::}",
+  "port": ${xupt_listen_port:-$port_xu},''', "xupt-inbound-listen-443", 1)
+    t = replace(t, '''  "tag": "xhttp-h23",
+  "listen": "::",
+  "port": ${port_xc},''',
+                '''  "tag": "xhttp-h23",
+  "listen": "${xcpt_listen_addr:-::}",
+  "port": ${xcpt_listen_port:-$port_xc},''', "xcpt-inbound-listen-443", 1)
+    t = replace(t, '''      "tag":"vless-ws",
+      "listen": "::",
+      "port": ${port_vw},''',
+                '''      "tag":"vless-ws",
+      "listen": "${vwpt_listen_addr:-::}",
+      "port": ${vwpt_listen_port:-$port_vw},''', "vwpt-inbound-listen-443", 1)
+    t = replace(t, '''            "tag":"anyreality-sb",
+            "listen":"::",
+            "listen_port":${port_ar},''',
+                '''            "tag":"anyreality-sb",
+            "listen":"${arpt_listen_addr:-::}",
+            "listen_port":${arpt_listen_port:-$port_ar},''', "arpt-inbound-listen-443", 1)
     # sbvlpt() restored (upstream d4f4b91 deleted it; QUINN decided
     # 2026-11-19 to keep it): insert before sbsspt(). pbk/sid are
     # already kernel-aware in the module; server stays $server_ip so

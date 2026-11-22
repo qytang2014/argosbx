@@ -6,12 +6,16 @@
 # at 238: the auto-sni.sh module insertion (A) and the one call site
 # inside ins() (A) — the call must run at a specific point in ins()
 # (after vlpt_on, before installxray/installsb) and ins() has no hook
-# point there, so it cannot be a hook. When a later step migrates more anchors to
+# point there, so it cannot be a hook. Reality-443 generalization
+# (2026-11-22) adds 6 anchors, landing at 244: one conditional
+# listen/port patch per non-vlpt Reality inbound (xhpt/vxpt/vwpt/xupt/
+# xcpt/arpt) — the inbound JSON has no hook point, and the listen line
+# must change in place. When a later step migrates more anchors to
 # hooks, update BUDGET to the new total. After that, a new anchor must
 # first be justified as un-hookable (see build/README.md and
 # build/ANCHORS.md); bumping BUDGET without converting to a hook needs
 # a reason in the commit message.
-BUDGET=238
+BUDGET=244
 
 cd "$(dirname "$0")/.." || exit 1
 out=$(python3 build/build.py --check-anchors 2>&1) || {
