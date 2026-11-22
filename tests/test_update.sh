@@ -127,7 +127,7 @@ echo "=== Test 4: 检查 built 脚本中包含 update 子命令与分发 ==="
   grep -Fq 'case "${*##* }" in list|del|upx|ups|upa|res|up|update|' "$built" || {
     echo "FAIL: up/update missing in top-case-exclusion"; exit 1;
   }
-  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' "$built" || {
+  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check || exit 1; fi' "$built" || {
     echo "FAIL: vlpt_coexistence_check not gated by _is_install_run in built script"; exit 1;
   }
 )

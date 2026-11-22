@@ -366,7 +366,9 @@ _auto_sni_run() {
         export ym_vl_fb=""; export ym_vl_fb_port="443"
       fi
       if command -v vlpt_coexistence_sync_sni >/dev/null 2>&1; then
-        vlpt_coexistence_sync_sni "$reym" || true
+        # set-port 失败必须停装：Reality 入站已移到内网端口，路由器没生效则 443 无人监听。
+        # 返回 1 透传给 auto_sni_resolve，ins() 收到非零即停装。
+        vlpt_coexistence_sync_sni "$reym" || return 1
       fi
       echo "自动探测：Reality 伪装域名 $reym（第 $tier 档，握手 ${best_ms} ms）"
       return 0

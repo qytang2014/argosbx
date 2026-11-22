@@ -210,20 +210,29 @@ web_server_migrate_to_port(){
     [ -z "$engine" ] || [ "$engine" = "nginx" ] && { ensure_proxy_script "nginx_proxy.sh" || true; }
   fi
 
+  # 任一实际执行的 set-port 失败都记下（Caddy 与 Nginx 两路同等处理）；
+  # 失败时不再静默继续：Reality 入站已移到内网端口，路由器没生效则 443 无人监听，
+  # 代理+订阅同时断，必须停装。
+  local _rc=0
   if [ -x "$caddy_bin" ] && { [ -z "$engine" ] || [ "$engine" = "caddy" ]; }; then
     if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: caddy_proxy.sh set-port 失败"
+      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$caddy_bin" set-port "$target_port" || echo "警告: caddy_proxy.sh set-port 失败"
+      "$caddy_bin" set-port "$target_port" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     fi
   fi
 
   if [ -x "$nginx_bin" ] && { [ -z "$engine" ] || [ "$engine" = "nginx" ]; }; then
     if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || echo "警告: nginx_proxy.sh set-port 失败"
+      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$nginx_bin" set-port "$target_port" || echo "警告: nginx_proxy.sh set-port 失败"
+      "$nginx_bin" set-port "$target_port" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     fi
+  fi
+
+  if [ "$_rc" != "0" ]; then
+    echo "错误：Web 服务 set-port 失败，443 SNI 分流未生效；Reality 入站已移到内网端口，443 无人监听，安装停止。" >&2
+    return 1
   fi
 
   # 等待 443 释放（仅在未启用 L4 SNI 分流且迁移至非 443 端口时需要等待 443 端口腾空）
@@ -289,7 +298,7 @@ vlpt_coexistence_sync_sni(){
   echo "$rp" > "$HOME/agsbx/reality_port" 2>/dev/null || true
   command -v port_set >/dev/null 2>&1 && port_set "reality_port" "$rp"
 
-  web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine"
+  web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine" || return 1
   return 0
 }
 
@@ -361,9 +370,9 @@ vlpt_coexistence_check(){
   local engine
   engine=$(_detect_coexistence_web_engine)
   if [ -n "${reym:-}" ] && [ -n "$engine" ]; then
-    vlpt_coexistence_sync_sni "$reym"
+    vlpt_coexistence_sync_sni "$reym" || return 1
   else
-    web_server_migrate_to_port "$wp" "" "" "$engine"
+    web_server_migrate_to_port "$wp" "" "" "$engine" || return 1
   fi
   export ym_vl_fb_port="$wp"
   return 0
@@ -388,7 +397,7 @@ vlpt_coexistence_cleanup(){
       rc-service sing-box stop >/dev/null 2>&1 || true
     fi
     kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
-    web_server_migrate_to_port 443
+    web_server_migrate_to_port 443 || echo "错误：卸载回滚失败，Web 服务未恢复到 443 端口；请手动执行 caddy_proxy.sh / nginx_proxy.sh set-port 443 恢复。" >&2
   fi
   rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" "$cport_file" "$nport_file" 2>/dev/null || true
   return 0
@@ -404,7 +413,9 @@ vlpt_coexistence_post_start(){
     local sni_dom="${ym_vl_re:-${reym:-}}"
     [ -z "$sni_dom" ] && [ -f "$HOME/agsbx/reym" ] && sni_dom=$(cat "$HOME/agsbx/reym" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$sni_dom" ]; then
-      vlpt_coexistence_sync_sni "$sni_dom"
+      # post_start 是 hook（run_hook 会吞掉返回值），这里至少要明确报错，不能静默：
+      # 此时 Reality 入站已在内网端口，路由器没生效则 443 无人监听。
+      vlpt_coexistence_sync_sni "$sni_dom" || { echo "错误：post_start 阶段 443 SNI 分流配置失败（set-port 未生效），Reality 入站已在内网端口，443 无人监听；请手动检查 caddy_proxy.sh / nginx_proxy.sh 的 set-port，或重新安装。" >&2; return 1; }
     fi
   fi
   [ -f "$HOME/agsbx/reality_port" ] || return 0

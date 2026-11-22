@@ -118,7 +118,7 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # When reym == ym, the SNI is the user's own domain: probes fall back to
     # the local web server (127.0.0.1:443) instead of the external domain.
     _rfb_old = 'export ym_vl_re=${reym:-' + chr(39)*2 + '}' + chr(10)
-    _rfb_new = 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' + chr(10) + \
+    _rfb_new = 'if _is_install_run "$1"; then vlpt_coexistence_check || exit 1; fi' + chr(10) + \
                'export ym_vl_re=${reym:-$ym}' + chr(10) + \
                'if [ -n "${ym_vl_re}" ] && [ "${ym_vl_re}" = "${ym}" ]; then export ym_vl_fb="127.0.0.1"; export ym_vl_fb_port="${web_port:-443}"; else export ym_vl_fb=""; export ym_vl_fb_port="443"; fi' + chr(10) + \
                'if _is_install_run "$1" && [ -n "$ym" ]; then ensure_web_server "$ym" || true; fi' + chr(10)

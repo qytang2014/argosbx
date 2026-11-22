@@ -164,8 +164,8 @@ echo "PASS: Test 5"
 echo "=== Test 6: Built argosbx.sh contains coexistence logic and fallback ports ==="
 (
   built_script="$ROOT/argosbx.sh"
-  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check; fi' "$built_script" || {
-    echo "FAIL: vlpt_coexistence_check invocation missing in built script"; exit 1;
+  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check || exit 1; fi' "$built_script" || {
+    echo "FAIL: vlpt_coexistence_check invocation (with || exit 1) missing in built script"; exit 1;
   }
   grep -Fq 'export ym_vl_fb_port="${web_port:-443}"' "$built_script" || {
     echo "FAIL: ym_vl_fb_port export missing in built script"; exit 1;
@@ -741,5 +741,122 @@ echo "=== Test 20: Built argosbx.sh has conditional listen/port for all 7 Realit
   grep -Fq '"listen_port": ${vlpt_listen_port:-$port_vl_re},' "$built_script" || { echo "FAIL: vlpt sing-box conditional port missing"; exit 1; }
 )
 echo "PASS: Test 20"
+
+echo "=== Test 21: set-port failure makes web_server_migrate_to_port return 1 ==="
+(
+  export HOME="$WORK_DIR/home_migrate_fail"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << 'EOF'
+#!/bin/bash
+exit 1
+EOF
+  cat > "$HOME/.local/bin/nginx_proxy.sh" << 'EOF'
+#!/bin/bash
+exit 1
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  # Caddy engine: set-port fails -> return 1
+  if web_server_migrate_to_port 8443 "" "" "caddy" 2>/dev/null; then
+    echo "FAIL: web_server_migrate_to_port should return 1 when caddy set-port fails"; exit 1
+  fi
+  # Nginx engine: set-port fails -> return 1
+  if web_server_migrate_to_port 8443 "" "" "nginx" 2>/dev/null; then
+    echo "FAIL: web_server_migrate_to_port should return 1 when nginx set-port fails"; exit 1
+  fi
+  # SNI variant (the sync_sni path): set-port --sni fails -> return 1
+  if web_server_migrate_to_port 8443 "www.stanford.edu" "8444" "caddy" 2>/dev/null; then
+    echo "FAIL: web_server_migrate_to_port should return 1 when caddy set-port --sni fails"; exit 1
+  fi
+)
+echo "PASS: Test 21"
+
+echo "=== Test 22: vlpt_coexistence_sync_sni propagates set-port failure ==="
+(
+  export HOME="$WORK_DIR/home_sync_fail"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  log_file="$WORK_DIR/sync_fail_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "caddy:\$*" >> "$log_file"
+exit 1
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  # No nginx_proxy.sh: engine is caddy, so only caddy runs
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export port_xh="12345"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  if vlpt_coexistence_sync_sni "www.stanford.edu" 2>/dev/null; then
+    echo "FAIL: vlpt_coexistence_sync_sni should return 1 when set-port fails"; exit 1
+  fi
+  # The Reality inbound was already moved to the internal port before set-port
+  # ran; sync_sni must not silently claim success in that state.
+  [ "${vlpt_listen_addr:-}" = "127.0.0.1" ] || { echo "FAIL: vlpt_listen_addr should be 127.0.0.1 (moved before set-port)"; exit 1; }
+  grep -q "caddy:set-port 8443 --sni www.stanford.edu --sni-target 8444" "$log_file" || { echo "FAIL: expected caddy set-port with --sni, got $(cat "$log_file")"; exit 1; }
+)
+echo "PASS: Test 22a"
+(
+  # Regression: set-port succeeds -> sync_sni returns 0
+  export HOME="$WORK_DIR/home_sync_ok"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << 'EOF'
+#!/bin/bash
+exit 0
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  vlpt_coexistence_sync_sni "www.stanford.edu" || { echo "FAIL: vlpt_coexistence_sync_sni should return 0 when set-port succeeds"; exit 1; }
+)
+echo "PASS: Test 22b"
+
+echo "=== Test 23: vlpt_coexistence_check propagates set-port failure ==="
+(
+  export HOME="$WORK_DIR/home_check_fail"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << 'EOF'
+#!/bin/bash
+exit 1
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export FORCE_NONINTERACTIVE=1
+  export reym="www.stanford.edu"
+  export certsrc="caddy"
+  export ym="my.example.com"
+
+  if vlpt_coexistence_check 2>/dev/null; then
+    echo "FAIL: vlpt_coexistence_check should return 1 when set-port fails"; exit 1
+  fi
+)
+echo "PASS: Test 23a"
+(
+  # Built script: the top-level check call must stop the install on failure,
+  # and _auto_sni_run must not swallow a sync_sni failure with || true.
+  grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check || exit 1; fi' "$ROOT/argosbx.sh" || { echo "FAIL: built script check call lacks || exit 1"; exit 1; }
+  ! grep -Fq 'vlpt_coexistence_sync_sni "$reym" || true' "$ROOT/argosbx.sh" || { echo "FAIL: built script still swallows sync_sni failure in _auto_sni_run"; exit 1; }
+  grep -Fq 'vlpt_coexistence_sync_sni "$reym" || return 1' "$ROOT/argosbx.sh" || { echo "FAIL: built script _auto_sni_run lacks || return 1"; exit 1; }
+)
+echo "PASS: Test 23b"
 
 echo "ALL TESTS PASSED!"
