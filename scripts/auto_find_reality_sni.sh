@@ -293,10 +293,10 @@ _auto_sni_run() {
   return 1
 }
 
-# 入口：reym/ym 已有时直接返回 0（幂等，rep/add 不重筛）。
+# 入口：reym 已有时直接返回 0（幂等，rep/add 不重筛）。
 auto_sni_resolve() {
   local rc
-  if [ -n "${ym_vl_re:-}" ]; then return 0; fi
+  if [ -n "${reym:-}" ]; then return 0; fi
   # H2 是硬要求：本机 curl 必须支持 HTTP/2，否则直接停装。
   if ! curl --version 2>/dev/null | grep -q 'HTTP2'; then
     echo "自动探测失败：本机 curl 不支持 HTTP/2（H2 是伪装域名的硬要求），无法验证；请安装带 HTTP/2 支持的 curl，或手动指定 reym" >&2

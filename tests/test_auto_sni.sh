@@ -237,7 +237,7 @@ FAKE_GEO_FILE="$TMP/geo-empty.json"
 mk_h2 learn.microsoft.com swscan.apple.com
 mk_lat "learn.microsoft.com 0.070" "swscan.apple.com 0.090"
 run_case 0 learn.microsoft.com "geo failure falls back to tier 2"
-# 10. idempotent: ym_vl_re already set -> no curl calls at all
+# 10. idempotent: reym already set -> no curl calls at all
 FAKE_GEO_FILE="$TMP/geo-gb-eng.json"
 FAKE_CURL_LOG="$TMP/curl.log"; : > "$FAKE_CURL_LOG"
 cat > "$TMP/run_idem.sh" << 'RUNIDEM'
@@ -250,8 +250,27 @@ RUNIDEM
 out=$(FAKE_CURL_LOG="$FAKE_CURL_LOG" PATH="$TMP/stubbin:$PATH" bash "$TMP/run_idem.sh" "$ROOT") || fail "idempotent run failed: $out"
 printf '%s' "$out" | grep -q 'rc=0' || fail "idempotent: rc not 0 (out: $out)"
 [ ! -s "$FAKE_CURL_LOG" ] || fail "idempotent: curl was called: $(cat "$FAKE_CURL_LOG")"
-echo "ok: idempotent (ym_vl_re set -> no probe)"
+echo "ok: idempotent (reym set -> no probe)"
 FAKE_CURL_LOG=""
+# 11. ym set, reym empty -> still probes (new rule: detect even with ym)
+FAKE_GEO_FILE="$TMP/geo-gb-eng.json"
+FAKE_GFW_FILE="$TMP/gfw-empty.txt"
+mk_h2 www.example.ac.uk www.cam.ac.uk www.ed.ac.uk www.ox.ac.uk
+mk_lat "www.example.ac.uk 0.080" "www.cam.ac.uk 0.050" "www.ed.ac.uk 0.040" "www.ox.ac.uk 0.060"
+cat > "$TMP/run_ym.sh" << 'RUNYM'
+#!/bin/bash
+. "$1/modules/auto-sni.sh"
+ym_vl_re="111.222.333.com"; reym=""
+auto_sni_resolve
+echo "rc=$? reym=${reym:-} ym_vl_re=${ym_vl_re:-}"
+RUNYM
+out=$(FAKE_GEO_FILE="$FAKE_GEO_FILE" FAKE_UNIV_FILE="$TMP/univ.json" \
+  FAKE_GFW_FILE="$FAKE_GFW_FILE" FAKE_H2_FILE="$FAKE_H2_FILE" \
+  FAKE_LATENCY_FILE="$FAKE_LATENCY_FILE" FAKE_CURL_VERSION_H2=1 \
+  PATH="$TMP/stubbin:$PATH" bash "$TMP/run_ym.sh" "$ROOT") || fail "ym-set probe run failed: $out"
+printf '%s' "$out" | grep -q 'rc=0 reym=www.example.ac.uk ym_vl_re=www.example.ac.uk' \
+  || fail "ym-set probe wrong: $out"
+echo "ok: ym set, reym empty -> probes (reym=www.example.ac.uk)"
 
 # ---------- 3. trigger guard (extracted from the built script) ----------
 call_line=$(grep -n 'auto_sni_resolve || exit 1' "$BUILT" | cut -d: -f1)
@@ -264,7 +283,8 @@ GUARD="$1"; SCEN="$2"; TRACE="$3"
 unset vlp xhp vxp vwp xup xcp arp ym_vl_re reym ym
 auto_sni_resolve() { echo "called" >> "$TRACE"; return "${STUB_RC:-0}"; }
 case "$SCEN" in
-  reym-set) ym_vl_re="www.ox.ac.uk"; vlp=yes ;;
+  reym-set) reym="www.ox.ac.uk"; vlp=yes ;;
+  ym-set) ym="111.222.333.com"; vlp=yes ;;
   no-flag) : ;;
   vlp) vlp=yes ;;
   xhp) xhp=yes ;;
@@ -285,6 +305,7 @@ guard_case() {
   echo "ok: guard $label (called=$called)"
 }
 guard_case reym-set 0 "reym set -> no probe"
+guard_case ym-set 1 "ym set, reym empty -> probe"
 guard_case no-flag 0 "no Reality flag -> no probe"
 guard_case vlp 1 "vlp set -> probe"
 guard_case xhp 1 "xhp set -> probe"

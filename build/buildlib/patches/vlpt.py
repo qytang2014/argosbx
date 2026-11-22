@@ -47,19 +47,19 @@ fi
 '''
     t = replace(t, "ins(){\nif [ \"$nvp\" != yes ]",
                 "ins(){\n" + vlpt_on + "if [ \"$nvp\" != yes ]", "vlpt-on-compute", 1)
-    # --- auto-sni call (private): resolve the Reality SNI when neither
-    # reym nor ym is set and a Reality protocol is being installed. Runs
-    # once at the top of ins(), after vlpt_on is computed and before any
-    # installxray/installsb branch. The guard is the trigger (reym/ym
-    # empty + any Reality flag); auto_sni_resolve itself is idempotent
-    # (returns 0 at once if ym_vl_re is already set), so rep/add never
+    # --- auto-sni call (private): resolve the Reality SNI when reym
+    # is not set (even if ym is set) and a Reality protocol is being
+    # installed. Runs once at the top of ins(), after vlpt_on is computed
+    # and before any installxray/installsb branch. The guard is the trigger
+    # (reym empty + any Reality flag); auto_sni_resolve itself is idempotent
+    # (returns 0 at once if reym is already set), so rep/add never
     # re-detect. Failure aborts the install (exit 1).
     # This is a call insertion inside ins(), an upstream function, so it
     # is a new anchor (A); there is no hook point inside ins() to hang
     # it on (see build/ANCHORS.md).
     t = replace(t, 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then',
-                '# Reality 伪装域名自动探测：reym/ym 都未指定且装 Reality 协议时才探测，失败即停装（见 modules/auto-sni.sh）\n'
-                'if [ -z "${ym_vl_re:-}" ] && { [ "$vlp" = yes ] || [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ] || [ "$arp" = yes ]; }; then\n'
+                '# Reality 伪装域名自动探测：reym 未指定且装 Reality 协议时才探测（有 ym 也探测，除非 reym 已填），失败即停装（见 modules/auto-sni.sh）\n'
+                'if [ -z "${reym:-}" ] && { [ "$vlp" = yes ] || [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ] || [ "$arp" = yes ]; }; then\n'
                 '  auto_sni_resolve || exit 1\n'
                 'fi\n'
                 'if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$snp" != yes ]; then', "auto-sni-call", 1)
@@ -99,7 +99,7 @@ fi
                 'sskey=$(cat "$HOME/agsbx/sskey" 2>/dev/null)\nfi\nif grep -q "vl-reality-sb" "$HOME/agsbx/sb.json" 2>/dev/null; then vlpt_pbk="$public_key_s"; vlpt_sid="$short_id_s"; else vlpt_pbk="$public_key_x"; vlpt_sid="$short_id_x"; fi\nif grep xhttp-reality "$HOME/agsbx/xr.json"', "vlpt-display-pbk", 1)
     t = replace(t, 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1; then',
                 'if grep reality-vision "$HOME/agsbx/xr.json" >/dev/null 2>&1 || grep vl-reality-sb "$HOME/agsbx/sb.json" >/dev/null 2>&1; then', "vlpt-display-guard", 1)
-    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=$dekey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
+    t = replace(t, 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=$enkey&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$public_key_x&sid=$short_id_x&type=tcp&headerType=none',
                 'vl_link="vless://$uuid@$server_ip:$port_vl_re?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$ym_vl_re&fp=chrome&pbk=$vlpt_pbk&sid=$vlpt_sid&type=tcp&headerType=none', "vlpt-link-pbk", 1)
     # vlpt link name: upstream renamed the display to reality-enc when
     # it switched to ENC; we keep encryption=none, so the name must

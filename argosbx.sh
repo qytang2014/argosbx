@@ -1308,7 +1308,7 @@ CAMOUFLAGE_TPL_EOF
 # 两处筛查逻辑保持一致，改一处要同步另一处。
 #
 # 触发（ins() 顶部，vlpt_on 算完、第一个 installxray/installsb 之前）：
-#   reym 与 ym 都未指定（ym_vl_re 为空）且任一 Reality 协议在装时，
+#   reym 未指定（有 ym 也探测，除非 reym 已填）且任一 Reality 协议在装时，
 #   调 auto_sni_resolve 一次。成功写 reym + ym_vl_re（reym 已在
 #   vars_save 清单，rep/add 复用，不重筛）；失败返回 1，调用方 exit 1 停装。
 # 筛选：geo 定位 → 候选（三档）→ GFW 列表过滤 → 在线 TLS 1.3 + H2
@@ -1594,10 +1594,10 @@ _auto_sni_run() {
   return 1
 }
 
-# 入口：reym/ym 已有时直接返回 0（幂等，rep/add 不重筛）。
+# 入口：reym 已有时直接返回 0（幂等，rep/add 不重筛）。
 auto_sni_resolve() {
   local rc
-  if [ -n "${ym_vl_re:-}" ]; then return 0; fi
+  if [ -n "${reym:-}" ]; then return 0; fi
   # H2 是硬要求：本机 curl 必须支持 HTTP/2，否则直接停装。
   if ! curl --version 2>/dev/null | grep -q 'HTTP2'; then
     echo "自动探测失败：本机 curl 不支持 HTTP/2（H2 是伪装域名的硬要求），无法验证；请安装带 HTTP/2 支持的 curl，或手动指定 reym" >&2
@@ -7470,8 +7470,8 @@ if [ -n "$vlp" ]; then
       else vlpt_on="xray"; fi ;;
   esac
 fi
-# Reality 伪装域名自动探测：reym/ym 都未指定且装 Reality 协议时才探测，失败即停装（见 modules/auto-sni.sh）
-if [ -z "${ym_vl_re:-}" ] && { [ "$vlp" = yes ] || [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ] || [ "$arp" = yes ]; }; then
+# Reality 伪装域名自动探测：reym 未指定且装 Reality 协议时才探测（有 ym 也探测，除非 reym 已填），失败即停装（见 modules/auto-sni.sh）
+if [ -z "${reym:-}" ] && { [ "$vlp" = yes ] || [ "$xhp" = yes ] || [ "$vxp" = yes ] || [ "$vwp" = yes ] || [ "$xup" = yes ] || [ "$xcp" = yes ] || [ "$arp" = yes ]; }; then
   auto_sni_resolve || exit 1
 fi
 if [ "$nvp" != yes ] && [ "$tup" != yes ] && [ "$anp" != yes ] && [ "$arp" != yes ] && [ "$ssp" != yes ] && [ "$vlpt_on" != "sb" ]; then
