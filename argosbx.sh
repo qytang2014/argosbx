@@ -322,6 +322,12 @@ _camouflage_write() {
 deploy_camouflage_blog() {
   local webroot="$1"
   [ -n "$webroot" ] || { echo "deploy_camouflage_blog: 需要 webroot 参数"; return 1; }
+  # ym 与 reym 不同时，Reality 回落指向伪装域名本身，本地博客无用，默认不部署；
+  # camouflage=1（生成器「强制部署」）可强制部署。
+  if [ -n "${ym:-}" ] && [ -n "${reym:-}" ] && [ "${reym}" != "${ym}" ] && [ "${camouflage:-}" != "1" ]; then
+    echo "伪装博客跳过：ym(${ym}) 与伪装域名 reym(${reym}) 不同，默认不部署（camouflage=1 可强制部署）"
+    return 0
+  fi
   camouflage_pick_persona
   mkdir -p "$webroot/posts"
   echo "伪装博客人设：$P_AUTHOR《$P_SITE_NAME》"

@@ -59,4 +59,18 @@ for f in glob.glob(sys.argv[1] + '/**/*.html', recursive=True):
 print("HTML balanced OK")
 PY
 
+# ym != reym 时默认跳过（硬伤 3）；camouflage=1 可强制；ym == reym 正常部署
+# （ym/reym/camouflage 以环境变量传入子 shell；函数读全局变量）
+ym="example.com" reym="other.example" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-skip" > "$TMP/log-skip" 2>&1
+grep -q "伪装博客跳过" "$TMP/log-skip" || { echo "FAIL: ym != reym 时应跳过并提示"; exit 1; }
+[ ! -e "$TMP/out-skip/index.html" ] || { echo "FAIL: ym != reym 时不应部署博客"; exit 1; }
+
+ym="example.com" reym="other.example" camouflage="1" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-force" > "$TMP/log-force" 2>&1
+N_FORCE=$(find "$TMP/out-force" -type f | wc -l)
+[ "$N_FORCE" = "14" ] || { echo "FAIL: camouflage=1 强制部署应得 14 个文件，实际 $N_FORCE"; exit 1; }
+
+ym="example.com" reym="example.com" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-same" > "$TMP/log-same" 2>&1
+N_SAME=$(find "$TMP/out-same" -type f | wc -l)
+[ "$N_SAME" = "14" ] || { echo "FAIL: ym == reym 时应正常部署，实际 $N_SAME"; exit 1; }
+
 echo "PASS: camouflage blog"
