@@ -27,8 +27,8 @@ cert_migrate_paths(){
   fi
 }
 
-# cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
-# 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
+# cert_setup_caddy_proxy: Initialize Caddy environment and configure primary domain site via caddy_proxy.sh.
+# Returns 0 on success; returns 1 on script missing or execution failure (fail loudly, no legacy bypass).
 cert_setup_caddy_proxy(){
   local ym="$1"
   local certmode="$2"
@@ -39,44 +39,63 @@ cert_setup_caddy_proxy(){
 
   local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
   ensure_proxy_script "caddy_proxy.sh" || true
-  cleanup_legacy_argosbx_caddyfile 2>/dev/null || true
 
   if [ ! -x "$caddy_proxy_bin" ]; then
+    echo "错误：未找到可执行脚本 $caddy_proxy_bin，无法配置 Caddy（所有 Caddy 配置必须由 caddy_proxy.sh 托管）。" >&2
     return 1
-  fi
-
-  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF、DNS 和 layer4 模块的最新版
-  if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
-    if ! command -v caddy >/dev/null 2>&1 || ! caddy list-modules 2>/dev/null | grep -q "^layer4$" || ! caddy list-modules 2>/dev/null | grep -q "http.handlers.waf" || ! caddy list-modules 2>/dev/null | grep -q "cloudflare"; then
-      ensure_caddy_download || true
-    fi
   fi
 
   local force_flag=""
   force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
-  "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
-
-  # web_proxy 智能识别：以 / 开头视为已部署的本地静态服务目录，否则视为反代后端地址，留空则默认部署伪装博客
-  local custom_root=0
-  if [[ "$proxy_backend" == /* ]]; then
-    webroot_dir="$proxy_backend"
-    proxy_backend=""
-    custom_root=1
+  if ! "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag; then
+    echo "错误：caddy_proxy.sh init 执行失败。" >&2
+    return 1
   fi
 
-  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ -z "$proxy_backend" ] && [ "$custom_root" = "0" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
-    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
-      deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+  # Determine site mode:
+  # 1. web_proxy starts with '/' -> user's local static root
+  # 2. web_proxy non-empty       -> user's reverse proxy backend
+  # 3. should_deploy_camouflage_blog -> deploy camouflage blog & serve webroot_dir
+  # 4. otherwise                 -> --no-default (404 fallback, no /var/www/html mapping)
+  local site_mode="no-default"
+  local site_target=""
+  if [[ "$proxy_backend" == /* ]]; then
+    site_mode="root"
+    site_target="$proxy_backend"
+  elif [ -n "$proxy_backend" ]; then
+    site_mode="proxy"
+    site_target="$proxy_backend"
+  elif command -v should_deploy_camouflage_blog >/dev/null 2>&1 && camouflage="$camouflage_flag" web_proxy="$proxy_backend" should_deploy_camouflage_blog; then
+    if [ "$camouflage_flag" = "1" ] || [ ! -f "$webroot_dir/index.html" ]; then
+      if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+        camouflage="$camouflage_flag" web_proxy="$proxy_backend" deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+      fi
     fi
+    site_mode="root"
+    site_target="$webroot_dir"
+  else
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      # Emit clear skip reason without writing files
+      camouflage="$camouflage_flag" web_proxy="$proxy_backend" deploy_camouflage_blog "$webroot_dir" >/dev/null 2>&1 || true
+    fi
+    echo "站点默认路由：未触发伪装博客条件且未设置 web_proxy，${ym} 仅启用 --no-default（根路径返回 404，不映射 /var/www/html）"
+    site_mode="no-default"
   fi
 
   local dns_arg=""
   [ "$certmode" = "dns" ] && dns_arg="--dns cloudflare"
 
-  if [ -n "$proxy_backend" ]; then
-    "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_backend" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  local site_rc=0
+  if [ "$site_mode" = "proxy" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --proxy "$site_target" ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
+  elif [ "$site_mode" = "root" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --root "$site_target" ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
   else
-    "$caddy_proxy_bin" site --domain "$ym" --root "$webroot_dir" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+    "$caddy_proxy_bin" site --domain "$ym" --no-default ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
+  fi
+  if [ "$site_rc" != "0" ]; then
+    echo "错误：caddy_proxy.sh site 配置域名 ${ym} 失败。" >&2
+    return 1
   fi
 
   caddyfile_path="/etc/caddy/Caddyfile"
@@ -149,99 +168,6 @@ prompt_cf_token(){
   [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]
 }
 
-# cleanup_legacy_argosbx_caddyfile: 迁移并清理旧版残留的 argosbx.caddyfile 及 import 语句
-cleanup_legacy_argosbx_caddyfile(){
-  local main_caddyfile="/etc/caddy/Caddyfile"
-  local legacy_file="/etc/caddy/argosbx.caddyfile"
-  if [ -f "$main_caddyfile" ] && grep -qE '^[ \t]*import[ \t]+.*argosbx\.caddyfile' "$main_caddyfile" 2>/dev/null; then
-    sed -i.bak_legacy '/^[ \t]*import[ \t]\+.*argosbx\.caddyfile/d' "$main_caddyfile" 2>/dev/null || true
-  fi
-  if [ -f "$legacy_file" ]; then
-    mv "$legacy_file" "${legacy_file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-  fi
-}
-
-write_caddyfile(){
-  local conf_file=""
-  caddyfile_path=""
-  cleanup_legacy_argosbx_caddyfile
-
-  if [ "$(id -u 2>/dev/null)" = "0" ]; then
-    mkdir -p /etc/caddy 2>/dev/null || true
-    if [ -w /etc/caddy ]; then
-      conf_file="/etc/caddy/Caddyfile"
-    fi
-  fi
-  if [ -z "$conf_file" ]; then
-    mkdir -p "$HOME/agsbx"
-    conf_file="$HOME/agsbx/Caddyfile"
-  fi
-
-  _webroot="${webroot:-/var/www/html}"
-  # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
-  if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
-    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
-      deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
-    fi
-  fi
-
-  # 若文件已存在，先移除旧有的该域名块（幂等覆盖，兼容嵌套 handle {} 与带端口格式）
-  if [ -f "$conf_file" ]; then
-    awk -v target="$ym" '
-      function matches_domain(header, target,   n, items, i, item) {
-        sub(/[[:space:]]*\{.*$/, "", header)
-        gsub(/,/, " ", header)
-        n = split(header, items, /[[:space:]]+/)
-        for (i = 1; i <= n; i++) {
-          item = items[i]
-          sub(/^https?:\/\//, "", item)
-          sub(/:[0-9]+$/, "", item)
-          if (item == target) return 1
-        }
-        return 0
-      }
-      BEGIN { in_block = 0; count = 0 }
-      $0 ~ /\{[[:space:]]*(#.*)?$/ && count == 0 && matches_domain($0, target) {
-        in_block = 1; count = 1; next
-      }
-      in_block {
-        line = $0
-        count += gsub(/\{/, "{", line)
-        count -= gsub(/\}/, "}", line)
-        if (count <= 0) { in_block = 0 }
-        next
-      }
-      { print $0 }
-    ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
-  fi
-
-  # ACME email: 若文件不存在或为空，且设置了 caddy_email，初始化全局块
-  if [ ! -s "$conf_file" ]; then
-    if [ -n "${caddy_email:-}" ]; then
-      printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
-    else
-      : > "$conf_file"
-    fi
-  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[[:space:]]*email[[:space:]]+' "$conf_file"; then
-    if grep -q "^{" "$conf_file"; then
-      awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
-    else
-      printf "{\n  email %s\n}\n\n%s" "$caddy_email" "$(cat "$conf_file")" > "$conf_file"
-    fi
-  fi
-
-  # 写入站点块
-  if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
-  else
-    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
-  fi
-  chmod 644 "$conf_file" 2>/dev/null || true
-  caddyfile_path="$conf_file"
-  echo "$conf_file" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
-  echo "Caddyfile 已生成：$conf_file（验证方式：$certmode_selected）"
-}
-
 # ensure_acme：acme.sh 不存在时自动安装（官方安装脚本，装到 $HOME/.acme.sh，写续期 cron）。不自动安装则返回 1，调用方继续等待、超时回落自签，不中断主脚本。
 ensure_acme(){
   [ -x "$HOME/.acme.sh/acme.sh" ] && return 0
@@ -252,69 +178,6 @@ ensure_acme(){
   rm -rf "$tmpdir"
   [ -x "$HOME/.acme.sh/acme.sh" ] || { echo "acme.sh 安装后仍未找到可执行文件"; return 1; }
   echo "acme.sh 已自动安装：$HOME/.acme.sh/acme.sh"
-  return 0
-}
-# ensure_caddy_download：Caddy 不存在或缺少模块时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS + caddy-l4 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
-# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.9），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.9，升级 Caddy 时传新 release 并改这个默认值即可。
-# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza + layer4 模块）才替换，验不过用备份恢复。
-ensure_caddy_download(){
-  [ "$(id -u 2>/dev/null)" = "0" ] || { echo "下载 Caddy 需要 root 权限（写 /usr/bin 与 /etc/caddy）"; return 1; }
-  local caddy_ver="${CADDY_VER:-caddy-v2.11.9}"
-  local base_url="${CADDY_DOWNLOAD_URL:-https://github.com/qytang2014/software/releases/download/${caddy_ver}}"
-  local caddy_bin=""
-  case "$cpu" in amd64) caddy_bin="caddy-linux-amd64";; arm64) caddy_bin="caddy-linux-arm64";; *) echo "不支持的架构：$cpu"; return 1;; esac
-  [[ "$base_url" != */ ]] && base_url="${base_url}/"
-  local final_url="${base_url}${caddy_bin}"
-  local tmpdir=""
-  tmpdir=$(mktemp -d 2>/dev/null) || return 1
-  echo "正在拉取预编译 Caddy：$final_url"
-  if ! curl -fL --retry 3 --connect-timeout 15 -o "$tmpdir/caddy" "$final_url" 2>/dev/null; then rm -rf "$tmpdir"; echo "Caddy 下载失败，请检查 URL 或网络"; return 1; fi
-  chmod +x "$tmpdir/caddy"
-  if ! "$tmpdir/caddy" version >/dev/null 2>&1; then rm -rf "$tmpdir"; echo "下载的 Caddy 无法运行（架构或文件损坏）"; return 1; fi
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "cloudflare"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Cloudflare 模块，拒绝替换"; return 1; fi
-  # coraza-caddy v2 注册的模块名为 http.handlers.waf（模块 ID 里不带 coraza 字样）
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "http.handlers.waf"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza WAF 模块，拒绝替换"; return 1; fi
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "^layer4$"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 layer4 四层分流模块，拒绝替换"; return 1; fi
-  if command -v systemctl >/dev/null 2>&1; then systemctl stop caddy 2>/dev/null || true; fi
-  if [ -f /usr/bin/caddy ]; then cp /usr/bin/caddy /usr/bin/caddy.bak 2>/dev/null || true; fi
-  if ! mv -f "$tmpdir/caddy" /usr/bin/caddy; then rm -rf "$tmpdir"; echo "替换 /usr/bin/caddy 失败"; return 1; fi
-  chmod 755 /usr/bin/caddy 2>/dev/null || true
-  setcap cap_net_bind_service=+ep /usr/bin/caddy 2>/dev/null || true
-  if ! /usr/bin/caddy version >/dev/null 2>&1; then [ -f /usr/bin/caddy.bak ] && mv -f /usr/bin/caddy.bak /usr/bin/caddy; rm -rf "$tmpdir"; echo "新 Caddy 校验失败，已恢复备份"; return 1; fi
-  rm -rf "$tmpdir"
-  # 确保有 systemd service（下载版没有 apt 自带的 service 文件）
-  if command -v systemctl >/dev/null 2>&1; then
-    if ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
-      echo "创建 Caddy systemd 服务..."
-      cat > /etc/systemd/system/caddy.service << EOF
-[Unit]
-Description=Caddy
-Documentation=https://caddyserver.com/docs/
-After=network.target network-online.target
-Requires=network-online.target
-
-[Service]
-Type=notify
-User=root
-EnvironmentFile=-$HOME/agsbx/cf_token.env
-Group=root
-ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
-ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
-TimeoutStopSec=5s
-LimitNOFILE=1048576
-PrivateTmp=true
-ProtectSystem=full
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
-
-[Install]
-WantedBy=multi-user.target
-EOF
-      systemctl daemon-reload 2>/dev/null || true
-      systemctl enable caddy 2>/dev/null || true
-    fi
-    systemctl start caddy 2>/dev/null || echo "Caddy 服务启动失败，请手动检查 systemctl status caddy"
-  fi
-  echo "预编译 Caddy 下载并替换成功"
   return 0
 }
 # 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时由 caddy_fetch_cert 从 Caddy 证书存储同步，acme 时直接安装到该目录）。

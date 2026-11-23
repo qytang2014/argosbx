@@ -42,30 +42,11 @@ if [ -n "$ym" ]; then
       fi
     fi
     echo "$certmode_selected" > "$HOME/agsbx/certmode"
-    echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
+    echo "域名证书来源：Caddy（验证方式：$certmode_selected，由 caddy_proxy.sh 托管；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
     _webroot="${webroot:-/var/www/html}"
-    if cert_setup_caddy_proxy "$ym" "$certmode_selected" "$caddy_email" "$_webroot" "$camouflage" "$web_proxy"; then
-      :
-    else
-      write_caddyfile
-      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-      if command -v caddy >/dev/null 2>&1; then
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
-          systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-            echo "Caddy 未在运行，尝试启动..."
-            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
-          }
-        elif command -v systemctl >/dev/null 2>&1; then
-          systemctl restart caddy >/dev/null 2>&1 || systemctl start caddy >/dev/null 2>&1 || caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || true
-        else
-          caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-            echo "Caddy 未在运行，尝试启动..."
-            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
-          }
-        fi
-      else
-        echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
-      fi
+    if ! cert_setup_caddy_proxy "$ym" "$certmode_selected" "$caddy_email" "$_webroot" "$camouflage" "$web_proxy"; then
+      echo "错误：Caddy 配置失败（请确保 caddy_proxy.sh 可正常获取与执行），安装停止。" >&2
+      exit 1
     fi
   fi
   if wait_domain_cert; then

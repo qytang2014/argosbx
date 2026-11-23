@@ -859,4 +859,135 @@ echo "PASS: Test 23a"
 )
 echo "PASS: Test 23b"
 
+echo "=== Test 24: caddy_proxy.sh & nginx_proxy.sh --no-default (404), get-port, reload ==="
+(
+  # 1. Caddy --no-default + subpath append + default handle replacement + get-port
+  c_dir="$WORK_DIR/caddy_nodef"
+  mkdir -p "$c_dir"
+  c_file="$c_dir/Caddyfile"
+  old_blog="$WORK_DIR/old_blog_dir"
+  mkdir -p "$old_blog"
+  echo "old blog content" > "$old_blog/index.html"
+
+  cat > "$c_file" << EOF
+{
+    email admin@example.com
+}
+(security) {
+    header {
+        Server "Protected"
+    }
+}
+example.com {
+    import security
+    handle /subtok* {
+        root * "/tmp/websbx"
+        file_server
+    }
+    handle {
+        root * ${old_blog}
+        file_server
+    }
+}
+EOF
+
+  # Replace default blog handle with --no-default via --append: preserves /subtok* and keeps disk files untouched
+  CADDY_DIR="$c_dir" CADDYFILE="$c_file" bash "$ROOT/../software_config/caddy_proxy.sh" site --domain "example.com" --no-default --append
+  grep -q 'handle /subtok\*' "$c_file" || { echo "FAIL: Caddy subroute lost after --no-default --append"; exit 1; }
+  grep -q 'respond 404' "$c_file" || { echo "FAIL: Caddy default handle missing respond 404"; exit 1; }
+  ! grep -q "$old_blog" "$c_file" || { echo "FAIL: Caddy old blog mapping still present"; exit 1; }
+  [ -f "$old_blog/index.html" ] || { echo "FAIL: disk blog file should NOT be deleted"; exit 1; }
+
+  # Fresh site creation with --no-default --force (no /var/www/html mapping)
+  CADDY_DIR="$c_dir" CADDYFILE="$c_file" bash "$ROOT/../software_config/caddy_proxy.sh" site --domain "fresh.example.com" --no-default --force
+  grep -q 'fresh.example.com' "$c_file" || { echo "FAIL: fresh.example.com block missing"; exit 1; }
+  ! grep -q '/var/www/html' "$c_file" || { echo "FAIL: --no-default should not reference /var/www/html"; exit 1; }
+
+  # get-port & reload CLI
+  echo "8443" > "$c_dir/web_port"
+  gp=$(CADDY_DIR="$c_dir" CADDYFILE="$c_file" bash "$ROOT/../software_config/caddy_proxy.sh" get-port)
+  [ "$gp" = "8443" ] || { echo "FAIL: caddy get-port expected 8443, got $gp"; exit 1; }
+  CADDY_DIR="$c_dir" CADDYFILE="$c_file" bash "$ROOT/../software_config/caddy_proxy.sh" reload
+
+  # 2. Nginx --no-default + subpath append + default location replacement + get-port
+  n_dir="$WORK_DIR/nginx_nodef"
+  mkdir -p "$n_dir/conf.d" "$n_dir/certs"
+  NGINX_DIR="$n_dir" NGINX_CONF_DIR="$n_dir/conf.d" CERT_DIR="$n_dir/certs" NGINX_SKIP_CERT_ISSUE=1 \
+    bash "$ROOT/../software_config/nginx_proxy.sh" site --domain "example.com" --no-default --force
+  n_conf="$n_dir/conf.d/example.com.conf"
+  [ -f "$n_conf" ] || { echo "FAIL: Nginx conf not created"; exit 1; }
+  grep -q 'return 404;' "$n_conf" || { echo "FAIL: Nginx --no-default missing return 404"; exit 1; }
+  ! grep -q '/var/www/html' "$n_conf" || { echo "FAIL: Nginx --no-default should not reference /var/www/html"; exit 1; }
+
+  # Mount subscription subpath via --append and verify both /subtok/ and return 404 coexist
+  NGINX_DIR="$n_dir" NGINX_CONF_DIR="$n_dir/conf.d" CERT_DIR="$n_dir/certs" NGINX_SKIP_CERT_ISSUE=1 \
+    bash "$ROOT/../software_config/nginx_proxy.sh" site --domain "example.com" --subpath "/subtok*=/tmp/websbx:nostrip:static" --append
+  grep -q 'location \^~ /subtok/' "$n_conf" || { echo "FAIL: Nginx subroute missing"; exit 1; }
+  grep -q 'return 404;' "$n_conf" || { echo "FAIL: Nginx default 404 lost after subpath append"; exit 1; }
+
+  # get-port & reload CLI
+  echo "9443" > "$n_dir/web_port"
+  ngp=$(NGINX_DIR="$n_dir" NGINX_CONF_DIR="$n_dir/conf.d" bash "$ROOT/../software_config/nginx_proxy.sh" get-port)
+  [ "$ngp" = "9443" ] || { echo "FAIL: nginx get-port expected 9443, got $ngp"; exit 1; }
+  NGINX_DIR="$n_dir" NGINX_CONF_DIR="$n_dir/conf.d" bash "$ROOT/../software_config/nginx_proxy.sh" reload
+)
+echo "PASS: Test 24"
+
+echo "=== Test 25: vlpt_coexistence_sync_sni deduplicates repeated set-port & _reality_proto_port ignores stale inactive ports ==="
+(
+  # 25a: Calling vlpt_coexistence_sync_sni twice with identical tuple invokes set-port only once
+  export HOME="$WORK_DIR/home_dedup"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  c_dir="$WORK_DIR/caddy_dedup"
+  mkdir -p "$c_dir"
+  export CADDYFILE="$c_dir/Caddyfile"
+  cat > "$CADDYFILE" << 'EOF'
+{
+    https_port 8443
+    layer4 {
+        :443 {
+            @reality_sni tls sni www.stanford.edu
+            route @reality_sni {
+                proxy 127.0.0.1:8444
+            }
+            route {
+                proxy 127.0.0.1:8443
+            }
+        }
+    }
+}
+EOF
+  log_file="$WORK_DIR/dedup_calls.log"
+  : > "$log_file"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << EOF
+#!/bin/bash
+echo "\$@" >> "$log_file"
+exit 0
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  ss() { echo ""; }
+  ensure_proxy_script() { return 0; }
+
+  export port_vl_re="443"
+  export web_port="8443"
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  export ym="my.example.com"
+  unset _VLPT_SNI_SYNCED_KEY
+
+  vlpt_coexistence_sync_sni "www.stanford.edu" || { echo "FAIL: first sync_sni failed"; exit 1; }
+  vlpt_coexistence_sync_sni "www.stanford.edu" || { echo "FAIL: second sync_sni failed"; exit 1; }
+  cnt=$(wc -l < "$log_file" | tr -d ' ')
+  [ "$cnt" = "1" ] || { echo "FAIL: expected set-port called once, got $cnt calls: $(cat "$log_file")"; exit 1; }
+
+  # 25b: _reality_proto_port ignores stale vl_re=443 in ports.env when rep only enables arpt=443
+  port_get() { [ "$1" = "vl_re" ] && echo "443"; }
+  unset port_vl_re vlpt port_xh xhpt port_vx vxpt port_vw vwpt port_xu xupt port_xc xcpt
+  vlp=""; xhp=""; vxp=""; vwp=""; xup=""; xcp=""
+  arp="yes"; port_ar="443"; arpt="443"
+  p_found=$(reality_443_proto) || { echo "FAIL: reality_443_proto should not conflict with inactive stale vl_re=443"; exit 1; }
+  [ "$p_found" = "arpt" ] || { echo "FAIL: expected arpt, got $p_found"; exit 1; }
+)
+echo "PASS: Test 25"
+
 echo "ALL TESTS PASSED!"

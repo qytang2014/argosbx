@@ -141,8 +141,16 @@ subhttps_write_conf(){
       echo "    file_server"
       echo "  }"
     fi
-    echo "  root * \"$_webroot\""
-    echo "  file_server"
+    if command -v should_deploy_camouflage_blog >/dev/null 2>&1 && should_deploy_camouflage_blog; then
+      echo "  handle {"
+      echo "    root * \"$_webroot\""
+      echo "    file_server"
+      echo "  }"
+    else
+      echo "  handle {"
+      echo "    respond 404"
+      echo "  }"
+    fi
     echo "}"
   } > "$HOME/agsbx/Caddyfile.sub" 2>/dev/null || return 1
   return 0
@@ -171,116 +179,79 @@ subhttps_ensure_websbx_readable(){
   find "$websbx" -type f -exec chmod 644 {} + 2>/dev/null || true
   return 0
 }
-subhttps_merge_eligible(){
-  # 证书是 Caddy 申请的（证书流程写过系统 Caddyfile）：这个文件就是我们自己的
-  # 配置，直接合，不再探测 443 被 Caddy 还是 Nginx 占用。其他异常由后面的
-  # validate / reload / 回环验证兜底，失败就摘除恢复。
-  local ym_c="$1" sysfile=""
-  [ -n "$ym_c" ] || return 1
-  sysfile=$(subhttps_merge_sysfile)
+# Determine which managed Web server engine is active for HTTPS subscription merging (caddy | nginx | empty).
+subhttps_merge_engine(){
+  local cs=""
+  cs="${certsrc:-}"
+  [ -z "$cs" ] && cs=$(subhttps_read "$HOME/agsbx/certsrc")
+  if [ "$cs" = "caddy" ]; then echo "caddy"; return 0; fi
+  if [ "$cs" = "acme" ] || [ "$cs" = "nginx" ]; then echo "nginx"; return 0; fi
   local cur_cf
   cur_cf=$(subhttps_read "$HOME/agsbx/caddyfile_path")
-  [ "$cur_cf" = "$sysfile" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ] || return 1
-  [ -f "$sysfile" ] || return 1
-  return 0
+  if [ "$cur_cf" = "$(subhttps_merge_sysfile)" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ]; then
+    echo "caddy"; return 0
+  fi
+  echo ""
 }
-subhttps_merge_active(){
-  # 合并块在位且 token 是当前 token（token 变了算未激活，走重新合并）
-  local ym_c="$1" token="" sysfile=""
+subhttps_merge_eligible(){
+  # Managed Web server (Caddy via caddy_proxy.sh or Nginx via nginx_proxy.sh) is eligible for auto-merge.
+  local ym_c="$1" eng="" sysfile="" nconf=""
   [ -n "$ym_c" ] || return 1
-  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile" ] || return 1
-
-  # 优先匹配 caddy_proxy.sh 写入的标准 handle /<token>* 格式
-  if grep -qE "(handle|handle_path)[[:space:]]+/$token(\*|/)" "$sysfile" 2>/dev/null; then
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "caddy" ]; then
+    sysfile=$(subhttps_merge_sysfile)
+    local cur_cf
+    cur_cf=$(subhttps_read "$HOME/agsbx/caddyfile_path")
+    [ "$cur_cf" = "$sysfile" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ] || return 1
+    [ -f "$sysfile" ] || return 1
+    return 0
+  elif [ "$eng" = "nginx" ]; then
+    nconf="${SUBHTTPS_NGINX_CONF_DIR:-/etc/nginx/conf.d}/${ym_c}.conf"
+    [ -f "$nconf" ] || return 1
     return 0
   fi
-
-  # 兼容旧版手写注入的独立标记
-  grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
-  grep -qF "handle /$token/" "$sysfile" 2>/dev/null
+  return 1
+}
+subhttps_merge_active(){
+  # Read-only check whether the current subscription token route is already mounted in Caddy or Nginx.
+  local ym_c="$1" token="" eng="" sysfile="" nconf=""
+  [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    nconf="${SUBHTTPS_NGINX_CONF_DIR:-/etc/nginx/conf.d}/${ym_c}.conf"
+    [ -f "$nconf" ] || return 1
+    grep -qE "location[[:space:]]+(\^~[[:space:]]+)?/$token/" "$nconf" 2>/dev/null
+    return $?
+  fi
+  sysfile=$(subhttps_merge_sysfile)
+  [ -f "$sysfile" ] || return 1
+  grep -qE "(handle|handle_path)[[:space:]]+/$token(\*|/)" "$sysfile" 2>/dev/null
 }
 subhttps_merge_serving(){
-  # display 用：块在位且系统 Caddy 在运行（systemd 或 caddy 进程）
+  # Check that the route is mounted and the managed web service is running.
+  local eng=""
   subhttps_merge_active "$1" || return 1
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl is-active --quiet nginx 2>/dev/null && return 0
+    fi
+    pgrep -x nginx >/dev/null 2>&1
+    return $?
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     systemctl is-active --quiet caddy 2>/dev/null && return 0
   fi
-  # 非 systemd（如下载版 Caddy）：检查 caddy 进程
   pgrep -x caddy >/dev/null 2>&1 || pgrep -f "caddy run" >/dev/null 2>&1 || pgrep -f "caddy start" >/dev/null 2>&1
 }
 subhttps_https_active(){
-  # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy（内存门/缺 caddy 二进制时豁免）
+  # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy/Nginx（内存门/缺 caddy 二进制时豁免）
   subhttps_caddy_running && return 0
   subhttps_merge_active "$(subhttps_read "$HOME/agsbx/ym")"
 }
-subhttps_strip_merge_block(){
-  # 从系统 Caddyfile 里手术摘除合并块（保留用户其他手工修改）；摘掉了返回 0
-  local sysfile="" before="" after="" token=""
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile" ] || return 1
-  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
-  before=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
-
-  if grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null; then
-    awk '/# >>> argosbx-subscription/{skip=1} !skip{print} /# <<< argosbx-subscription/{skip=0}' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
-  elif [ -n "$token" ] && grep -qE "(handle|handle_path)[[:space:]]+/$token" "$sysfile" 2>/dev/null; then
-    awk -v tok="$token" '
-      BEGIN { in_tok = 0; count = 0 }
-      $0 ~ "(handle|handle_path)[[:space:]]+/" tok {
-        in_tok = 1; count = 1; next
-      }
-      in_tok {
-        line = $0
-        c_open = gsub(/\{/, "{", line)
-        c_close = gsub(/\}/, "}", line)
-        count += c_open
-        count -= c_close
-        if (count == 0) {
-          in_tok = 0
-        }
-        next
-      }
-      { print $0 }
-    ' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
-  else
-    return 1
-  fi
-  after=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
-  [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]
-}
-subhttps_merge_insert(){
-  # 摘除旧块后把新订阅块插到站点块首行之后；找不到站点块返回 1（原文件不动）
-  local ym_c="$1" token="$2" sysfile="" websbx="" block_tmp=""
-  [ -n "$ym_c" ] && [ -n "$token" ] || return 1
-  sysfile=$(subhttps_merge_sysfile); websbx="$HOME/websbx"
-  block_tmp=$(mktemp) || return 1
-  {
-    echo "  # >>> argosbx-subscription (argosbx 自动合并，勿手工改) >>>"
-    # 必须用 handle（不剥路径），见 subhttps_write_conf 的注释
-    echo "  handle /$token/* {"
-    echo "    root * \"$websbx\""
-    echo "    file_server"
-    echo "  }"
-    echo "  # <<< argosbx-subscription <<<"
-  } > "$block_tmp"
-  subhttps_strip_merge_block >/dev/null 2>&1 || true
-  if awk -v ym="$ym_c" -v bf="$block_tmp" '
-    BEGIN{ while((getline line < bf) > 0){ block = block line "\n" } }
-    !done && index($0, ym) == 1 && $NF == "{" { print; printf "%s", block; done=1; next }
-    { print }
-    END{ if(!done) exit 1 }
-  ' "$sysfile" > "$sysfile.new" 2>/dev/null; then
-    mv -f "$sysfile.new" "$sysfile"; rm -f "$block_tmp"; return 0
-  fi
-  rm -f "$block_tmp" "$sysfile.new"; return 1
-}
-subhttps_merge_reload(){
-  systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1
-}
 subhttps_merge_verify(){
-  # 本机回环验证订阅地址返回 200（443 共存模式下 Caddy HTTPS 实际监听在 web_port，如 8443）
+  # 本机回环验证订阅地址返回 200（443 共存模式下 Web HTTPS 实际监听在 web_port，如 8443）
   local ym_c="$1" token="$2" code="" wp=""
   command -v curl >/dev/null 2>&1 || return 1
   wp="${web_port:-$(subhttps_read "$HOME/agsbx/web_port")}"
@@ -294,66 +265,62 @@ subhttps_merge_verify(){
   return 1
 }
 subhttps_merge_system_caddy(){
-  # 编排：已合并（token 一致）直接成功；否则优先 caddy_proxy 追加，保底插入→全量校验→reload→回环验证；
-  # 失败摘除恢复并说明原因（调用方据此决定是继续试独立 Caddy 还是回退）
-  local ym_c="$1" token="" sysfile=""
+  # Strictly delegate subscription subpath mount/rollback to caddy_proxy.sh or nginx_proxy.sh.
+  local ym_c="$1" token="" eng="" proxy_bin="" script_name=""
   [ -n "$ym_c" ] || return 1
   token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
   subhttps_merge_eligible "$ym_c" || return 1
-  command -v caddy >/dev/null 2>&1 || { echo "合并失败：未找到 caddy 命令，无法校验配置"; return 1; }
   if subhttps_merge_active "$ym_c"; then return 0; fi
-  # caddy 用户需能读取 $HOME/websbx，否则验证 403
+  # Web worker user (caddy/www-data/nginx) needs traversal permission on $HOME/websbx
   subhttps_ensure_websbx_readable
 
-  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
-  ensure_proxy_script "caddy_proxy.sh" || true
-  local websbx="$HOME/websbx"
-  if [ -x "$caddy_proxy_bin" ]; then
-    if "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*=${websbx}:nostrip:static" --append; then
-      if subhttps_merge_verify "$ym_c" "$token"; then
-        echo "订阅成功合并到系统 Caddy（通过 caddy_proxy）：https://$ym_c/$token/"
-        return 0
-      fi
-    fi
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    script_name="nginx_proxy.sh"
+  else
+    script_name="caddy_proxy.sh"
   fi
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
-  if ! subhttps_merge_insert "$ym_c" "$token"; then
-    echo "合并失败：写入系统 Caddyfile 失败（找不到 $ym_c 站点块）"
+  proxy_bin="$HOME/.local/bin/$script_name"
+  if command -v ensure_proxy_script >/dev/null 2>&1; then
+    ensure_proxy_script "$script_name" || true
+  fi
+  if [ ! -x "$proxy_bin" ]; then
+    echo "合并失败：未找到可执行脚本 $proxy_bin，无法自动挂载订阅路径"
     return 1
   fi
-  if ! caddy validate --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1; then
-    echo "合并失败：Caddy 配置校验未通过，已恢复原文件"
-    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+
+  local websbx="$HOME/websbx"
+  if ! "$proxy_bin" site --domain "$ym_c" --subpath "/$token*=${websbx}:nostrip:static" --append; then
+    echo "合并失败：${script_name} 挂载订阅子路由失败"
+    return 1
   fi
-  if ! subhttps_merge_reload; then
-    echo "合并失败：系统 Caddy 重载失败，已恢复原文件"
-    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+  sleep 1
+  if subhttps_merge_verify "$ym_c" "$token"; then
+    echo "订阅成功合并到系统 ${eng}（通过 ${script_name}）：https://$ym_c/$token/"
+    return 0
   fi
-  sleep 2
-  if subhttps_merge_verify "$ym_c" "$token"; then return 0; fi
-  echo "合并失败：订阅地址验证未通过（非 200），已恢复原文件"
-  subhttps_strip_merge_block >/dev/null 2>&1 || true
-  subhttps_merge_reload >/dev/null 2>&1 || true
+  echo "合并失败：订阅地址验证未通过（非 200），正在通过 ${script_name} 回滚订阅路由"
+  "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   return 1
 }
 subhttps_unmerge_system_caddy(){
-  # 降级/del 时通过 caddy_proxy.sh 摘除子路由；若无 caddy_proxy 则回退使用保底 strip
-  local ym_c="" token=""
+  # Strictly delegate subscription subpath removal to caddy_proxy.sh or nginx_proxy.sh.
+  local ym_c="" token="" eng="" script_name="" proxy_bin=""
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
-  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  [ -n "$ym_c" ] && [ -n "$token" ] || return 0
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    script_name="nginx_proxy.sh"
+  else
+    script_name="caddy_proxy.sh"
+  fi
+  proxy_bin="$HOME/.local/bin/$script_name"
   if command -v ensure_proxy_script >/dev/null 2>&1; then
-    ensure_proxy_script "caddy_proxy.sh" || true
+    ensure_proxy_script "$script_name" || true
   fi
-
-  if [ -x "$caddy_proxy_bin" ] && [ -n "$ym_c" ] && [ -n "$token" ]; then
-    "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
-  fi
-
-  # 保底：若残留旧式注释块，再尝试清理
-  if subhttps_strip_merge_block; then
-    subhttps_merge_reload || true
+  if [ -x "$proxy_bin" ]; then
+    "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   fi
   return 0
 }

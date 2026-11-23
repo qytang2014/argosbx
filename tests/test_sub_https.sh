@@ -179,14 +179,13 @@ rm -f "$HOME/agsbx/ym"
 OUT="$(sub_https_display)"
 echo "$OUT" | grep -q "http://1.2.3.4:18080/token-123/clmi.yaml" || fail "display http-ip clmi missing"
 
-# --- auto-merge into system Caddy (443 held by our own cert-flow Caddy) ---
-MERGEBIN="$TESTHOME/merge-bin"; mkdir -p "$MERGEBIN"
+# --- auto-merge into system Caddy / Nginx strictly via caddy_proxy.sh & nginx_proxy.sh ---
+MERGEBIN="$TESTHOME/merge-bin"; mkdir -p "$MERGEBIN" "$HOME/.local/bin"
 for b in ufw crontab ps; do cp "$MOCKBIN/$b" "$MERGEBIN/$b"; done
 cat > "$MERGEBIN/caddy" <<'EOF'
 #!/bin/bash
-# validate succeeds; run fails (simulates 443 busy: our own Caddy cannot bind)
 if [ "$1" = "validate" ]; then exit 0; fi
-if [ "$1" = "version" ]; then echo "v2.11.7"; exit 0; fi
+if [ "$1" = "version" ]; then echo "v2.11.9"; exit 0; fi
 exit 1
 EOF
 chmod +x "$MERGEBIN/caddy"
@@ -203,106 +202,135 @@ echo "200"
 EOF
 chmod +x "$MERGEBIN/curl"
 export PATH="$MERGEBIN:/usr/bin:/bin"
-mkdir -p "$TESTHOME/fakecaddy"
-export SUBHTTPS_MERGE_SYSFILE="$TESTHOME/fakecaddy/argosbx.caddyfile"
+mkdir -p "$TESTHOME/fakecaddy" "$TESTHOME/fakenginx"
+export SUBHTTPS_MERGE_SYSFILE="$TESTHOME/fakecaddy/Caddyfile"
 export SUBHTTPS_MERGE_MAINFILE="$TESTHOME/fakecaddy/Caddyfile"
-printf '{\n\temail test@example.com\n}\nimport argosbx.caddyfile\n' > "$SUBHTTPS_MERGE_MAINFILE"
-printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
+export SUBHTTPS_NGINX_CONF_DIR="$TESTHOME/fakenginx"
+
+# Stub ensure_proxy_script so tests use our local mock proxy scripts
+ensure_proxy_script() { return 0; }
+# Verify legacy direct-edit bypass helpers are gone
+! grep -q "subhttps_merge_insert()" "$ROOT/modules/sub-https.sh" || fail "subhttps_merge_insert should be removed"
+! grep -q "subhttps_strip_merge_block()" "$ROOT/modules/sub-https.sh" || fail "subhttps_strip_merge_block should be removed"
+
+# Mock caddy_proxy.sh that appends/removes handle /<token>* in SUBHTTPS_MERGE_SYSFILE
+cat > "$HOME/.local/bin/caddy_proxy.sh" <<'EOF'
+#!/bin/bash
+echo "caddy_proxy $@" >> "$TESTHOME/proxy_merge.log"
+if echo "$@" | grep -q -- "--remove"; then
+  awk '/handle \/token-123\*/{skip=1; next} skip && /\}/{skip=0; next} !skip{print}' "$SUBHTTPS_MERGE_SYSFILE" > "$SUBHTTPS_MERGE_SYSFILE.tmp" && mv "$SUBHTTPS_MERGE_SYSFILE.tmp" "$SUBHTTPS_MERGE_SYSFILE"
+  exit 0
+fi
+if echo "$@" | grep -q -- "--append"; then
+  awk '
+    /example\.test \{/ { print; print "    handle /token-123* {\n        root * \"/tmp/websbx\"\n        file_server\n    }"; next }
+    { print }
+  ' "$SUBHTTPS_MERGE_SYSFILE" > "$SUBHTTPS_MERGE_SYSFILE.tmp" && mv "$SUBHTTPS_MERGE_SYSFILE.tmp" "$SUBHTTPS_MERGE_SYSFILE"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+
+# Mock nginx_proxy.sh that appends/removes location ^~ /<token>/ in SUBHTTPS_NGINX_CONF_DIR/example.test.conf
+cat > "$HOME/.local/bin/nginx_proxy.sh" <<'EOF'
+#!/bin/bash
+echo "nginx_proxy $@" >> "$TESTHOME/proxy_merge.log"
+CONF="$SUBHTTPS_NGINX_CONF_DIR/example.test.conf"
+if echo "$@" | grep -q -- "--remove"; then
+  awk '/location \^~ \/token-123\//{skip=1; next} skip && /\}/{skip=0; next} !skip{print}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+  exit 0
+fi
+if echo "$@" | grep -q -- "--append"; then
+  awk '
+    /# ==============================================/ { print "    location ^~ /token-123/ {\n        root /tmp/websbx;\n        index index.html;\n    }"; print; next }
+    { print }
+  ' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$HOME/.local/bin/nginx_proxy.sh"
+
+printf 'example.test {\n    handle {\n        respond 404\n    }\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
 echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
+echo "caddy" > "$HOME/agsbx/certsrc"
 echo "example.test" > "$HOME/agsbx/ym"
 export SUBHTTPS_MEM_KB=524288
-: > "$TESTHOME/systemctl.log"
+: > "$TESTHOME/proxy_merge.log"
 
 subhttps_merge_eligible "example.test" || fail "should be eligible with our own system Caddy"
 sub_https_sync >/dev/null 2>&1 || fail "merge sync failed"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should be https-merged"
-grep -q "handle /token-123/" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing subscription block"
-grep -Eq "^[[:space:]]*handle_path /" "$SUBHTTPS_MERGE_SYSFILE" && fail "sysfile must not use handle_path (strips token, 404)"
-grep -q "# >>> argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing merge markers"
-grep -q 'root \* /var/www/html' "$SUBHTTPS_MERGE_SYSFILE" || fail "blog root should be preserved"
-grep -q "systemctl reload caddy" "$TESTHOME/systemctl.log" || fail "should reload system caddy"
-[ -f "$SUBHTTPS_MERGE_SYSFILE.pre-sub" ] || fail "should keep a pre-merge backup"
+grep -q "handle /token-123\*" "$SUBHTTPS_MERGE_SYSFILE" || fail "sysfile missing subscription handle block"
+grep -q "respond 404" "$SUBHTTPS_MERGE_SYSFILE" || fail "default 404 handle should be preserved"
+grep -q "caddy_proxy site --domain example.test --subpath /token-123\*=" "$TESTHOME/proxy_merge.log" || fail "should delegate to caddy_proxy.sh"
 OUT="$(sub_https_display)"
 echo "$OUT" | grep -q "https://example.test/token-123/clmi.yaml" || fail "merged display https clmi missing"
 
-# idempotent: second sync must not duplicate the block
-N1=$(grep -c "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE")
+# idempotent: second sync sees subhttps_merge_active and does not invoke caddy_proxy again
+CALLS1=$(wc -l < "$TESTHOME/proxy_merge.log")
 sub_https_sync >/dev/null 2>&1 || fail "second merge sync failed"
-[ "$(grep -c "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE")" = "$N1" ] || fail "merge should be idempotent"
-[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "mode should stay https-merged"
+[ "$(wc -l < "$TESTHOME/proxy_merge.log")" = "$CALLS1" ] || fail "merge should be idempotent"
 
-# guard: 证书不是 Caddy 申请的（caddyfile_path 未指向系统 Caddyfile）→ 不合并，直接回退
-rm -f "$HOME/agsbx/caddyfile_path"
-printf 'example.test {\n\troot * /var/www/html\n\tfile_server\n}\n' > "$SUBHTTPS_MERGE_SYSFILE"
-_test_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    shasum -a 256 "$1" | awk '{print $1}'
-  fi
-}
-_test_perm() {
-  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
-}
-
-BEFORE_SUM=$(_test_sha256 "$SUBHTTPS_MERGE_SYSFILE")
-subhttps_merge_eligible "example.test" && fail "should not be eligible without caddyfile_path"
-sub_https_sync >/dev/null 2>&1
-[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "should fall back to http-domain"
-[ "$(_test_sha256 "$SUBHTTPS_MERGE_SYSFILE")" = "$BEFORE_SUM" ] || fail "sysfile must not be touched"
-grep -q "handle /token-123/" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should use handle"
-grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/caddy-snippet.txt" && fail "caddy snippet must not use handle_path"
-grep -q "root $HOME/websbx;" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should use root"
-grep -q "711" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should mention 711 permission"
-grep -q "711" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should mention 711 permission"
-
-# downgrade: cert gone -> http-domain, merge block stripped, blog intact
-echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
-sub_https_sync >/dev/null 2>&1 || fail "re-merge failed"
-[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "should merge again"
+# downgrade: cert gone -> http-domain, caddy_proxy --remove strips route, default 404 intact
 rm "$HOME/agsbx/cert/cert.crt"
 sub_https_sync >/dev/null 2>&1 || fail "downgrade sync failed"
 [ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "cert gone should be http-domain"
-grep -q "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" && fail "downgrade should strip merge block"
-grep -q 'root \* /var/www/html' "$SUBHTTPS_MERGE_SYSFILE" || fail "blog should survive unmerge"
+grep -q "/token-123" "$SUBHTTPS_MERGE_SYSFILE" && fail "downgrade should remove subscription route via caddy_proxy.sh"
+grep -q "respond 404" "$SUBHTTPS_MERGE_SYSFILE" || fail "default 404 handle should survive unmerge"
 
-# del stop also unmerges
+# del stop also unmerges via caddy_proxy.sh
 openssl req -new -x509 -days 365 -nodes -keyout "$HOME/agsbx/cert/private.key" -out "$HOME/agsbx/cert/cert.crt" -subj "/CN=example.test" -addext "subjectAltName=DNS:example.test" >/dev/null 2>&1 || fail "cert regen failed"
 sub_https_sync >/dev/null 2>&1 || fail "re-merge before stop failed"
-grep -q "# >>> argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" || fail "should be merged before stop"
+grep -q "handle /token-123\*" "$SUBHTTPS_MERGE_SYSFILE" || fail "should be merged before stop"
 sub_https_stop
-grep -q "argosbx-subscription" "$SUBHTTPS_MERGE_SYSFILE" && fail "del stop should unmerge"
+grep -q "/token-123" "$SUBHTTPS_MERGE_SYSFILE" && fail "del stop should unmerge via caddy_proxy.sh"
 [ ! -f "$HOME/agsbx/subhttps.mode" ] || fail "mode file should be removed on del stop"
 
-# caddy_proxy format detection without markers
-echo "https-merged" > "$HOME/agsbx/subhttps.mode"
-echo "$SUBHTTPS_MERGE_SYSFILE" > "$HOME/agsbx/caddyfile_path"
-cat << "CADDY_PROXY_FMT" > "$SUBHTTPS_MERGE_SYSFILE"
-example.test {
-    handle /token-123* {
-        root * "/tmp/websbx"
-        file_server
+# --- auto-merge into system Nginx via nginx_proxy.sh (acme/low-memory engine) ---
+echo "acme" > "$HOME/agsbx/certsrc"
+rm -f "$HOME/agsbx/caddyfile_path"
+cat > "$SUBHTTPS_NGINX_CONF_DIR/example.test.conf" <<'EOF'
+server {
+    listen 443 ssl http2;
+    server_name example.test;
+    # ================= 核心路由块 =================
+    location / {
+        return 404;
     }
-    handle {
-        root * /var/www/html
-        try_files {path} {path}/ /index.html
-        file_server
-    }
+    # ==============================================
 }
-CADDY_PROXY_FMT
-subhttps_merge_active "example.test" || fail "should detect caddy_proxy format handle /token*"
-OUT="$(sub_https_display)"
-echo "$OUT" | grep -q "https://example.test/token-123/clmi.yaml" || fail "caddy_proxy format display https clmi missing"
-subhttps_strip_merge_block "$SUBHTTPS_MERGE_SYSFILE" "token-123"
-grep -q "/token-123" "$SUBHTTPS_MERGE_SYSFILE" && fail "caddy_proxy handle block should be stripped by subhttps_strip_merge_block"
-grep -q "/var/www/html" "$SUBHTTPS_MERGE_SYSFILE" || fail "fallback handle should survive strip"
+EOF
+: > "$TESTHOME/proxy_merge.log"
+subhttps_merge_eligible "example.test" || fail "should be eligible with managed Nginx"
+sub_https_sync >/dev/null 2>&1 || fail "nginx merge sync failed"
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "https-merged" ] || fail "nginx mode should be https-merged"
+grep -q "location \^~ /token-123/" "$SUBHTTPS_NGINX_CONF_DIR/example.test.conf" || fail "nginx conf missing subscription location"
+grep -q "return 404;" "$SUBHTTPS_NGINX_CONF_DIR/example.test.conf" || fail "nginx default 404 should be preserved"
+grep -q "nginx_proxy site --domain example.test --subpath /token-123\*=" "$TESTHOME/proxy_merge.log" || fail "should delegate to nginx_proxy.sh"
+sub_https_stop
+grep -q "/token-123" "$SUBHTTPS_NGINX_CONF_DIR/example.test.conf" && fail "nginx del stop should unmerge via nginx_proxy.sh"
+
+# guard: no managed Caddyfile and no Nginx conf -> not eligible, falls back to http-domain + snippets
+echo "caddy" > "$HOME/agsbx/certsrc"
+rm -f "$HOME/agsbx/caddyfile_path" "$SUBHTTPS_NGINX_CONF_DIR/example.test.conf"
+subhttps_merge_eligible "example.test" && fail "should not be eligible without managed config"
+sub_https_sync >/dev/null 2>&1
+[ "$(cat "$HOME/agsbx/subhttps.mode")" = "http-domain" ] || fail "should fall back to http-domain"
+grep -q "handle /token-123/" "$HOME/agsbx/caddy-snippet.txt" || fail "caddy snippet should use handle"
+grep -Eq "^[[:space:]]*handle_path /" "$HOME/agsbx/caddy-snippet.txt" && fail "caddy snippet must not use handle_path"
+grep -q "root $HOME/websbx;" "$HOME/agsbx/nginx-snippet.txt" || fail "nginx snippet should use root"
 
 # --- restore env for remaining phases ---
-unset SUBHTTPS_MERGE_SYSFILE SUBHTTPS_MERGE_MAINFILE
-rm -f "$HOME/agsbx/caddyfile_path"
+_test_perm() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+unset SUBHTTPS_MERGE_SYSFILE SUBHTTPS_MERGE_MAINFILE SUBHTTPS_NGINX_CONF_DIR
+rm -f "$HOME/agsbx/caddyfile_path" "$HOME/agsbx/certsrc" "$HOME/.local/bin/caddy_proxy.sh" "$HOME/.local/bin/nginx_proxy.sh"
 export PATH="$MOCKBIN:/usr/bin:/bin"
 export SUBHTTPS_MEM_KB=524288
-rm -rf "$TESTHOME/merge-bin" "$TESTHOME/fakecaddy" 2>/dev/null || true
+rm -rf "$TESTHOME/merge-bin" "$TESTHOME/fakecaddy" "$TESTHOME/fakenginx" 2>/dev/null || true
 
 # --- cert-restart integration: guarded call runs when defined ---
 export HOME="$TESTHOME"

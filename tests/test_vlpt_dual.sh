@@ -115,4 +115,56 @@ else
   echo "SKIP: sing-box binary not present, vl-reality-sb check skipped"
 fi
 
+# 4. sbvlpt/sbvlpt1 scope guard regression:
+# Must live inside the vlpt guard (NOT inside `if grep ss-2022`), so:
+#   - vlpt-only (no sspt) defines sbvlpt/sbvlpt1 and produces valid JSON
+#   - sspt-only (no vlpt) does NOT define sbvlpt/sbvlpt1
+#   - vlpt + sspt defines both
+td_scope=$(mktemp -d)
+python3 - "$F" "$td_scope" << 'PY'
+import sys
+src = open(sys.argv[1]).read()
+# Locate the exact vlpt display guard and ss-2022 display guard
+vlpt_guard = 'if grep -q \'"tag":"reality-vision"\' "$HOME/agsbx/xr.json" 2>/dev/null || grep -q \'"tag": "vl-reality-sb"\' "$HOME/agsbx/sb.json" 2>/dev/null; then'
+ss_guard = 'if grep ss-2022 "$HOME/agsbx/sb.json" >/dev/null 2>&1; then'
+i_vlpt = src.index(vlpt_guard)
+i_vlpt_end = src.index('\nfi\n', i_vlpt) + 4
+i_ss = src.index(ss_guard)
+i_ss_end = src.index('\nfi\n', i_ss) + 4
+vlpt_block = src[i_vlpt:i_vlpt_end]
+ss_block = src[i_ss:i_ss_end]
+assert 'sbvlpt(){' in vlpt_block and 'sbvlpt1(){' in vlpt_block, "sbvlpt/sbvlpt1 missing from vlpt guard block"
+assert 'sbvlpt(){' not in ss_block and 'sbvlpt1(){' not in ss_block, "sbvlpt/sbvlpt1 must NOT be inside ss-2022 guard block"
+open(sys.argv[2] + "/vlpt_and_ss.sh", "w").write(vlpt_block + "\n" + ss_block + "\n")
+PY
+# Case A: vlpt (Sing-box) only, no ss-2022 -> sbvlpt defined and valid JSON
+mkdir -p "$td_scope/home_vlpt/agsbx"
+echo '{"inbounds":[{"tag": "vl-reality-sb"}]}' > "$td_scope/home_vlpt/agsbx/sb.json"
+out_a=$(HOME="$td_scope/home_vlpt" bash -c '
+  port_get(){ [ "$1" = "vl_re" ] && echo "443"; }
+  uuid="11111111-2222-3333-4444-555555555555"; reality_addr="node.example.com"
+  ym_vl_re="www.stanford.edu"; vlpt_pbk="PUBKEY"; vlpt_sid="12345678"; sxname=""; hostname="vps"
+  source "$1" >/dev/null
+  type sbvlpt >/dev/null 2>&1 || exit 11
+  type sbvlpt1 >/dev/null 2>&1 || exit 12
+  type sbsspt >/dev/null 2>&1 && exit 13
+  sbvlpt
+' _ "$td_scope/vlpt_and_ss.sh") || { echo "FAIL: vlpt-only sbvlpt scope test failed ($?)"; FAIL=1; }
+python3 -c 'import json, sys; obj = json.loads(sys.argv[1].rstrip().rstrip(",")); assert obj["type"]=="vless" and obj["server"]=="node.example.com" and obj["server_port"]==443 and obj["tls"]["reality"]["public_key"]=="PUBKEY"' "$out_a" || { echo "FAIL: sbvlpt JSON invalid: $out_a"; FAIL=1; }
+
+# Case B: ss-2022 only, no vlpt -> sbvlpt must NOT be defined
+mkdir -p "$td_scope/home_ss/agsbx"
+echo '{"inbounds":[{"tag":"ss-2022"}]}' > "$td_scope/home_ss/agsbx/sb.json"
+HOME="$td_scope/home_ss" bash -c '
+  port_get(){ [ "$1" = "ss" ] && echo "12345"; }
+  uuid="11111111-2222-3333-4444-555555555555"; domain_addr="node.example.com"
+  sskey="SSKEY"; sxname=""; hostname="vps"
+  source "$1" >/dev/null
+  type sbsspt >/dev/null 2>&1 || exit 21
+  type sbvlpt >/dev/null 2>&1 && exit 22
+  type sbvlpt1 >/dev/null 2>&1 && exit 23
+  exit 0
+' _ "$td_scope/vlpt_and_ss.sh" || { echo "FAIL: ss-only must not define sbvlpt ($?)"; FAIL=1; }
+rm -rf "$td_scope"
+
 [ "$FAIL" = 0 ] && echo "test_vlpt_dual: PASS" || { echo "test_vlpt_dual: FAIL"; exit 1; }

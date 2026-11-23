@@ -59,18 +59,40 @@ for f in glob.glob(sys.argv[1] + '/**/*.html', recursive=True):
 print("HTML balanced OK")
 PY
 
-# ym != reym 时默认跳过（硬伤 3）；camouflage=1 可强制；ym == reym 正常部署
-# （ym/reym/camouflage 以环境变量传入子 shell；函数读全局变量）
-ym="example.com" reym="other.example" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-skip" > "$TMP/log-skip" 2>&1
+# Strict gating matrix (camouflage-gating-and-proxy-convergence):
+# 1. ym != reym with Reality -> skip (0 files)
+ym="example.com" reym="other.example" vlp="yes" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-skip" > "$TMP/log-skip" 2>&1
 grep -q "伪装博客跳过" "$TMP/log-skip" || { echo "FAIL: ym != reym 时应跳过并提示"; exit 1; }
 [ ! -e "$TMP/out-skip/index.html" ] || { echo "FAIL: ym != reym 时不应部署博客"; exit 1; }
 
+# 2. ym set + reym empty (auto-SNI will pick third-party domain) + Reality -> skip (0 files)
+ym="example.com" reym="" vlp="yes" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-empty-reym" > "$TMP/log-empty-reym" 2>&1
+grep -q "伪装博客跳过" "$TMP/log-empty-reym" || { echo "FAIL: reym 留空时应跳过并提示"; exit 1; }
+[ ! -e "$TMP/out-empty-reym/index.html" ] || { echo "FAIL: reym 留空时不应部署博客"; exit 1; }
+
+# 3. Non-Reality protocol (e.g. hy2 only) + ym == reym -> skip (0 files)
+ym="example.com" reym="example.com" hyp="yes" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-no-reality" > "$TMP/log-no-reality" 2>&1
+grep -q "伪装博客跳过" "$TMP/log-no-reality" || { echo "FAIL: 无 Reality 协议时应跳过并提示"; exit 1; }
+[ ! -e "$TMP/out-no-reality/index.html" ] || { echo "FAIL: 无 Reality 协议时不应部署博客"; exit 1; }
+
+# 4. Reality + ym == reym + web_proxy set -> skip (0 files)
+ym="example.com" reym="example.com" vlp="yes" web_proxy="127.0.0.1:8080" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-webproxy" > "$TMP/log-webproxy" 2>&1
+grep -q "伪装博客跳过" "$TMP/log-webproxy" || { echo "FAIL: 设置 web_proxy 时应跳过并提示"; exit 1; }
+[ ! -e "$TMP/out-webproxy/index.html" ] || { echo "FAIL: 设置 web_proxy 时不应部署博客"; exit 1; }
+
+# 5. camouflage=0 explicitly disables even when Reality + ym == reym -> skip
+ym="example.com" reym="example.com" vlp="yes" camouflage="0" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-cam0" > "$TMP/log-cam0" 2>&1
+grep -q "伪装博客跳过" "$TMP/log-cam0" || { echo "FAIL: camouflage=0 时应跳过并提示"; exit 1; }
+[ ! -e "$TMP/out-cam0/index.html" ] || { echo "FAIL: camouflage=0 时不应部署博客"; exit 1; }
+
+# 6. camouflage=1 explicitly forces deployment even when ym != reym and no Reality -> 14 files
 ym="example.com" reym="other.example" camouflage="1" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-force" > "$TMP/log-force" 2>&1
 N_FORCE=$(find "$TMP/out-force" -type f | wc -l)
 [ "$N_FORCE" = "14" ] || { echo "FAIL: camouflage=1 强制部署应得 14 个文件，实际 $N_FORCE"; exit 1; }
 
-ym="example.com" reym="example.com" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-same" > "$TMP/log-same" 2>&1
+# 7. Reality + ym == reym -> deploy 14 files
+ym="example.com" reym="example.com" vlp="yes" bash -c "source $ROOT/modules/hook.sh; source $TMP/module.sh && deploy_camouflage_blog $TMP/out-same" > "$TMP/log-same" 2>&1
 N_SAME=$(find "$TMP/out-same" -type f | wc -l)
-[ "$N_SAME" = "14" ] || { echo "FAIL: ym == reym 时应正常部署，实际 $N_SAME"; exit 1; }
+[ "$N_SAME" = "14" ] || { echo "FAIL: Reality + ym == reym 时应正常部署，实际 $N_SAME"; exit 1; }
 
 echo "PASS: camouflage blog"

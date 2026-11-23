@@ -174,13 +174,13 @@ ensure_proxy_script(){
   elif [ "$script_name" = "caddy_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null; then
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "caddy_safe_reload" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   elif [ "$script_name" = "nginx_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null; then
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "nginx_safe_reload" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   fi
@@ -317,16 +317,59 @@ _camouflage_write() {
   printf '%s' "$_c" > "$1"
 }
 
+# Check if any Reality protocol is enabled in current install/rep run.
+has_reality_protocol() {
+  [ "${vlp:-}" = "yes" ] || [ "${xhp:-}" = "yes" ] || [ "${vxp:-}" = "yes" ] || \
+  [ "${vwp:-}" = "yes" ] || [ "${xup:-}" = "yes" ] || [ "${xcp:-}" = "yes" ] || \
+  [ "${arp:-}" = "yes" ] || \
+  [ -n "${vlpt:-}" ] || [ -n "${xhpt:-}" ] || [ -n "${vxpt:-}" ] || \
+  [ -n "${vwpt:-}" ] || [ -n "${xupt:-}" ] || [ -n "${xcpt:-}" ] || [ -n "${arpt:-}" ]
+}
+
+# Single source of truth for whether the local camouflage blog should be deployed.
+# Only deploy when:
+#   - camouflage=1 (explicitly forced), OR
+#   - camouflage is not 0, web_proxy is empty, at least one Reality protocol is enabled,
+#     and ym/reym are both non-empty and equal (own-domain Reality fallback).
+# Note: when reym is empty, auto_sni_resolve selects an external third-party domain (!= ym),
+# so a local camouflage blog is not needed.
+should_deploy_camouflage_blog() {
+  if [ "${camouflage:-}" = "1" ]; then
+    return 0
+  fi
+  if [ "${camouflage:-}" = "0" ]; then
+    return 1
+  fi
+  if [ -n "${web_proxy:-}" ]; then
+    return 1
+  fi
+  if [ -n "${ym:-}" ] && [ -n "${reym:-}" ] && [ "${reym}" = "${ym}" ] && has_reality_protocol; then
+    return 0
+  fi
+  return 1
+}
+
 # deploy_camouflage_blog <webroot>: 部署伪装博客到 webroot
 # 模板内容由 build.py 从 modules/camouflage/ 嵌入（见 CAMOUFLAGE_TEMPLATES 标记）
 deploy_camouflage_blog() {
   local webroot="$1"
   [ -n "$webroot" ] || { echo "deploy_camouflage_blog: 需要 webroot 参数"; return 1; }
-  # ym 与 reym 不同时，Reality 回落指向伪装域名本身，本地博客无用，默认不部署；
-  # camouflage=1（生成器「强制部署」）可强制部署。
-  if [ -n "${ym:-}" ] && [ -n "${reym:-}" ] && [ "${reym}" != "${ym}" ] && [ "${camouflage:-}" != "1" ]; then
-    echo "伪装博客跳过：ym(${ym}) 与伪装域名 reym(${reym}) 不同，默认不部署（camouflage=1 可强制部署）"
-    return 0
+  # 域名部署上下文下严格执行门控：仅在 Reality + reym==ym（或 camouflage=1 强制）时部署
+  if [ -n "${ym:-}" ] || [ "${camouflage:-}" = "0" ]; then
+    if ! should_deploy_camouflage_blog; then
+      if [ "${camouflage:-}" = "0" ]; then
+        echo "伪装博客跳过：已显式关闭 camouflage=0"
+      elif [ -n "${web_proxy:-}" ]; then
+        echo "伪装博客跳过：已配置自有服务 web_proxy(${web_proxy})"
+      elif ! has_reality_protocol; then
+        echo "伪装博客跳过：未启用 Reality 协议，默认不部署（camouflage=1 可强制部署）"
+      elif [ -z "${reym:-}" ]; then
+        echo "伪装博客跳过：reym 未指定（将自动探测第三方伪装域名），默认不部署（camouflage=1 可强制部署）"
+      else
+        echo "伪装博客跳过：ym(${ym}) 与伪装域名 reym(${reym}) 不同，默认不部署（camouflage=1 可强制部署）"
+      fi
+      return 0
+    fi
   fi
   camouflage_pick_persona
   mkdir -p "$webroot/posts"
@@ -1374,6 +1417,16 @@ _auto_sni_valid_remote_ip() {
   return 0
 }
 
+# Check whether local curl supports --curves (introduced in curl 7.73.0).
+_auto_sni_curl_supports_curves() {
+  local ver major minor
+  ver=$(curl --version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+' | head -n 1 || true)
+  [ -n "$ver" ] || return 1
+  major="${ver%%.*}"
+  minor="${ver#*.}"
+  [ "$major" -gt 7 ] 2>/dev/null || { [ "$major" -eq 7 ] 2>/dev/null && [ "$minor" -ge 73 ] 2>/dev/null; }
+}
+
 # 单域名探测（由 xargs -P 并行调用）：通过则写一行
 # "tier|sub|握手ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
 # 状态码只记录、不过滤（Reality 只看握手）。
@@ -1386,9 +1439,16 @@ _auto_sni_probe_one() {
   if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|edgecast|bunnycdn|gcore|cdn77|azion|cdn)"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
+  # 2. 强制 IPv4 + TLS 1.3 + X25519 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
+  # REALITY 硬性要求目标站支持 X25519 密钥交换（不触发 HelloRetryRequest 强制 P-521/P-384），
+  # 否则服务端 REALITY 握手必定报 "REALITY: processed invalid connection"。
+  local -a curve_args=()
+  if _auto_sni_curl_supports_curves; then
+    curve_args=(--curves X25519)
+  fi
   metrics=$(curl -4 -sS -I -o /dev/null \
     --tlsv1.3 --tls-max 1.3 \
+    "${curve_args[@]}" \
     --http2 \
     --connect-timeout 3 \
     --max-time 5 \
@@ -1396,6 +1456,12 @@ _auto_sni_probe_one() {
     -D "$hdr_file" \
     -w "%{http_code}|%{time_connect}|%{time_appconnect}|%{remote_ip}" \
     "https://${domain}" 2>/dev/null) || { rm -f "$hdr_file"; return 0; }
+  # 老版本 curl (<7.73) 无 --curves 参数时，用 openssl 兜底验证目标站是否支持 X25519
+  if [ "${#curve_args[@]}" -eq 0 ] && command -v openssl >/dev/null 2>&1; then
+    if ! timeout 4 openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -groups X25519 -brief </dev/null 2>&1 | grep -qi "X25519"; then
+      rm -f "$hdr_file"; return 0
+    fi
+  fi
   http_code=$(printf '%s' "$metrics" | cut -d'|' -f1)
   t_app=$(printf '%s' "$metrics" | cut -d'|' -f3)
   remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f4)
@@ -1642,7 +1708,7 @@ _auto_sni_probe_tier() {
   { awk -F'|' -v t="$tier" '$1==t && $2==1' "$cands" | shuf; awk -F'|' -v t="$tier" '$1==t && $2==2' "$cands" | shuf; } | head -n "$_AUTO_SNI_MAX_TEST_DOMAINS" > "$test_file" 2>/dev/null || true
   [ -s "$test_file" ] || return 1
   export _AUTO_SNI_TMP _AUTO_SNI_RESULTS _AUTO_SNI_SELF_IP
-  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip
+  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip _auto_sni_curl_supports_curves
   xargs -P 8 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
   [ -s "$_AUTO_SNI_RESULTS" ]
 }
@@ -1761,8 +1827,8 @@ web_port_is_available_or_self(){
   # 3. 若输出未包含进程信息（如普通用户权限），但该端口确实与已有记录一致，且 caddy/nginx 服务正在运行
   local known_wp=""
   [ -f "$HOME/agsbx/web_port" ] && known_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
-  [ -z "$known_wp" ] && [ -f "${CADDY_PORT_FILE:-/etc/caddy/web_port}" ] && known_wp=$(cat "${CADDY_PORT_FILE:-/etc/caddy/web_port}" 2>/dev/null | tr -d '[:space:]')
-  [ -z "$known_wp" ] && [ -f "${NGINX_PORT_FILE:-/etc/nginx/web_port}" ] && known_wp=$(cat "${NGINX_PORT_FILE:-/etc/nginx/web_port}" 2>/dev/null | tr -d '[:space:]')
+  [ -z "$known_wp" ] && known_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
+  [ -z "$known_wp" ] && known_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
   if [ -n "$known_wp" ] && [ "$known_wp" = "$port" ]; then
     if (command -v systemctl >/dev/null 2>&1 && (systemctl is-active --quiet caddy 2>/dev/null || systemctl is-active --quiet nginx 2>/dev/null)) || \
        pgrep -x caddy >/dev/null 2>&1 || pgrep -x nginx >/dev/null 2>&1; then
@@ -1771,6 +1837,34 @@ web_port_is_available_or_self(){
   fi
 
   return 1 # 被其他外部进程占用
+}
+
+# Query current non-443 HTTPS port from caddy_proxy.sh / nginx_proxy.sh via CLI.
+_proxy_get_port(){
+  local eng="$1" bin="" p=""
+  case "$eng" in
+    caddy) bin="$HOME/.local/bin/caddy_proxy.sh" ;;
+    nginx) bin="$HOME/.local/bin/nginx_proxy.sh" ;;
+    *) return 1 ;;
+  esac
+  [ -x "$bin" ] || return 1
+  p=$("$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
+  case "$p" in
+    443|''|*[!0-9]*) return 1 ;;
+    *) printf '%s' "$p"; return 0 ;;
+  esac
+}
+
+# Delegate safe config validation and service reload to caddy_proxy.sh / nginx_proxy.sh.
+_proxy_reload(){
+  local eng="$1" bin=""
+  case "$eng" in
+    caddy) bin="$HOME/.local/bin/caddy_proxy.sh" ;;
+    nginx) bin="$HOME/.local/bin/nginx_proxy.sh" ;;
+    *) return 0 ;;
+  esac
+  [ -x "$bin" ] || return 0
+  "$bin" reload >/dev/null 2>&1 || true
 }
 
 web_port_find_available(){
@@ -1847,23 +1941,35 @@ reality_port_find_available(){
   shuf -i 10000-65535 -n 1
 }
 
+# Check whether any protocol selection flag is active in the current run context.
+_has_any_proto_flag(){
+  [ -n "${vlp:-}" ] || [ -n "${xhp:-}" ] || [ -n "${vxp:-}" ] || [ -n "${vwp:-}" ] || \
+  [ -n "${xup:-}" ] || [ -n "${xcp:-}" ] || [ -n "${arp:-}" ] || [ -n "${hyp:-}" ] || \
+  [ -n "${tup:-}" ] || [ -n "${anp:-}" ] || [ -n "${nvp:-}" ] || [ -n "${vmp:-}" ] || \
+  [ -n "${vmt:-}" ] || [ -n "${ssp:-}" ] || [ -n "${snp:-}" ] || [ -n "${sop:-}" ]
+}
+
 # _reality_proto_port PROTO: 取某一 Reality 协议的有效端口（实例 1）。
-# 与 vlpt 原逻辑一致：端口变量 > 用户变量 > ports.env 持久化；逗号列表只取首项
-# （其余协议没有 vlpt-comma.sh 那样的导出前拆分，port_xh 等在 check 时仍是原始逗号列表，
-# 所以这里统一用 ${p%%,*} 取首项；vlpt 已被提前拆分，对它是空操作）。
+# 仅在当前运行启用了该协议（或孤立无协议标志的测试/查询上下文）时才允许回退读取
+# ports.env，避免 rep 切换协议时被历史残留的 443 端口干扰。
 _reality_proto_port(){
-  local proto="$1" p="" key=""
+  local proto="$1" p="" key="" flag="" active=0
   case "$proto" in
-    vlpt) p="${port_vl_re:-${vlpt:-}}"; key="vl_re" ;;
-    xhpt) p="${port_xh:-${xhpt:-}}"; key="xh" ;;
-    vxpt) p="${port_vx:-${vxpt:-}}"; key="vx" ;;
-    vwpt) p="${port_vw:-${vwpt:-}}"; key="vw" ;;
-    xupt) p="${port_xu:-${xupt:-}}"; key="xu" ;;
-    xcpt) p="${port_xc:-${xcpt:-}}"; key="xc" ;;
-    arpt) p="${port_ar:-${arpt:-}}"; key="ar" ;;
+    vlpt) p="${port_vl_re:-${vlpt:-}}"; key="vl_re"; flag="${vlp:-}" ;;
+    xhpt) p="${port_xh:-${xhpt:-}}"; key="xh"; flag="${xhp:-}" ;;
+    vxpt) p="${port_vx:-${vxpt:-}}"; key="vx"; flag="${vxp:-}" ;;
+    vwpt) p="${port_vw:-${vwpt:-}}"; key="vw"; flag="${vwp:-}" ;;
+    xupt) p="${port_xu:-${xupt:-}}"; key="xu"; flag="${xup:-}" ;;
+    xcpt) p="${port_xc:-${xcpt:-}}"; key="xc"; flag="${xcp:-}" ;;
+    arpt) p="${port_ar:-${arpt:-}}"; key="ar"; flag="${arp:-}" ;;
     *) return 1 ;;
   esac
-  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+  if [ "$flag" = "yes" ] || [ "$flag" = "$proto" ]; then
+    active=1
+  elif ! _has_any_proto_flag; then
+    active=1
+  fi
+  if [ -z "$p" ] && [ "$active" = "1" ] && command -v port_get >/dev/null 2>&1; then
     p=$(port_get "$key" 2>/dev/null || true)
   fi
   p="${p%%,*}"
@@ -2022,7 +2128,28 @@ vlpt_coexistence_sync_sni(){
   echo "$rp" > "$HOME/agsbx/reality_port" 2>/dev/null || true
   command -v port_set >/dev/null 2>&1 && port_set "reality_port" "$rp"
 
+  local sync_key="${engine}|${wp}|${sni_dom}|${rp}"
+  if [ "${_VLPT_SNI_SYNCED_KEY:-}" = "$sync_key" ]; then
+    # Verify on-disk router config is still intact before skipping redundant set-port
+    local intact=1
+    if [ "$engine" = "caddy" ]; then
+      local cf="${CADDYFILE:-/etc/caddy/Caddyfile}"
+      if [ -f "$cf" ] && ! grep -qE '^[[:space:]]*layer4[[:space:]]*\{' "$cf" 2>/dev/null; then
+        intact=0
+      fi
+    elif [ "$engine" = "nginx" ]; then
+      local sc="${NGINX_DIR:-/etc/nginx}/stream.d/reality_sni.conf"
+      if [ -d "${NGINX_DIR:-/etc/nginx}" ] && [ ! -f "$sc" ]; then
+        intact=0
+      fi
+    fi
+    if [ "$intact" = "1" ]; then
+      return 0
+    fi
+  fi
+
   web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine" || return 1
+  export _VLPT_SNI_SYNCED_KEY="$sync_key"
   return 0
 }
 
@@ -2034,7 +2161,7 @@ vlpt_coexistence_check(){
   fi
   [ -n "$proto" ] || return 0
 
-  # 检测是否已存在先前配置的有效 web_port
+  # 检测是否已存在先前配置的有效 web_port（仅通过端口记录或 proxy 脚本 CLI 查询）
   local existing_wp=""
   if command -v port_get >/dev/null 2>&1; then
     existing_wp=$(port_get "web_port" 2>/dev/null || true)
@@ -2042,13 +2169,8 @@ vlpt_coexistence_check(){
   if [ -z "$existing_wp" ] && [ -f "$HOME/agsbx/web_port" ]; then
     existing_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
   fi
-  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
-  if [ -z "$existing_wp" ] && [ -f "$cport_file" ]; then
-    existing_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
-  fi
-  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
-  if [ -z "$existing_wp" ] && [ -f "$nport_file" ]; then
-    existing_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+  if [ -z "$existing_wp" ]; then
+    existing_wp=$(_proxy_get_port "caddy" 2>/dev/null || _proxy_get_port "nginx" 2>/dev/null || true)
   fi
   case "$existing_wp" in
     443|''|*[!0-9]*) existing_wp="" ;;
@@ -2106,10 +2228,8 @@ vlpt_coexistence_cleanup(){
   local wp=""
   [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
   local caddy_wp="" nginx_wp=""
-  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
-  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
-  [ -f "$cport_file" ] && caddy_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
-  [ -f "$nport_file" ] && nginx_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+  caddy_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
+  nginx_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
 
   if [ -n "$wp" ] || [ -n "$caddy_wp" ] || [ -n "$nginx_wp" ]; then
     echo "检测到 Web 服务曾配置高位端口共存，正在恢复 Caddy / Nginx 默认 443 端口与初始配置..."
@@ -2123,7 +2243,7 @@ vlpt_coexistence_cleanup(){
     kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
     web_server_migrate_to_port 443 || echo "错误：卸载回滚失败，Web 服务未恢复到 443 端口；请手动执行 caddy_proxy.sh / nginx_proxy.sh set-port 443 恢复。" >&2
   fi
-  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" "$cport_file" "$nport_file" 2>/dev/null || true
+  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" 2>/dev/null || true
   return 0
 }
 
@@ -2145,58 +2265,27 @@ vlpt_coexistence_post_start(){
   [ -f "$HOME/agsbx/reality_port" ] || return 0
   local engine
   engine=$(_detect_coexistence_web_engine)
-  if [ "$engine" = "caddy" ] && command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet caddy 2>/dev/null; then
-      systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
-    else
-      systemctl start caddy >/dev/null 2>&1 || true
-    fi
-  elif [ "$engine" = "nginx" ] && command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
-    else
-      systemctl start nginx >/dev/null 2>&1 || true
-    fi
-  fi
+  [ -n "$engine" ] && _proxy_reload "$engine"
 }
 
 if command -v register_hook >/dev/null 2>&1; then
   register_hook post_start vlpt_coexistence_post_start
   register_hook on_uninstall vlpt_coexistence_cleanup
 fi
-# web-server.sh: ensure a web server listens on 443 when ym (own domain) is set.
-# Background: ym enables Reality camouflage with fallback to 127.0.0.1:443.
-# If neither Caddy nor nginx listens on 443, the camouflage is broken.
-# This module auto-installs nginx (lightweight, suitable for low-memory
-# machines where the user chose acme.sh to avoid Caddy) AND configures
-# the vhost to serve the camouflage blog.
+# web-server.sh: ensure a managed Web server (Nginx via nginx_proxy.sh) is configured when ym is set
+# under the acme/low-memory path. Caddy path is handled by cert_setup_caddy_proxy() in cert-main.sh.
+# All Nginx installation and vhost configuration are strictly delegated to nginx_proxy.sh.
 
-# ensure_web_server: called when ym is non-empty and camouflage is active.
-# Web server choice follows detect_certsrc(): caddy path -> ensure Caddy,
-# acme path (low memory) -> install nginx.
-# Returns 0 if 443 has a listener (or was successfully set up), 1 otherwise.
 ensure_web_server(){
   local ym_c="$1" src=""
   [ -n "$ym_c" ] || return 0
-  local target_p="${web_port:-443}"
-  # 目标端口已有监听？（Caddy、nginx 或其他）直接返回
-  if command -v ss >/dev/null 2>&1; then
-    if ss -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
-      return 0
-    fi
-  elif command -v netstat >/dev/null 2>&1; then
-    if netstat -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
-      return 0
-    fi
-  fi
-  # 按内存决策装哪个（跟 certsrc 的 auto 逻辑一致：低内存->acme->nginx，否则->caddy）
-  # 注意：不用 detect_certsrc，因为它在 Caddy 未安装时会被误判为 acme
+
+  # Select engine consistent with detect_certsrc() (low memory < 256MB -> acme/nginx, otherwise caddy)
   local mem_kb=""
   mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
-  # 显式指定 certsrc 时优先
   if [ "${certsrc:-}" = "caddy" ]; then
     src="caddy"
-  elif [ "${certsrc:-}" = "acme" ]; then
+  elif [ "${certsrc:-}" = "acme" ] || [ "${certsrc:-}" = "nginx" ]; then
     src="acme"
   elif [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then
     src="acme"
@@ -2204,86 +2293,74 @@ ensure_web_server(){
     src="caddy"
   fi
   if [ "$src" = "caddy" ]; then
-    # Caddy 路径：证书阶段会调用 ensure_caddy_download 并写 Caddyfile，
-    # 这里只需确认走 Caddy 路径，不提前下载（避免函数定义顺序问题）
+    # Caddy path is configured via cert_setup_caddy_proxy() in cert-main.sh
     return 0
   fi
-  # acme 路径（低内存）：优先调用 nginx_proxy.sh 进行环境初始化与站点/反代发布
+
+  # Nginx path: strictly delegate to nginx_proxy.sh (no direct apt/yum/apk or manual vhost bypass)
   local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
   ensure_proxy_script "nginx_proxy.sh" || true
-  if [ -x "$nginx_proxy_bin" ]; then
-    local force_flag=""
-    force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
-    "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+  if [ ! -x "$nginx_proxy_bin" ]; then
+    echo "错误：未找到可执行脚本 $nginx_proxy_bin，无法配置 Nginx（所有 Nginx 配置必须由 nginx_proxy.sh 托管）。" >&2
+    return 1
+  fi
 
-    _webroot="${webroot:-/var/www/html}"
-    local proxy_target="${web_proxy:-}"
-    local custom_root=0
-    if [[ "$proxy_target" == /* ]]; then
-      _webroot="$proxy_target"
-      proxy_target=""
-      custom_root=1
-    fi
+  local force_flag=""
+  force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
+  if ! "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag; then
+    echo "错误：nginx_proxy.sh init 执行失败。" >&2
+    return 1
+  fi
 
-    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ -z "$proxy_target" ] && [ "$custom_root" = "0" ] && [ ! -f "$_webroot/index.html" ]; }; then
+  local _webroot="${webroot:-/var/www/html}"
+  local proxy_target="${web_proxy:-}"
+  local site_mode="no-default"
+  local site_target=""
+  if [[ "$proxy_target" == /* ]]; then
+    site_mode="root"
+    site_target="$proxy_target"
+  elif [ -n "$proxy_target" ]; then
+    site_mode="proxy"
+    site_target="$proxy_target"
+  elif command -v should_deploy_camouflage_blog >/dev/null 2>&1 && should_deploy_camouflage_blog; then
+    if [ "${camouflage:-}" = "1" ] || [ ! -f "$_webroot/index.html" ]; then
       if command -v deploy_camouflage_blog >/dev/null 2>&1; then
         deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
       fi
     fi
-
-    if [ -n "$proxy_target" ]; then
-      "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
-    else
-      "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
-    fi
-
-    if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
-      mkdir -p "$CERT_DIR" 2>/dev/null || true
-      cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
-      cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
-      chmod 600 "$CERT_KEY" 2>/dev/null || true
-    fi
-    return 0
-  fi
-
-  # nginx 已安装？写 vhost 并返回
-  if command -v nginx >/dev/null 2>&1; then
-    _webserver_write_nginx_conf "$ym_c" || true
-    return 0
-  fi
-  # 都没有，尝试自动安装 nginx（轻量）
-  echo "检测到 443 无 Web 服务监听（伪装博客需要），尝试自动安装 nginx..."
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq && apt-get install -y -qq nginx >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y -q nginx >/dev/null 2>&1
-  elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache nginx >/dev/null 2>&1
+    site_mode="root"
+    site_target="$_webroot"
   else
-    echo "未找到包管理器，无法自动安装 nginx。请手动安装 nginx 或 Caddy，否则 443 伪装不生效。"
+    echo "站点默认路由：未触发伪装博客条件且未设置 web_proxy，${ym_c} 仅启用 --no-default（根路径返回 404，不映射 /var/www/html）"
+    site_mode="no-default"
+  fi
+
+  local dns_arg=""
+  local cm=""
+  cm="${certmode_selected:-${certmode:-}}"
+  [ -z "$cm" ] && [ -f "$HOME/agsbx/certmode" ] && cm=$(cat "$HOME/agsbx/certmode" 2>/dev/null | tr -d '[:space:]')
+  [ "$cm" = "dns" ] && dns_arg="--dns cloudflare"
+
+  local site_rc=0
+  if [ "$site_mode" = "proxy" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$site_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  elif [ "$site_mode" = "root" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --root "$site_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  else
+    "$nginx_proxy_bin" site --domain "$ym_c" --no-default ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  fi
+  if [ "$site_rc" != "0" ]; then
+    echo "错误：nginx_proxy.sh site 配置域名 ${ym_c} 失败。" >&2
     return 1
   fi
-  if command -v nginx >/dev/null 2>&1; then
-    echo "nginx 安装成功，正在配置 vhost..."
-    _webserver_write_nginx_conf "$ym_c" || true
-    return 0
-  else
-    echo "nginx 自动安装失败。请手动安装 nginx 或 Caddy，否则 443 伪装不生效。"
-    return 1
-  fi
-}
 
-# _webserver_write_nginx_conf <ym>: 委托 nginx_proxy.sh 配置 vhost
-_webserver_write_nginx_conf(){
-  local ym_c="$1" _webroot="${webroot:-/var/www/html}"
-  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
-  ensure_proxy_script "nginx_proxy.sh" || true
-  if [ -x "$nginx_proxy_bin" ]; then
-    "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" --force || true
-    return 0
+  if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
+    mkdir -p "$CERT_DIR" 2>/dev/null || true
+    cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
+    cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
+    chmod 600 "$CERT_KEY" 2>/dev/null || true
   fi
-  echo "未找到 nginx_proxy.sh，跳过自动配置"
-  return 1
+  return 0
 }
 # ports.sh: consolidated port storage in $HOME/agsbx/ports.env
 # Replaces the old per-protocol port_* files (port_vl_re, port_xh, ...).
@@ -3518,8 +3595,16 @@ subhttps_write_conf(){
       echo "    file_server"
       echo "  }"
     fi
-    echo "  root * \"$_webroot\""
-    echo "  file_server"
+    if command -v should_deploy_camouflage_blog >/dev/null 2>&1 && should_deploy_camouflage_blog; then
+      echo "  handle {"
+      echo "    root * \"$_webroot\""
+      echo "    file_server"
+      echo "  }"
+    else
+      echo "  handle {"
+      echo "    respond 404"
+      echo "  }"
+    fi
     echo "}"
   } > "$HOME/agsbx/Caddyfile.sub" 2>/dev/null || return 1
   return 0
@@ -3548,116 +3633,79 @@ subhttps_ensure_websbx_readable(){
   find "$websbx" -type f -exec chmod 644 {} + 2>/dev/null || true
   return 0
 }
-subhttps_merge_eligible(){
-  # 证书是 Caddy 申请的（证书流程写过系统 Caddyfile）：这个文件就是我们自己的
-  # 配置，直接合，不再探测 443 被 Caddy 还是 Nginx 占用。其他异常由后面的
-  # validate / reload / 回环验证兜底，失败就摘除恢复。
-  local ym_c="$1" sysfile=""
-  [ -n "$ym_c" ] || return 1
-  sysfile=$(subhttps_merge_sysfile)
+# Determine which managed Web server engine is active for HTTPS subscription merging (caddy | nginx | empty).
+subhttps_merge_engine(){
+  local cs=""
+  cs="${certsrc:-}"
+  [ -z "$cs" ] && cs=$(subhttps_read "$HOME/agsbx/certsrc")
+  if [ "$cs" = "caddy" ]; then echo "caddy"; return 0; fi
+  if [ "$cs" = "acme" ] || [ "$cs" = "nginx" ]; then echo "nginx"; return 0; fi
   local cur_cf
   cur_cf=$(subhttps_read "$HOME/agsbx/caddyfile_path")
-  [ "$cur_cf" = "$sysfile" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ] || return 1
-  [ -f "$sysfile" ] || return 1
-  return 0
+  if [ "$cur_cf" = "$(subhttps_merge_sysfile)" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ]; then
+    echo "caddy"; return 0
+  fi
+  echo ""
 }
-subhttps_merge_active(){
-  # 合并块在位且 token 是当前 token（token 变了算未激活，走重新合并）
-  local ym_c="$1" token="" sysfile=""
+subhttps_merge_eligible(){
+  # Managed Web server (Caddy via caddy_proxy.sh or Nginx via nginx_proxy.sh) is eligible for auto-merge.
+  local ym_c="$1" eng="" sysfile="" nconf=""
   [ -n "$ym_c" ] || return 1
-  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile" ] || return 1
-
-  # 优先匹配 caddy_proxy.sh 写入的标准 handle /<token>* 格式
-  if grep -qE "(handle|handle_path)[[:space:]]+/$token(\*|/)" "$sysfile" 2>/dev/null; then
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "caddy" ]; then
+    sysfile=$(subhttps_merge_sysfile)
+    local cur_cf
+    cur_cf=$(subhttps_read "$HOME/agsbx/caddyfile_path")
+    [ "$cur_cf" = "$sysfile" ] || [ "$cur_cf" = "/etc/caddy/Caddyfile" ] || return 1
+    [ -f "$sysfile" ] || return 1
+    return 0
+  elif [ "$eng" = "nginx" ]; then
+    nconf="${SUBHTTPS_NGINX_CONF_DIR:-/etc/nginx/conf.d}/${ym_c}.conf"
+    [ -f "$nconf" ] || return 1
     return 0
   fi
-
-  # 兼容旧版手写注入的独立标记
-  grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null || return 1
-  grep -qF "handle /$token/" "$sysfile" 2>/dev/null
+  return 1
+}
+subhttps_merge_active(){
+  # Read-only check whether the current subscription token route is already mounted in Caddy or Nginx.
+  local ym_c="$1" token="" eng="" sysfile="" nconf=""
+  [ -n "$ym_c" ] || return 1
+  token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    nconf="${SUBHTTPS_NGINX_CONF_DIR:-/etc/nginx/conf.d}/${ym_c}.conf"
+    [ -f "$nconf" ] || return 1
+    grep -qE "location[[:space:]]+(\^~[[:space:]]+)?/$token/" "$nconf" 2>/dev/null
+    return $?
+  fi
+  sysfile=$(subhttps_merge_sysfile)
+  [ -f "$sysfile" ] || return 1
+  grep -qE "(handle|handle_path)[[:space:]]+/$token(\*|/)" "$sysfile" 2>/dev/null
 }
 subhttps_merge_serving(){
-  # display 用：块在位且系统 Caddy 在运行（systemd 或 caddy 进程）
+  # Check that the route is mounted and the managed web service is running.
+  local eng=""
   subhttps_merge_active "$1" || return 1
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl is-active --quiet nginx 2>/dev/null && return 0
+    fi
+    pgrep -x nginx >/dev/null 2>&1
+    return $?
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     systemctl is-active --quiet caddy 2>/dev/null && return 0
   fi
-  # 非 systemd（如下载版 Caddy）：检查 caddy 进程
   pgrep -x caddy >/dev/null 2>&1 || pgrep -f "caddy run" >/dev/null 2>&1 || pgrep -f "caddy start" >/dev/null 2>&1
 }
 subhttps_https_active(){
-  # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy（内存门/缺 caddy 二进制时豁免）
+  # https 已生效：独立 Caddy 在跑，或已合并到系统 Caddy/Nginx（内存门/缺 caddy 二进制时豁免）
   subhttps_caddy_running && return 0
   subhttps_merge_active "$(subhttps_read "$HOME/agsbx/ym")"
 }
-subhttps_strip_merge_block(){
-  # 从系统 Caddyfile 里手术摘除合并块（保留用户其他手工修改）；摘掉了返回 0
-  local sysfile="" before="" after="" token=""
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile" ] || return 1
-  token=$(subhttps_read "$HOME/agsbx/subtoken.log")
-  before=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
-
-  if grep -q "# >>> argosbx-subscription" "$sysfile" 2>/dev/null; then
-    awk '/# >>> argosbx-subscription/{skip=1} !skip{print} /# <<< argosbx-subscription/{skip=0}' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
-  elif [ -n "$token" ] && grep -qE "(handle|handle_path)[[:space:]]+/$token" "$sysfile" 2>/dev/null; then
-    awk -v tok="$token" '
-      BEGIN { in_tok = 0; count = 0 }
-      $0 ~ "(handle|handle_path)[[:space:]]+/" tok {
-        in_tok = 1; count = 1; next
-      }
-      in_tok {
-        line = $0
-        c_open = gsub(/\{/, "{", line)
-        c_close = gsub(/\}/, "}", line)
-        count += c_open
-        count -= c_close
-        if (count == 0) {
-          in_tok = 0
-        }
-        next
-      }
-      { print $0 }
-    ' "$sysfile" > "$sysfile.tmp" && mv -f "$sysfile.tmp" "$sysfile"
-  else
-    return 1
-  fi
-  after=$(sha256sum "$sysfile" 2>/dev/null | awk '{print $1}')
-  [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]
-}
-subhttps_merge_insert(){
-  # 摘除旧块后把新订阅块插到站点块首行之后；找不到站点块返回 1（原文件不动）
-  local ym_c="$1" token="$2" sysfile="" websbx="" block_tmp=""
-  [ -n "$ym_c" ] && [ -n "$token" ] || return 1
-  sysfile=$(subhttps_merge_sysfile); websbx="$HOME/websbx"
-  block_tmp=$(mktemp) || return 1
-  {
-    echo "  # >>> argosbx-subscription (argosbx 自动合并，勿手工改) >>>"
-    # 必须用 handle（不剥路径），见 subhttps_write_conf 的注释
-    echo "  handle /$token/* {"
-    echo "    root * \"$websbx\""
-    echo "    file_server"
-    echo "  }"
-    echo "  # <<< argosbx-subscription <<<"
-  } > "$block_tmp"
-  subhttps_strip_merge_block >/dev/null 2>&1 || true
-  if awk -v ym="$ym_c" -v bf="$block_tmp" '
-    BEGIN{ while((getline line < bf) > 0){ block = block line "\n" } }
-    !done && index($0, ym) == 1 && $NF == "{" { print; printf "%s", block; done=1; next }
-    { print }
-    END{ if(!done) exit 1 }
-  ' "$sysfile" > "$sysfile.new" 2>/dev/null; then
-    mv -f "$sysfile.new" "$sysfile"; rm -f "$block_tmp"; return 0
-  fi
-  rm -f "$block_tmp" "$sysfile.new"; return 1
-}
-subhttps_merge_reload(){
-  systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1
-}
 subhttps_merge_verify(){
-  # 本机回环验证订阅地址返回 200（443 共存模式下 Caddy HTTPS 实际监听在 web_port，如 8443）
+  # 本机回环验证订阅地址返回 200（443 共存模式下 Web HTTPS 实际监听在 web_port，如 8443）
   local ym_c="$1" token="$2" code="" wp=""
   command -v curl >/dev/null 2>&1 || return 1
   wp="${web_port:-$(subhttps_read "$HOME/agsbx/web_port")}"
@@ -3671,66 +3719,62 @@ subhttps_merge_verify(){
   return 1
 }
 subhttps_merge_system_caddy(){
-  # 编排：已合并（token 一致）直接成功；否则优先 caddy_proxy 追加，保底插入→全量校验→reload→回环验证；
-  # 失败摘除恢复并说明原因（调用方据此决定是继续试独立 Caddy 还是回退）
-  local ym_c="$1" token="" sysfile=""
+  # Strictly delegate subscription subpath mount/rollback to caddy_proxy.sh or nginx_proxy.sh.
+  local ym_c="$1" token="" eng="" proxy_bin="" script_name=""
   [ -n "$ym_c" ] || return 1
   token=$(subhttps_read "$HOME/agsbx/subtoken.log"); [ -n "$token" ] || return 1
   subhttps_merge_eligible "$ym_c" || return 1
-  command -v caddy >/dev/null 2>&1 || { echo "合并失败：未找到 caddy 命令，无法校验配置"; return 1; }
   if subhttps_merge_active "$ym_c"; then return 0; fi
-  # caddy 用户需能读取 $HOME/websbx，否则验证 403
+  # Web worker user (caddy/www-data/nginx) needs traversal permission on $HOME/websbx
   subhttps_ensure_websbx_readable
 
-  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
-  ensure_proxy_script "caddy_proxy.sh" || true
-  local websbx="$HOME/websbx"
-  if [ -x "$caddy_proxy_bin" ]; then
-    if "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*=${websbx}:nostrip:static" --append; then
-      if subhttps_merge_verify "$ym_c" "$token"; then
-        echo "订阅成功合并到系统 Caddy（通过 caddy_proxy）：https://$ym_c/$token/"
-        return 0
-      fi
-    fi
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    script_name="nginx_proxy.sh"
+  else
+    script_name="caddy_proxy.sh"
   fi
-  sysfile=$(subhttps_merge_sysfile)
-  [ -f "$sysfile.pre-sub" ] || cp -f "$sysfile" "$sysfile.pre-sub" 2>/dev/null || true
-  if ! subhttps_merge_insert "$ym_c" "$token"; then
-    echo "合并失败：写入系统 Caddyfile 失败（找不到 $ym_c 站点块）"
+  proxy_bin="$HOME/.local/bin/$script_name"
+  if command -v ensure_proxy_script >/dev/null 2>&1; then
+    ensure_proxy_script "$script_name" || true
+  fi
+  if [ ! -x "$proxy_bin" ]; then
+    echo "合并失败：未找到可执行脚本 $proxy_bin，无法自动挂载订阅路径"
     return 1
   fi
-  if ! caddy validate --config "$(subhttps_merge_mainfile)" --adapter caddyfile >/dev/null 2>&1; then
-    echo "合并失败：Caddy 配置校验未通过，已恢复原文件"
-    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+
+  local websbx="$HOME/websbx"
+  if ! "$proxy_bin" site --domain "$ym_c" --subpath "/$token*=${websbx}:nostrip:static" --append; then
+    echo "合并失败：${script_name} 挂载订阅子路由失败"
+    return 1
   fi
-  if ! subhttps_merge_reload; then
-    echo "合并失败：系统 Caddy 重载失败，已恢复原文件"
-    subhttps_strip_merge_block >/dev/null 2>&1 || true; return 1
+  sleep 1
+  if subhttps_merge_verify "$ym_c" "$token"; then
+    echo "订阅成功合并到系统 ${eng}（通过 ${script_name}）：https://$ym_c/$token/"
+    return 0
   fi
-  sleep 2
-  if subhttps_merge_verify "$ym_c" "$token"; then return 0; fi
-  echo "合并失败：订阅地址验证未通过（非 200），已恢复原文件"
-  subhttps_strip_merge_block >/dev/null 2>&1 || true
-  subhttps_merge_reload >/dev/null 2>&1 || true
+  echo "合并失败：订阅地址验证未通过（非 200），正在通过 ${script_name} 回滚订阅路由"
+  "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   return 1
 }
 subhttps_unmerge_system_caddy(){
-  # 降级/del 时通过 caddy_proxy.sh 摘除子路由；若无 caddy_proxy 则回退使用保底 strip
-  local ym_c="" token=""
+  # Strictly delegate subscription subpath removal to caddy_proxy.sh or nginx_proxy.sh.
+  local ym_c="" token="" eng="" script_name="" proxy_bin=""
   ym_c=$(subhttps_read "$HOME/agsbx/ym")
   token=$(subhttps_read "$HOME/agsbx/subtoken.log")
-  local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  [ -n "$ym_c" ] && [ -n "$token" ] || return 0
+  eng=$(subhttps_merge_engine)
+  if [ "$eng" = "nginx" ]; then
+    script_name="nginx_proxy.sh"
+  else
+    script_name="caddy_proxy.sh"
+  fi
+  proxy_bin="$HOME/.local/bin/$script_name"
   if command -v ensure_proxy_script >/dev/null 2>&1; then
-    ensure_proxy_script "caddy_proxy.sh" || true
+    ensure_proxy_script "$script_name" || true
   fi
-
-  if [ -x "$caddy_proxy_bin" ] && [ -n "$ym_c" ] && [ -n "$token" ]; then
-    "$caddy_proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
-  fi
-
-  # 保底：若残留旧式注释块，再尝试清理
-  if subhttps_strip_merge_block; then
-    subhttps_merge_reload || true
+  if [ -x "$proxy_bin" ]; then
+    "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   fi
   return 0
 }
@@ -4683,8 +4727,8 @@ cert_migrate_paths(){
   fi
 }
 
-# cert_setup_caddy_proxy：使用 caddy_proxy.sh 初始化环境并配置主域名站点
-# 返回 0 表示通过 caddy_proxy.sh 成功配置；返回 1 表示脚本缺失或不可执行，需回落传统逻辑
+# cert_setup_caddy_proxy: Initialize Caddy environment and configure primary domain site via caddy_proxy.sh.
+# Returns 0 on success; returns 1 on script missing or execution failure (fail loudly, no legacy bypass).
 cert_setup_caddy_proxy(){
   local ym="$1"
   local certmode="$2"
@@ -4695,44 +4739,63 @@ cert_setup_caddy_proxy(){
 
   local caddy_proxy_bin="$HOME/.local/bin/caddy_proxy.sh"
   ensure_proxy_script "caddy_proxy.sh" || true
-  cleanup_legacy_argosbx_caddyfile 2>/dev/null || true
 
   if [ ! -x "$caddy_proxy_bin" ]; then
+    echo "错误：未找到可执行脚本 $caddy_proxy_bin，无法配置 Caddy（所有 Caddy 配置必须由 caddy_proxy.sh 托管）。" >&2
     return 1
-  fi
-
-  # 若以 root 运行，尝试确保系统 Caddy 核心覆盖安装/升级至包含 WAF、DNS 和 layer4 模块的最新版
-  if [ "$(id -u 2>/dev/null)" = "0" ] && command -v ensure_caddy_download >/dev/null 2>&1; then
-    if ! command -v caddy >/dev/null 2>&1 || ! caddy list-modules 2>/dev/null | grep -q "^layer4$" || ! caddy list-modules 2>/dev/null | grep -q "http.handlers.waf" || ! caddy list-modules 2>/dev/null | grep -q "cloudflare"; then
-      ensure_caddy_download || true
-    fi
   fi
 
   local force_flag=""
   force_flag=$(check_and_prompt_force_email "$caddy_proxy_bin" "$email")
-  "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag || true
-
-  # web_proxy 智能识别：以 / 开头视为已部署的本地静态服务目录，否则视为反代后端地址，留空则默认部署伪装博客
-  local custom_root=0
-  if [[ "$proxy_backend" == /* ]]; then
-    webroot_dir="$proxy_backend"
-    proxy_backend=""
-    custom_root=1
+  if ! "$caddy_proxy_bin" init ${email:+--email "$email"} $force_flag; then
+    echo "错误：caddy_proxy.sh init 执行失败。" >&2
+    return 1
   fi
 
-  if [ "$camouflage_flag" = "1" ] || { [ -z "$camouflage_flag" ] && [ -z "$proxy_backend" ] && [ "$custom_root" = "0" ] && [ ! -f "$webroot_dir/index.html" ]; }; then
-    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
-      deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+  # Determine site mode:
+  # 1. web_proxy starts with '/' -> user's local static root
+  # 2. web_proxy non-empty       -> user's reverse proxy backend
+  # 3. should_deploy_camouflage_blog -> deploy camouflage blog & serve webroot_dir
+  # 4. otherwise                 -> --no-default (404 fallback, no /var/www/html mapping)
+  local site_mode="no-default"
+  local site_target=""
+  if [[ "$proxy_backend" == /* ]]; then
+    site_mode="root"
+    site_target="$proxy_backend"
+  elif [ -n "$proxy_backend" ]; then
+    site_mode="proxy"
+    site_target="$proxy_backend"
+  elif command -v should_deploy_camouflage_blog >/dev/null 2>&1 && camouflage="$camouflage_flag" web_proxy="$proxy_backend" should_deploy_camouflage_blog; then
+    if [ "$camouflage_flag" = "1" ] || [ ! -f "$webroot_dir/index.html" ]; then
+      if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+        camouflage="$camouflage_flag" web_proxy="$proxy_backend" deploy_camouflage_blog "$webroot_dir" || echo "伪装博客部署失败，请手动检查 $webroot_dir"
+      fi
     fi
+    site_mode="root"
+    site_target="$webroot_dir"
+  else
+    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
+      # Emit clear skip reason without writing files
+      camouflage="$camouflage_flag" web_proxy="$proxy_backend" deploy_camouflage_blog "$webroot_dir" >/dev/null 2>&1 || true
+    fi
+    echo "站点默认路由：未触发伪装博客条件且未设置 web_proxy，${ym} 仅启用 --no-default（根路径返回 404，不映射 /var/www/html）"
+    site_mode="no-default"
   fi
 
   local dns_arg=""
   [ "$certmode" = "dns" ] && dns_arg="--dns cloudflare"
 
-  if [ -n "$proxy_backend" ]; then
-    "$caddy_proxy_bin" site --domain "$ym" --proxy "$proxy_backend" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+  local site_rc=0
+  if [ "$site_mode" = "proxy" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --proxy "$site_target" ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
+  elif [ "$site_mode" = "root" ]; then
+    "$caddy_proxy_bin" site --domain "$ym" --root "$site_target" ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
   else
-    "$caddy_proxy_bin" site --domain "$ym" --root "$webroot_dir" ${email:+--email "$email"} $force_flag $dns_arg --force || true
+    "$caddy_proxy_bin" site --domain "$ym" --no-default ${email:+--email "$email"} $force_flag $dns_arg --force || site_rc=$?
+  fi
+  if [ "$site_rc" != "0" ]; then
+    echo "错误：caddy_proxy.sh site 配置域名 ${ym} 失败。" >&2
+    return 1
   fi
 
   caddyfile_path="/etc/caddy/Caddyfile"
@@ -4805,99 +4868,6 @@ prompt_cf_token(){
   [ -n "$CLOUDFLARE_API_TOKEN" ] || [ -n "$CF_API_TOKEN" ]
 }
 
-# cleanup_legacy_argosbx_caddyfile: 迁移并清理旧版残留的 argosbx.caddyfile 及 import 语句
-cleanup_legacy_argosbx_caddyfile(){
-  local main_caddyfile="/etc/caddy/Caddyfile"
-  local legacy_file="/etc/caddy/argosbx.caddyfile"
-  if [ -f "$main_caddyfile" ] && grep -qE '^[ \t]*import[ \t]+.*argosbx\.caddyfile' "$main_caddyfile" 2>/dev/null; then
-    sed -i.bak_legacy '/^[ \t]*import[ \t]\+.*argosbx\.caddyfile/d' "$main_caddyfile" 2>/dev/null || true
-  fi
-  if [ -f "$legacy_file" ]; then
-    mv "$legacy_file" "${legacy_file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-  fi
-}
-
-write_caddyfile(){
-  local conf_file=""
-  caddyfile_path=""
-  cleanup_legacy_argosbx_caddyfile
-
-  if [ "$(id -u 2>/dev/null)" = "0" ]; then
-    mkdir -p /etc/caddy 2>/dev/null || true
-    if [ -w /etc/caddy ]; then
-      conf_file="/etc/caddy/Caddyfile"
-    fi
-  fi
-  if [ -z "$conf_file" ]; then
-    mkdir -p "$HOME/agsbx"
-    conf_file="$HOME/agsbx/Caddyfile"
-  fi
-
-  _webroot="${webroot:-/var/www/html}"
-  # 部署伪装博客（camouflage=1 时强制；默认仅当 webroot 无 index.html 时部署，避免覆盖已有站点）
-  if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ ! -f "$_webroot/index.html" ]; }; then
-    if command -v deploy_camouflage_blog >/dev/null 2>&1; then
-      deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
-    fi
-  fi
-
-  # 若文件已存在，先移除旧有的该域名块（幂等覆盖，兼容嵌套 handle {} 与带端口格式）
-  if [ -f "$conf_file" ]; then
-    awk -v target="$ym" '
-      function matches_domain(header, target,   n, items, i, item) {
-        sub(/[[:space:]]*\{.*$/, "", header)
-        gsub(/,/, " ", header)
-        n = split(header, items, /[[:space:]]+/)
-        for (i = 1; i <= n; i++) {
-          item = items[i]
-          sub(/^https?:\/\//, "", item)
-          sub(/:[0-9]+$/, "", item)
-          if (item == target) return 1
-        }
-        return 0
-      }
-      BEGIN { in_block = 0; count = 0 }
-      $0 ~ /\{[[:space:]]*(#.*)?$/ && count == 0 && matches_domain($0, target) {
-        in_block = 1; count = 1; next
-      }
-      in_block {
-        line = $0
-        count += gsub(/\{/, "{", line)
-        count -= gsub(/\}/, "}", line)
-        if (count <= 0) { in_block = 0 }
-        next
-      }
-      { print $0 }
-    ' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
-  fi
-
-  # ACME email: 若文件不存在或为空，且设置了 caddy_email，初始化全局块
-  if [ ! -s "$conf_file" ]; then
-    if [ -n "${caddy_email:-}" ]; then
-      printf "{\n  email %s\n}\n\n" "$caddy_email" > "$conf_file"
-    else
-      : > "$conf_file"
-    fi
-  elif [ -n "${caddy_email:-}" ] && ! grep -qE '^[[:space:]]*email[[:space:]]+' "$conf_file"; then
-    if grep -q "^{" "$conf_file"; then
-      awk -v em="  email ${caddy_email}" '!inj && /^{/{print $0; print em; inj=1; next}1' "$conf_file" > "${conf_file}.tmp" && mv -f "${conf_file}.tmp" "$conf_file"
-    else
-      printf "{\n  email %s\n}\n\n%s" "$caddy_email" "$(cat "$conf_file")" > "$conf_file"
-    fi
-  fi
-
-  # 写入站点块
-  if [ "$certmode_selected" = "dns" ]; then
-    printf "%s {\n  tls {\n    dns cloudflare {env.CLOUDFLARE_API_TOKEN}\n  }\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
-  else
-    printf "%s {\n  root * %s\n  file_server\n}\n" "$ym" "$_webroot" >> "$conf_file"
-  fi
-  chmod 644 "$conf_file" 2>/dev/null || true
-  caddyfile_path="$conf_file"
-  echo "$conf_file" > "$HOME/agsbx/caddyfile_path" 2>/dev/null || true
-  echo "Caddyfile 已生成：$conf_file（验证方式：$certmode_selected）"
-}
-
 # ensure_acme：acme.sh 不存在时自动安装（官方安装脚本，装到 $HOME/.acme.sh，写续期 cron）。不自动安装则返回 1，调用方继续等待、超时回落自签，不中断主脚本。
 ensure_acme(){
   [ -x "$HOME/.acme.sh/acme.sh" ] && return 0
@@ -4908,69 +4878,6 @@ ensure_acme(){
   rm -rf "$tmpdir"
   [ -x "$HOME/.acme.sh/acme.sh" ] || { echo "acme.sh 安装后仍未找到可执行文件"; return 1; }
   echo "acme.sh 已自动安装：$HOME/.acme.sh/acme.sh"
-  return 0
-}
-# ensure_caddy_download：Caddy 不存在或缺少模块时从通用二进制仓库的 GitHub Release 拉取预编译版（含 Coraza WAF + Cloudflare DNS + caddy-l4 插件），非交互、带备份与校验，失败返回 1 不中断主脚本。
-# 下载源默认 https://github.com/qytang2014/software/releases/download/<CADDY_VER>/（qytang2014/software 为通用二进制发布仓库，tag 带软件名前缀，如 caddy-v2.11.9），可用 CADDY_DOWNLOAD_URL 覆盖（指向存放 caddy-linux-amd64/arm64 的目录）；CADDY_VER 默认 caddy-v2.11.9，升级 Caddy 时传新 release 并改这个默认值即可。
-# 不再先装官方版再覆盖；只在需要时停掉已有服务，验过新二进制（可运行 + Cloudflare + Coraza + layer4 模块）才替换，验不过用备份恢复。
-ensure_caddy_download(){
-  [ "$(id -u 2>/dev/null)" = "0" ] || { echo "下载 Caddy 需要 root 权限（写 /usr/bin 与 /etc/caddy）"; return 1; }
-  local caddy_ver="${CADDY_VER:-caddy-v2.11.9}"
-  local base_url="${CADDY_DOWNLOAD_URL:-https://github.com/qytang2014/software/releases/download/${caddy_ver}}"
-  local caddy_bin=""
-  case "$cpu" in amd64) caddy_bin="caddy-linux-amd64";; arm64) caddy_bin="caddy-linux-arm64";; *) echo "不支持的架构：$cpu"; return 1;; esac
-  [[ "$base_url" != */ ]] && base_url="${base_url}/"
-  local final_url="${base_url}${caddy_bin}"
-  local tmpdir=""
-  tmpdir=$(mktemp -d 2>/dev/null) || return 1
-  echo "正在拉取预编译 Caddy：$final_url"
-  if ! curl -fL --retry 3 --connect-timeout 15 -o "$tmpdir/caddy" "$final_url" 2>/dev/null; then rm -rf "$tmpdir"; echo "Caddy 下载失败，请检查 URL 或网络"; return 1; fi
-  chmod +x "$tmpdir/caddy"
-  if ! "$tmpdir/caddy" version >/dev/null 2>&1; then rm -rf "$tmpdir"; echo "下载的 Caddy 无法运行（架构或文件损坏）"; return 1; fi
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "cloudflare"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Cloudflare 模块，拒绝替换"; return 1; fi
-  # coraza-caddy v2 注册的模块名为 http.handlers.waf（模块 ID 里不带 coraza 字样）
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "http.handlers.waf"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 Coraza WAF 模块，拒绝替换"; return 1; fi
-  if ! "$tmpdir/caddy" list-modules 2>/dev/null | grep -q "^layer4$"; then rm -rf "$tmpdir"; echo "下载的 Caddy 缺少 layer4 四层分流模块，拒绝替换"; return 1; fi
-  if command -v systemctl >/dev/null 2>&1; then systemctl stop caddy 2>/dev/null || true; fi
-  if [ -f /usr/bin/caddy ]; then cp /usr/bin/caddy /usr/bin/caddy.bak 2>/dev/null || true; fi
-  if ! mv -f "$tmpdir/caddy" /usr/bin/caddy; then rm -rf "$tmpdir"; echo "替换 /usr/bin/caddy 失败"; return 1; fi
-  chmod 755 /usr/bin/caddy 2>/dev/null || true
-  setcap cap_net_bind_service=+ep /usr/bin/caddy 2>/dev/null || true
-  if ! /usr/bin/caddy version >/dev/null 2>&1; then [ -f /usr/bin/caddy.bak ] && mv -f /usr/bin/caddy.bak /usr/bin/caddy; rm -rf "$tmpdir"; echo "新 Caddy 校验失败，已恢复备份"; return 1; fi
-  rm -rf "$tmpdir"
-  # 确保有 systemd service（下载版没有 apt 自带的 service 文件）
-  if command -v systemctl >/dev/null 2>&1; then
-    if ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
-      echo "创建 Caddy systemd 服务..."
-      cat > /etc/systemd/system/caddy.service << EOF
-[Unit]
-Description=Caddy
-Documentation=https://caddyserver.com/docs/
-After=network.target network-online.target
-Requires=network-online.target
-
-[Service]
-Type=notify
-User=root
-EnvironmentFile=-$HOME/agsbx/cf_token.env
-Group=root
-ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
-ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
-TimeoutStopSec=5s
-LimitNOFILE=1048576
-PrivateTmp=true
-ProtectSystem=full
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
-
-[Install]
-WantedBy=multi-user.target
-EOF
-      systemctl daemon-reload 2>/dev/null || true
-      systemctl enable caddy 2>/dev/null || true
-    fi
-    systemctl start caddy 2>/dev/null || echo "Caddy 服务启动失败，请手动检查 systemctl status caddy"
-  fi
-  echo "预编译 Caddy 下载并替换成功"
   return 0
 }
 # 域名证书：固定目录 $HOME/agsbx/cert（Caddy 时由 caddy_fetch_cert 从 Caddy 证书存储同步，acme 时直接安装到该目录）。
@@ -8465,6 +8372,43 @@ vl_link="vless://$uuid@$reality_addr:$port_vl_re?encryption=none&flow=xtls-rprx-
 echo "$vl_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$vl_link"
 echo
+# sbvlpt-restore.sh: restore upstream-deleted sbvlpt()/sbvlpt1()
+# (upstream d4f4b91 deleted the sing-box subscription entry for vlpt;
+# QUINN decided 2026-11-19 to keep it). Inserted by build.py before
+# clvlpt() inside the vlpt display guard (works for both Xray and
+# Sing-box vlpt, independent of ss-2022). pbk/sid are kernel-aware
+# ($vlpt_pbk/$vlpt_sid, set by vlpt-display-pbk); server is $server_ip
+# here so the reality-sb-config patch (which rewrites it to
+# $reality_addr) still finds exactly one occurrence. encryption stays
+# none: sing-box has no VLESS Encryption.
+sbvlpt(){
+cat <<EOF
+    {
+      "type": "vless",
+      "tag": "${sxname}vless-$hostname",
+      "server": "$reality_addr",
+      "server_port": $port_vl_re,
+      "uuid": "$uuid",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "$ym_vl_re",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+      "reality": {
+          "enabled": true,
+          "public_key": "$vlpt_pbk",
+          "short_id": "$vlpt_sid"
+        }
+      }
+    },
+EOF
+}
+sbvlpt1(){
+echo "\"${sxname}vless-$hostname\","
+}
 clvlpt(){
 cat <<EOF
 - name: ${sxname}vless-reality-vision-$hostname               
@@ -9172,41 +9116,6 @@ ss_link="ss://$(echo -n "2022-blake3-aes-128-gcm:$sskey@$domain_addr:$port_ss" |
 echo "$ss_link" >> "$HOME/agsbx/jhsub.txt"
 echo "$ss_link"
 echo
-# sbvlpt-restore.sh: restore upstream-deleted sbvlpt()/sbvlpt1()
-# (upstream d4f4b91 deleted the sing-box subscription entry for vlpt;
-# QUINN decided 2026-11-19 to keep it). Inserted by build.py before
-# sbsspt(). pbk/sid are kernel-aware ($vlpt_pbk/$vlpt_sid, set by
-# vlpt-display-pbk); server is $server_ip here so the reality-sb-config
-# patch (which rewrites it to $reality_addr) still finds exactly one
-# occurrence. encryption stays none: sing-box has no VLESS Encryption.
-sbvlpt(){
-cat <<EOF
-    {
-      "type": "vless",
-      "tag": "${sxname}vless-$hostname",
-      "server": "$reality_addr",
-      "server_port": $port_vl_re,
-      "uuid": "$uuid",
-      "flow": "xtls-rprx-vision",
-      "tls": {
-        "enabled": true,
-        "server_name": "$ym_vl_re",
-        "utls": {
-          "enabled": true,
-          "fingerprint": "chrome"
-        },
-      "reality": {
-          "enabled": true,
-          "public_key": "$vlpt_pbk",
-          "short_id": "$vlpt_sid"
-        }
-      }
-    },
-EOF
-}
-sbvlpt1(){
-echo "\"${sxname}vless-$hostname\","
-}
 sbsspt(){
 cat <<EOF
 {
@@ -10417,30 +10326,11 @@ if [ -n "$ym" ]; then
       fi
     fi
     echo "$certmode_selected" > "$HOME/agsbx/certmode"
-    echo "域名证书来源：Caddy（验证方式：$certmode_selected，Caddy 监听 80/443；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
+    echo "域名证书来源：Caddy（验证方式：$certmode_selected，由 caddy_proxy.sh 托管；DNS 时需 Cloudflare API），固定目录 $CERT_DIR"
     _webroot="${webroot:-/var/www/html}"
-    if cert_setup_caddy_proxy "$ym" "$certmode_selected" "$caddy_email" "$_webroot" "$camouflage" "$web_proxy"; then
-      :
-    else
-      write_caddyfile
-      ensure_caddy_download || echo "Caddy 预编译下载失败，脚本仍会继续等待证书，超时回落自签"
-      if command -v caddy >/dev/null 2>&1; then
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
-          systemctl reload caddy >/dev/null 2>&1 || caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-            echo "Caddy 未在运行，尝试启动..."
-            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动启动，脚本仍会继续等待证书"
-          }
-        elif command -v systemctl >/dev/null 2>&1; then
-          systemctl restart caddy >/dev/null 2>&1 || systemctl start caddy >/dev/null 2>&1 || caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || true
-        else
-          caddy reload --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || {
-            echo "Caddy 未在运行，尝试启动..."
-            caddy start --config "$caddyfile_path" --adapter caddyfile >/dev/null 2>&1 || echo "Caddy 启动失败，请手动用 $caddyfile_path 启动，脚本仍会继续等待证书"
-          }
-        fi
-      else
-        echo "未检测到 caddy 命令，脚本仍会继续等待证书，超时回落自签"
-      fi
+    if ! cert_setup_caddy_proxy "$ym" "$certmode_selected" "$caddy_email" "$_webroot" "$camouflage" "$web_proxy"; then
+      echo "错误：Caddy 配置失败（请确保 caddy_proxy.sh 可正常获取与执行），安装停止。" >&2
+      exit 1
     fi
   fi
   if wait_domain_cert; then

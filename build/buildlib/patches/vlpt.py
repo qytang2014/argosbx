@@ -180,12 +180,14 @@ fi
             "listen":"${arpt_listen_addr:-::}",
             "listen_port":${arpt_listen_port:-$port_ar},''', "arpt-inbound-listen-443", 1)
     # sbvlpt() restored (upstream d4f4b91 deleted it; QUINN decided
-    # 2026-11-19 to keep it): insert before sbsspt(). pbk/sid are
-    # already kernel-aware in the module; server stays $server_ip so
-    # the reality-sb-config patch below still finds one occurrence.
+    # 2026-11-19 to keep it): insert before clvlpt() so it shares the
+    # exact vlpt existence guard (both Xray reality-vision and Sing-box
+    # vl-reality-sb) instead of the ss-2022 guard. pbk/sid are already
+    # kernel-aware in the module; server stays $server_ip so the
+    # reality-sb-config patch below still finds one occurrence.
     sbvlpt_restore = read("modules/sbvlpt-restore.sh")
-    t = replace(t, 'sbsspt(){',
-                sbvlpt_restore + 'sbsspt(){', "sbvlpt-restore", 1)
+    t = replace(t, 'clvlpt(){',
+                sbvlpt_restore + 'clvlpt(){', "sbvlpt-restore", 1)
     t = replace(t, '    public-key: $public_key_x    \n    short-id: $short_id_x',
                 '    public-key: $vlpt_pbk    \n    short-id: $vlpt_sid', "vlpt-clash-pbk", 1)
 

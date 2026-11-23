@@ -350,4 +350,16 @@ fi
 [ -z "$out" ] || fail "standalone all-fail stdout must be empty, got [$out]"
 echo "ok: standalone failure -> exit 1, empty stdout"
 
+# ---------- 5. X25519 hard requirement check ----------
+# Verify probe invokes curl with --curves X25519 (rejecting P-521/HRR-only targets like uvh.nl)
+CURL_LOG_X25519="$TMP/curl_x25519.log"
+: > "$CURL_LOG_X25519"
+mk_h2 www.example.ac.uk
+FAKE_CURL_LOG="$CURL_LOG_X25519" FAKE_GEO_FILE="$TMP/geo-gb-eng.json" FAKE_UNIV_FILE="$TMP/univ.json" \
+  FAKE_GFW_FILE="$TMP/gfw-empty.txt" FAKE_H2_FILE="$FAKE_H2_FILE" \
+  FAKE_LATENCY_FILE="$FAKE_LATENCY_FILE" \
+  PATH="$TMP/stubbin:$PATH" bash "$STANDALONE" >/dev/null 2>&1
+grep -q -- "--curves X25519" "$CURL_LOG_X25519" || fail "probe did not enforce --curves X25519 in curl call"
+echo "ok: X25519 curve enforced (--curves X25519)"
+
 echo "PASS: auto-sni"

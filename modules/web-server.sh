@@ -1,36 +1,17 @@
-# web-server.sh: ensure a web server listens on 443 when ym (own domain) is set.
-# Background: ym enables Reality camouflage with fallback to 127.0.0.1:443.
-# If neither Caddy nor nginx listens on 443, the camouflage is broken.
-# This module auto-installs nginx (lightweight, suitable for low-memory
-# machines where the user chose acme.sh to avoid Caddy) AND configures
-# the vhost to serve the camouflage blog.
+# web-server.sh: ensure a managed Web server (Nginx via nginx_proxy.sh) is configured when ym is set
+# under the acme/low-memory path. Caddy path is handled by cert_setup_caddy_proxy() in cert-main.sh.
+# All Nginx installation and vhost configuration are strictly delegated to nginx_proxy.sh.
 
-# ensure_web_server: called when ym is non-empty and camouflage is active.
-# Web server choice follows detect_certsrc(): caddy path -> ensure Caddy,
-# acme path (low memory) -> install nginx.
-# Returns 0 if 443 has a listener (or was successfully set up), 1 otherwise.
 ensure_web_server(){
   local ym_c="$1" src=""
   [ -n "$ym_c" ] || return 0
-  local target_p="${web_port:-443}"
-  # 目标端口已有监听？（Caddy、nginx 或其他）直接返回
-  if command -v ss >/dev/null 2>&1; then
-    if ss -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
-      return 0
-    fi
-  elif command -v netstat >/dev/null 2>&1; then
-    if netstat -tlnp 2>/dev/null | grep -qE ":${target_p}\s"; then
-      return 0
-    fi
-  fi
-  # 按内存决策装哪个（跟 certsrc 的 auto 逻辑一致：低内存->acme->nginx，否则->caddy）
-  # 注意：不用 detect_certsrc，因为它在 Caddy 未安装时会被误判为 acme
+
+  # Select engine consistent with detect_certsrc() (low memory < 256MB -> acme/nginx, otherwise caddy)
   local mem_kb=""
   mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)
-  # 显式指定 certsrc 时优先
   if [ "${certsrc:-}" = "caddy" ]; then
     src="caddy"
-  elif [ "${certsrc:-}" = "acme" ]; then
+  elif [ "${certsrc:-}" = "acme" ] || [ "${certsrc:-}" = "nginx" ]; then
     src="acme"
   elif [ -n "$mem_kb" ] && [ "$mem_kb" -lt 262144 ]; then
     src="acme"
@@ -38,84 +19,72 @@ ensure_web_server(){
     src="caddy"
   fi
   if [ "$src" = "caddy" ]; then
-    # Caddy 路径：证书阶段会调用 ensure_caddy_download 并写 Caddyfile，
-    # 这里只需确认走 Caddy 路径，不提前下载（避免函数定义顺序问题）
+    # Caddy path is configured via cert_setup_caddy_proxy() in cert-main.sh
     return 0
   fi
-  # acme 路径（低内存）：优先调用 nginx_proxy.sh 进行环境初始化与站点/反代发布
+
+  # Nginx path: strictly delegate to nginx_proxy.sh (no direct apt/yum/apk or manual vhost bypass)
   local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
   ensure_proxy_script "nginx_proxy.sh" || true
-  if [ -x "$nginx_proxy_bin" ]; then
-    local force_flag=""
-    force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
-    "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag || true
+  if [ ! -x "$nginx_proxy_bin" ]; then
+    echo "错误：未找到可执行脚本 $nginx_proxy_bin，无法配置 Nginx（所有 Nginx 配置必须由 nginx_proxy.sh 托管）。" >&2
+    return 1
+  fi
 
-    _webroot="${webroot:-/var/www/html}"
-    local proxy_target="${web_proxy:-}"
-    local custom_root=0
-    if [[ "$proxy_target" == /* ]]; then
-      _webroot="$proxy_target"
-      proxy_target=""
-      custom_root=1
-    fi
+  local force_flag=""
+  force_flag=$(check_and_prompt_force_email "$nginx_proxy_bin" "$caddy_email")
+  if ! "$nginx_proxy_bin" init ${caddy_email:+--email "$caddy_email"} $force_flag; then
+    echo "错误：nginx_proxy.sh init 执行失败。" >&2
+    return 1
+  fi
 
-    if [ "$camouflage" = "1" ] || { [ -z "$camouflage" ] && [ -z "$proxy_target" ] && [ "$custom_root" = "0" ] && [ ! -f "$_webroot/index.html" ]; }; then
+  local _webroot="${webroot:-/var/www/html}"
+  local proxy_target="${web_proxy:-}"
+  local site_mode="no-default"
+  local site_target=""
+  if [[ "$proxy_target" == /* ]]; then
+    site_mode="root"
+    site_target="$proxy_target"
+  elif [ -n "$proxy_target" ]; then
+    site_mode="proxy"
+    site_target="$proxy_target"
+  elif command -v should_deploy_camouflage_blog >/dev/null 2>&1 && should_deploy_camouflage_blog; then
+    if [ "${camouflage:-}" = "1" ] || [ ! -f "$_webroot/index.html" ]; then
       if command -v deploy_camouflage_blog >/dev/null 2>&1; then
         deploy_camouflage_blog "$_webroot" || echo "伪装博客部署失败，请手动检查 $_webroot"
       fi
     fi
-
-    if [ -n "$proxy_target" ]; then
-      "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$proxy_target" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
-    else
-      "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" ${caddy_email:+--email "$caddy_email"} $force_flag --force || true
-    fi
-
-    if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
-      mkdir -p "$CERT_DIR" 2>/dev/null || true
-      cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
-      cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
-      chmod 600 "$CERT_KEY" 2>/dev/null || true
-    fi
-    return 0
-  fi
-
-  # nginx 已安装？写 vhost 并返回
-  if command -v nginx >/dev/null 2>&1; then
-    _webserver_write_nginx_conf "$ym_c" || true
-    return 0
-  fi
-  # 都没有，尝试自动安装 nginx（轻量）
-  echo "检测到 443 无 Web 服务监听（伪装博客需要），尝试自动安装 nginx..."
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq && apt-get install -y -qq nginx >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y -q nginx >/dev/null 2>&1
-  elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache nginx >/dev/null 2>&1
+    site_mode="root"
+    site_target="$_webroot"
   else
-    echo "未找到包管理器，无法自动安装 nginx。请手动安装 nginx 或 Caddy，否则 443 伪装不生效。"
+    echo "站点默认路由：未触发伪装博客条件且未设置 web_proxy，${ym_c} 仅启用 --no-default（根路径返回 404，不映射 /var/www/html）"
+    site_mode="no-default"
+  fi
+
+  local dns_arg=""
+  local cm=""
+  cm="${certmode_selected:-${certmode:-}}"
+  [ -z "$cm" ] && [ -f "$HOME/agsbx/certmode" ] && cm=$(cat "$HOME/agsbx/certmode" 2>/dev/null | tr -d '[:space:]')
+  [ "$cm" = "dns" ] && dns_arg="--dns cloudflare"
+
+  local site_rc=0
+  if [ "$site_mode" = "proxy" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --proxy "$site_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  elif [ "$site_mode" = "root" ]; then
+    "$nginx_proxy_bin" site --domain "$ym_c" --root "$site_target" ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  else
+    "$nginx_proxy_bin" site --domain "$ym_c" --no-default ${caddy_email:+--email "$caddy_email"} $force_flag $dns_arg --force || site_rc=$?
+  fi
+  if [ "$site_rc" != "0" ]; then
+    echo "错误：nginx_proxy.sh site 配置域名 ${ym_c} 失败。" >&2
     return 1
   fi
-  if command -v nginx >/dev/null 2>&1; then
-    echo "nginx 安装成功，正在配置 vhost..."
-    _webserver_write_nginx_conf "$ym_c" || true
-    return 0
-  else
-    echo "nginx 自动安装失败。请手动安装 nginx 或 Caddy，否则 443 伪装不生效。"
-    return 1
-  fi
-}
 
-# _webserver_write_nginx_conf <ym>: 委托 nginx_proxy.sh 配置 vhost
-_webserver_write_nginx_conf(){
-  local ym_c="$1" _webroot="${webroot:-/var/www/html}"
-  local nginx_proxy_bin="$HOME/.local/bin/nginx_proxy.sh"
-  ensure_proxy_script "nginx_proxy.sh" || true
-  if [ -x "$nginx_proxy_bin" ]; then
-    "$nginx_proxy_bin" site --domain "$ym_c" --root "$_webroot" --force || true
-    return 0
+  if [ -f "/etc/nginx/certs/${ym_c}/fullchain.crt" ] && [ -f "/etc/nginx/certs/${ym_c}/private.key" ]; then
+    mkdir -p "$CERT_DIR" 2>/dev/null || true
+    cp -f "/etc/nginx/certs/${ym_c}/fullchain.crt" "$CERT_CRT" 2>/dev/null || true
+    cp -f "/etc/nginx/certs/${ym_c}/private.key" "$CERT_KEY" 2>/dev/null || true
+    chmod 600 "$CERT_KEY" 2>/dev/null || true
   fi
-  echo "未找到 nginx_proxy.sh，跳过自动配置"
-  return 1
+  return 0
 }

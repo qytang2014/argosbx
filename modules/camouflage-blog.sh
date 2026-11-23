@@ -53,16 +53,59 @@ _camouflage_write() {
   printf '%s' "$_c" > "$1"
 }
 
+# Check if any Reality protocol is enabled in current install/rep run.
+has_reality_protocol() {
+  [ "${vlp:-}" = "yes" ] || [ "${xhp:-}" = "yes" ] || [ "${vxp:-}" = "yes" ] || \
+  [ "${vwp:-}" = "yes" ] || [ "${xup:-}" = "yes" ] || [ "${xcp:-}" = "yes" ] || \
+  [ "${arp:-}" = "yes" ] || \
+  [ -n "${vlpt:-}" ] || [ -n "${xhpt:-}" ] || [ -n "${vxpt:-}" ] || \
+  [ -n "${vwpt:-}" ] || [ -n "${xupt:-}" ] || [ -n "${xcpt:-}" ] || [ -n "${arpt:-}" ]
+}
+
+# Single source of truth for whether the local camouflage blog should be deployed.
+# Only deploy when:
+#   - camouflage=1 (explicitly forced), OR
+#   - camouflage is not 0, web_proxy is empty, at least one Reality protocol is enabled,
+#     and ym/reym are both non-empty and equal (own-domain Reality fallback).
+# Note: when reym is empty, auto_sni_resolve selects an external third-party domain (!= ym),
+# so a local camouflage blog is not needed.
+should_deploy_camouflage_blog() {
+  if [ "${camouflage:-}" = "1" ]; then
+    return 0
+  fi
+  if [ "${camouflage:-}" = "0" ]; then
+    return 1
+  fi
+  if [ -n "${web_proxy:-}" ]; then
+    return 1
+  fi
+  if [ -n "${ym:-}" ] && [ -n "${reym:-}" ] && [ "${reym}" = "${ym}" ] && has_reality_protocol; then
+    return 0
+  fi
+  return 1
+}
+
 # deploy_camouflage_blog <webroot>: 部署伪装博客到 webroot
 # 模板内容由 build.py 从 modules/camouflage/ 嵌入（见 CAMOUFLAGE_TEMPLATES 标记）
 deploy_camouflage_blog() {
   local webroot="$1"
   [ -n "$webroot" ] || { echo "deploy_camouflage_blog: 需要 webroot 参数"; return 1; }
-  # ym 与 reym 不同时，Reality 回落指向伪装域名本身，本地博客无用，默认不部署；
-  # camouflage=1（生成器「强制部署」）可强制部署。
-  if [ -n "${ym:-}" ] && [ -n "${reym:-}" ] && [ "${reym}" != "${ym}" ] && [ "${camouflage:-}" != "1" ]; then
-    echo "伪装博客跳过：ym(${ym}) 与伪装域名 reym(${reym}) 不同，默认不部署（camouflage=1 可强制部署）"
-    return 0
+  # 域名部署上下文下严格执行门控：仅在 Reality + reym==ym（或 camouflage=1 强制）时部署
+  if [ -n "${ym:-}" ] || [ "${camouflage:-}" = "0" ]; then
+    if ! should_deploy_camouflage_blog; then
+      if [ "${camouflage:-}" = "0" ]; then
+        echo "伪装博客跳过：已显式关闭 camouflage=0"
+      elif [ -n "${web_proxy:-}" ]; then
+        echo "伪装博客跳过：已配置自有服务 web_proxy(${web_proxy})"
+      elif ! has_reality_protocol; then
+        echo "伪装博客跳过：未启用 Reality 协议，默认不部署（camouflage=1 可强制部署）"
+      elif [ -z "${reym:-}" ]; then
+        echo "伪装博客跳过：reym 未指定（将自动探测第三方伪装域名），默认不部署（camouflage=1 可强制部署）"
+      else
+        echo "伪装博客跳过：ym(${ym}) 与伪装域名 reym(${reym}) 不同，默认不部署（camouflage=1 可强制部署）"
+      fi
+      return 0
+    fi
   fi
   camouflage_pick_persona
   mkdir -p "$webroot/posts"

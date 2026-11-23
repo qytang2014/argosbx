@@ -37,8 +37,8 @@ web_port_is_available_or_self(){
   # 3. 若输出未包含进程信息（如普通用户权限），但该端口确实与已有记录一致，且 caddy/nginx 服务正在运行
   local known_wp=""
   [ -f "$HOME/agsbx/web_port" ] && known_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
-  [ -z "$known_wp" ] && [ -f "${CADDY_PORT_FILE:-/etc/caddy/web_port}" ] && known_wp=$(cat "${CADDY_PORT_FILE:-/etc/caddy/web_port}" 2>/dev/null | tr -d '[:space:]')
-  [ -z "$known_wp" ] && [ -f "${NGINX_PORT_FILE:-/etc/nginx/web_port}" ] && known_wp=$(cat "${NGINX_PORT_FILE:-/etc/nginx/web_port}" 2>/dev/null | tr -d '[:space:]')
+  [ -z "$known_wp" ] && known_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
+  [ -z "$known_wp" ] && known_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
   if [ -n "$known_wp" ] && [ "$known_wp" = "$port" ]; then
     if (command -v systemctl >/dev/null 2>&1 && (systemctl is-active --quiet caddy 2>/dev/null || systemctl is-active --quiet nginx 2>/dev/null)) || \
        pgrep -x caddy >/dev/null 2>&1 || pgrep -x nginx >/dev/null 2>&1; then
@@ -47,6 +47,34 @@ web_port_is_available_or_self(){
   fi
 
   return 1 # 被其他外部进程占用
+}
+
+# Query current non-443 HTTPS port from caddy_proxy.sh / nginx_proxy.sh via CLI.
+_proxy_get_port(){
+  local eng="$1" bin="" p=""
+  case "$eng" in
+    caddy) bin="$HOME/.local/bin/caddy_proxy.sh" ;;
+    nginx) bin="$HOME/.local/bin/nginx_proxy.sh" ;;
+    *) return 1 ;;
+  esac
+  [ -x "$bin" ] || return 1
+  p=$("$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
+  case "$p" in
+    443|''|*[!0-9]*) return 1 ;;
+    *) printf '%s' "$p"; return 0 ;;
+  esac
+}
+
+# Delegate safe config validation and service reload to caddy_proxy.sh / nginx_proxy.sh.
+_proxy_reload(){
+  local eng="$1" bin=""
+  case "$eng" in
+    caddy) bin="$HOME/.local/bin/caddy_proxy.sh" ;;
+    nginx) bin="$HOME/.local/bin/nginx_proxy.sh" ;;
+    *) return 0 ;;
+  esac
+  [ -x "$bin" ] || return 0
+  "$bin" reload >/dev/null 2>&1 || true
 }
 
 web_port_find_available(){
@@ -123,23 +151,35 @@ reality_port_find_available(){
   shuf -i 10000-65535 -n 1
 }
 
+# Check whether any protocol selection flag is active in the current run context.
+_has_any_proto_flag(){
+  [ -n "${vlp:-}" ] || [ -n "${xhp:-}" ] || [ -n "${vxp:-}" ] || [ -n "${vwp:-}" ] || \
+  [ -n "${xup:-}" ] || [ -n "${xcp:-}" ] || [ -n "${arp:-}" ] || [ -n "${hyp:-}" ] || \
+  [ -n "${tup:-}" ] || [ -n "${anp:-}" ] || [ -n "${nvp:-}" ] || [ -n "${vmp:-}" ] || \
+  [ -n "${vmt:-}" ] || [ -n "${ssp:-}" ] || [ -n "${snp:-}" ] || [ -n "${sop:-}" ]
+}
+
 # _reality_proto_port PROTO: 取某一 Reality 协议的有效端口（实例 1）。
-# 与 vlpt 原逻辑一致：端口变量 > 用户变量 > ports.env 持久化；逗号列表只取首项
-# （其余协议没有 vlpt-comma.sh 那样的导出前拆分，port_xh 等在 check 时仍是原始逗号列表，
-# 所以这里统一用 ${p%%,*} 取首项；vlpt 已被提前拆分，对它是空操作）。
+# 仅在当前运行启用了该协议（或孤立无协议标志的测试/查询上下文）时才允许回退读取
+# ports.env，避免 rep 切换协议时被历史残留的 443 端口干扰。
 _reality_proto_port(){
-  local proto="$1" p="" key=""
+  local proto="$1" p="" key="" flag="" active=0
   case "$proto" in
-    vlpt) p="${port_vl_re:-${vlpt:-}}"; key="vl_re" ;;
-    xhpt) p="${port_xh:-${xhpt:-}}"; key="xh" ;;
-    vxpt) p="${port_vx:-${vxpt:-}}"; key="vx" ;;
-    vwpt) p="${port_vw:-${vwpt:-}}"; key="vw" ;;
-    xupt) p="${port_xu:-${xupt:-}}"; key="xu" ;;
-    xcpt) p="${port_xc:-${xcpt:-}}"; key="xc" ;;
-    arpt) p="${port_ar:-${arpt:-}}"; key="ar" ;;
+    vlpt) p="${port_vl_re:-${vlpt:-}}"; key="vl_re"; flag="${vlp:-}" ;;
+    xhpt) p="${port_xh:-${xhpt:-}}"; key="xh"; flag="${xhp:-}" ;;
+    vxpt) p="${port_vx:-${vxpt:-}}"; key="vx"; flag="${vxp:-}" ;;
+    vwpt) p="${port_vw:-${vwpt:-}}"; key="vw"; flag="${vwp:-}" ;;
+    xupt) p="${port_xu:-${xupt:-}}"; key="xu"; flag="${xup:-}" ;;
+    xcpt) p="${port_xc:-${xcpt:-}}"; key="xc"; flag="${xcp:-}" ;;
+    arpt) p="${port_ar:-${arpt:-}}"; key="ar"; flag="${arp:-}" ;;
     *) return 1 ;;
   esac
-  if [ -z "$p" ] && command -v port_get >/dev/null 2>&1; then
+  if [ "$flag" = "yes" ] || [ "$flag" = "$proto" ]; then
+    active=1
+  elif ! _has_any_proto_flag; then
+    active=1
+  fi
+  if [ -z "$p" ] && [ "$active" = "1" ] && command -v port_get >/dev/null 2>&1; then
     p=$(port_get "$key" 2>/dev/null || true)
   fi
   p="${p%%,*}"
@@ -298,7 +338,28 @@ vlpt_coexistence_sync_sni(){
   echo "$rp" > "$HOME/agsbx/reality_port" 2>/dev/null || true
   command -v port_set >/dev/null 2>&1 && port_set "reality_port" "$rp"
 
+  local sync_key="${engine}|${wp}|${sni_dom}|${rp}"
+  if [ "${_VLPT_SNI_SYNCED_KEY:-}" = "$sync_key" ]; then
+    # Verify on-disk router config is still intact before skipping redundant set-port
+    local intact=1
+    if [ "$engine" = "caddy" ]; then
+      local cf="${CADDYFILE:-/etc/caddy/Caddyfile}"
+      if [ -f "$cf" ] && ! grep -qE '^[[:space:]]*layer4[[:space:]]*\{' "$cf" 2>/dev/null; then
+        intact=0
+      fi
+    elif [ "$engine" = "nginx" ]; then
+      local sc="${NGINX_DIR:-/etc/nginx}/stream.d/reality_sni.conf"
+      if [ -d "${NGINX_DIR:-/etc/nginx}" ] && [ ! -f "$sc" ]; then
+        intact=0
+      fi
+    fi
+    if [ "$intact" = "1" ]; then
+      return 0
+    fi
+  fi
+
   web_server_migrate_to_port "$wp" "$sni_dom" "$rp" "$engine" || return 1
+  export _VLPT_SNI_SYNCED_KEY="$sync_key"
   return 0
 }
 
@@ -310,7 +371,7 @@ vlpt_coexistence_check(){
   fi
   [ -n "$proto" ] || return 0
 
-  # 检测是否已存在先前配置的有效 web_port
+  # 检测是否已存在先前配置的有效 web_port（仅通过端口记录或 proxy 脚本 CLI 查询）
   local existing_wp=""
   if command -v port_get >/dev/null 2>&1; then
     existing_wp=$(port_get "web_port" 2>/dev/null || true)
@@ -318,13 +379,8 @@ vlpt_coexistence_check(){
   if [ -z "$existing_wp" ] && [ -f "$HOME/agsbx/web_port" ]; then
     existing_wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
   fi
-  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
-  if [ -z "$existing_wp" ] && [ -f "$cport_file" ]; then
-    existing_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
-  fi
-  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
-  if [ -z "$existing_wp" ] && [ -f "$nport_file" ]; then
-    existing_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+  if [ -z "$existing_wp" ]; then
+    existing_wp=$(_proxy_get_port "caddy" 2>/dev/null || _proxy_get_port "nginx" 2>/dev/null || true)
   fi
   case "$existing_wp" in
     443|''|*[!0-9]*) existing_wp="" ;;
@@ -382,10 +438,8 @@ vlpt_coexistence_cleanup(){
   local wp=""
   [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
   local caddy_wp="" nginx_wp=""
-  local cport_file="${CADDY_PORT_FILE:-/etc/caddy/web_port}"
-  local nport_file="${NGINX_PORT_FILE:-/etc/nginx/web_port}"
-  [ -f "$cport_file" ] && caddy_wp=$(cat "$cport_file" 2>/dev/null | tr -d '[:space:]')
-  [ -f "$nport_file" ] && nginx_wp=$(cat "$nport_file" 2>/dev/null | tr -d '[:space:]')
+  caddy_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
+  nginx_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
 
   if [ -n "$wp" ] || [ -n "$caddy_wp" ] || [ -n "$nginx_wp" ]; then
     echo "检测到 Web 服务曾配置高位端口共存，正在恢复 Caddy / Nginx 默认 443 端口与初始配置..."
@@ -399,7 +453,7 @@ vlpt_coexistence_cleanup(){
     kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
     web_server_migrate_to_port 443 || echo "错误：卸载回滚失败，Web 服务未恢复到 443 端口；请手动执行 caddy_proxy.sh / nginx_proxy.sh set-port 443 恢复。" >&2
   fi
-  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" "$cport_file" "$nport_file" 2>/dev/null || true
+  rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" 2>/dev/null || true
   return 0
 }
 
@@ -421,19 +475,7 @@ vlpt_coexistence_post_start(){
   [ -f "$HOME/agsbx/reality_port" ] || return 0
   local engine
   engine=$(_detect_coexistence_web_engine)
-  if [ "$engine" = "caddy" ] && command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet caddy 2>/dev/null; then
-      systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
-    else
-      systemctl start caddy >/dev/null 2>&1 || true
-    fi
-  elif [ "$engine" = "nginx" ] && command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
-    else
-      systemctl start nginx >/dev/null 2>&1 || true
-    fi
-  fi
+  [ -n "$engine" ] && _proxy_reload "$engine"
 }
 
 if command -v register_hook >/dev/null 2>&1; then

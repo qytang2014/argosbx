@@ -1,7 +1,5 @@
 #!/bin/bash
-# Test: cert functions in isolation, without touching /etc/caddy.
-# write_caddyfile is tested with /etc/caddy replaced by a temp dir
-# in a copy of the function, so the test never writes to the real system.
+# Test: cert functions in isolation, verifying strict convergence to caddy_proxy.sh.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -10,14 +8,16 @@ mkdir -p "$TMP/certdir"
 python3 - "$ROOT/argosbx.sh" "$TMP/certdir" << 'PY'
 import re, sys
 t = open(sys.argv[1]).read()
-# cert module functions live in modules/cert.sh in source, but in the
-# built file they are inline; extract by function names.
-for name in ["detect_certsrc", "detect_certmode", "cleanup_legacy_argosbx_caddyfile", "cert_setup_caddy_proxy", "write_caddyfile", "ensure_caddy_download", "caddy_fetch_cert", "wait_domain_cert"]:
+for name in ["detect_certsrc", "detect_certmode", "cert_setup_caddy_proxy", "caddy_fetch_cert", "wait_domain_cert", "domain_cert_valid"]:
     m = re.search(rf"{name}\(\)\{{.*?\n\}}\n", t, re.S)
     assert m, f"{name} not found"
     open(f"{sys.argv[2]}/{name}.sh", "w").write(m.group(0))
+# Verify legacy direct-edit bypass functions are completely converged out of argosbx.sh
+for removed in ["write_caddyfile()", "ensure_caddy_download()", "cleanup_legacy_argosbx_caddyfile()"]:
+    assert removed not in t, f"legacy bypass function {removed} should be removed from argosbx.sh"
 PY
-# detect_certsrc: explicit overrides win, auto without caddy -> acme
+
+# detect_certsrc: explicit overrides win, auto returns caddy or acme
 cat > "$TMP/run_certsrc.sh" << 'RUN'
 #!/bin/bash
 source "$1/detect_certsrc.sh"
@@ -27,6 +27,7 @@ certsrc=""; out="$(detect_certsrc)"; case "$out" in caddy|acme) ;; *) echo "FAIL
 echo "certsrc explicit/auto OK: auto=$out"
 RUN
 bash "$TMP/run_certsrc.sh" "$TMP/certdir"
+
 # detect_certmode: explicit, argo -> dns, otherwise http (no server_ip.log in test home)
 cat > "$TMP/run_certmode.sh" << 'RUN'
 #!/bin/bash
@@ -40,43 +41,22 @@ echo "certmode explicit/argo/default OK"
 RUN
 mkdir -p "$TMP/fakehome/agsbx"
 bash "$TMP/run_certmode.sh" "$TMP/fakehome" "$TMP/certdir"
-# write_caddyfile: directly writes to main Caddyfile, no argosbx.caddyfile, idempotently updates domain block
-sed -e 's|/etc/caddy|'"$TMP"'/testetc|g' -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/cleanup_legacy_argosbx_caddyfile.sh" > "$TMP/cleanup_test.sh"
-sed -e 's|/etc/caddy|'"$TMP"'/testetc|g' -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/write_caddyfile.sh" > "$TMP/write_test.sh"
-cat > "$TMP/run_write.sh" << 'RUN'
-#!/bin/bash
-export HOME="$1"
-mkdir -p "$1/agsbx" "$2/testetc"
-printf 'example.com {\n  reverse_proxy localhost:8080\n}\n' > "$2/testetc/Caddyfile"
-source "$3"
-source "$4"
-ym="test.example.com"; certmode_selected="http"; write_caddyfile
-[ ! -f "$2/testetc/argosbx.caddyfile" ] || { echo "FAIL: argosbx.caddyfile should not exist"; exit 1; }
-! grep -q "import argosbx.caddyfile" "$2/testetc/Caddyfile" || { echo "FAIL: import argosbx.caddyfile should not exist"; exit 1; }
-grep -q 'test.example.com' "$2/testetc/Caddyfile" || { echo "FAIL: domain missing in main Caddyfile"; exit 1; }
-grep -q 'example.com' "$2/testetc/Caddyfile" || { echo "FAIL: existing site missing in main Caddyfile"; exit 1; }
-ym="test.example.com"; certmode_selected="dns"; write_caddyfile
-[ "$(grep -c "test.example.com" "$2/testetc/Caddyfile")" = "1" ] || { echo "FAIL: domain block duplicated"; exit 1; }
-grep -q "dns cloudflare" "$2/testetc/Caddyfile" || { echo "FAIL: dns caddyfile missing cloudflare"; exit 1; }
-echo "write_caddyfile direct/idempotent/dns OK"
-RUN
-bash "$TMP/run_write.sh" "$TMP/fakehome" "$TMP" "$TMP/cleanup_test.sh" "$TMP/write_test.sh"
 
-# cert_setup_caddy_proxy: returns 1 when caddy_proxy.sh missing, returns 0 and executes site/init when present
+# cert_setup_caddy_proxy: strict delegation + --no-default / --root / --proxy routing
 cat > "$TMP/run_proxy_setup.sh" << 'RUN'
 #!/bin/bash
 export HOME="$1"
+ROOT="$3"
 mkdir -p "$1/.local/bin" "$1/agsbx"
-source "$2/certdir/cleanup_legacy_argosbx_caddyfile.sh"
-# Dummy helpers required by cert_setup_caddy_proxy
 ensure_proxy_script() { return 0; }
 check_and_prompt_force_email() { echo ""; }
+source "$ROOT/modules/camouflage-blog.sh"
 source "$2/certdir/cert_setup_caddy_proxy.sh"
 
-# Test 1: No proxy script -> returns 1
-cert_setup_caddy_proxy "test.example.com" "http" "" "/var/www/html" "0" "" && { echo "FAIL: missing proxy script should return 1"; exit 1; }
+# Test 1: No proxy script -> fails loudly (returns 1)
+cert_setup_caddy_proxy "test.example.com" "http" "" "$1/www" "" "" 2>/dev/null && { echo "FAIL: missing proxy script should return 1"; exit 1; }
 
-# Test 2: Proxy script exists -> executes and returns 0
+# Install mock caddy_proxy.sh
 cat > "$1/.local/bin/caddy_proxy.sh" << 'PROXY'
 #!/bin/bash
 echo "$@" >> "$HOME/proxy_calls.log"
@@ -84,91 +64,67 @@ exit 0
 PROXY
 chmod +x "$1/.local/bin/caddy_proxy.sh"
 
-cert_setup_caddy_proxy "test.example.com" "http" "admin@example.com" "/var/www/html" "0" "" || { echo "FAIL: existing proxy script should return 0"; exit 1; }
-grep -q "site --domain test.example.com --root /var/www/html" "$1/proxy_calls.log" || { echo "FAIL: site call missing"; exit 1; }
+# Test 2: ym != reym (or reym empty) -> --no-default, NO blog deployed
+: > "$1/proxy_calls.log"
+ym="test.example.com" reym="" vlp="yes" cert_setup_caddy_proxy "test.example.com" "http" "admin@example.com" "$1/www-skip" "" "" || { echo "FAIL: no-default mode should return 0"; exit 1; }
 grep -q "init --email admin@example.com" "$1/proxy_calls.log" || { echo "FAIL: init call missing"; exit 1; }
+grep -q "site --domain test.example.com --no-default --email admin@example.com --force" "$1/proxy_calls.log" || { echo "FAIL: expected --no-default site call, got: $(cat "$1/proxy_calls.log")"; exit 1; }
+[ ! -e "$1/www-skip/index.html" ] || { echo "FAIL: blog should not be deployed when reym is empty"; exit 1; }
 [ "$(cat "$1/agsbx/caddyfile_path")" = "/etc/caddy/Caddyfile" ] || { echo "FAIL: caddyfile_path not written"; exit 1; }
+
+# Test 3: Reality + reym == ym -> deploys blog and passes --root
+: > "$1/proxy_calls.log"
+deploy_camouflage_blog() { mkdir -p "$1"; echo "blog" > "$1/index.html"; }
+ym="test.example.com" reym="test.example.com" vlp="yes" cert_setup_caddy_proxy "test.example.com" "dns" "admin@example.com" "$1/www-same" "" "" || { echo "FAIL: same-domain mode should return 0"; exit 1; }
+grep -q "site --domain test.example.com --root $1/www-same --email admin@example.com --dns cloudflare --force" "$1/proxy_calls.log" || { echo "FAIL: expected --root + --dns cloudflare call, got: $(cat "$1/proxy_calls.log")"; exit 1; }
+[ -f "$1/www-same/index.html" ] || { echo "FAIL: blog should be deployed when Reality + reym == ym"; exit 1; }
+
+# Test 4: web_proxy host:port -> passes --proxy, no blog
+: > "$1/proxy_calls.log"
+ym="test.example.com" reym="test.example.com" vlp="yes" cert_setup_caddy_proxy "test.example.com" "http" "" "$1/www-proxy" "" "127.0.0.1:8080" || { echo "FAIL: web_proxy mode should return 0"; exit 1; }
+grep -q "site --domain test.example.com --proxy 127.0.0.1:8080 --force" "$1/proxy_calls.log" || { echo "FAIL: expected --proxy call, got: $(cat "$1/proxy_calls.log")"; exit 1; }
+[ ! -e "$1/www-proxy/index.html" ] || { echo "FAIL: blog should not be deployed when web_proxy is set"; exit 1; }
+
+# Test 5: web_proxy /custom/dir -> passes --root /custom/dir, no blog
+: > "$1/proxy_calls.log"
+ym="test.example.com" reym="test.example.com" vlp="yes" cert_setup_caddy_proxy "test.example.com" "http" "" "$1/www-static" "" "/srv/my-app" || { echo "FAIL: custom static root mode should return 0"; exit 1; }
+grep -q "site --domain test.example.com --root /srv/my-app --force" "$1/proxy_calls.log" || { echo "FAIL: expected --root /srv/my-app call, got: $(cat "$1/proxy_calls.log")"; exit 1; }
 
 echo "cert_setup_caddy_proxy OK"
 RUN
 mkdir -p "$TMP/proxyhome"
-bash "$TMP/run_proxy_setup.sh" "$TMP/proxyhome" "$TMP"
+bash "$TMP/run_proxy_setup.sh" "$TMP/proxyhome" "$TMP" "$ROOT"
 
 # Scope safety check: modules/cert-main.sh must not contain 'local' declarations outside functions
 ! grep -E '^[[:space:]]*local[[:space:]]+' "$ROOT/modules/cert-main.sh" || { echo "FAIL: cert-main.sh contains top-level local declaration"; exit 1; }
 echo "cert-main.sh scope safety OK"
+
 # acme.sh --issue must pin --server letsencrypt (default CA is ZeroSSL which needs EAB registration)
 [ "$(grep -c 'acme.sh" --issue --server letsencrypt' "$ROOT/argosbx.sh")" = "3" ] || { echo "FAIL: expected 3 --issue --server letsencrypt commands"; exit 1; }
-# webroot mode: detect_certmode returns webroot, acme uses -w
 grep -q 'if \[ "$certmode" = "webroot" \]; then echo "webroot"; return; fi' "$ROOT/argosbx.sh" || { echo "FAIL: webroot detect_certmode"; exit 1; }
 grep -q 'acme.sh" --issue --server letsencrypt -w "$_webroot" -d "$ym"' "$ROOT/argosbx.sh" || { echo "FAIL: webroot --issue"; exit 1; }
-# Caddy file_server (not respond "ok")
-grep -q 'file_server' "$ROOT/argosbx.sh" || { echo "FAIL: caddy file_server missing"; exit 1; }
 ! grep -q 'respond "ok"' "$ROOT/argosbx.sh" || { echo "FAIL: respond ok should be gone"; exit 1; }
 echo "acme.sh --server letsencrypt pinned OK"
+
 # domain_cert_valid: valid cert -> 0, expiring/wrong-domain/missing -> 1
-python3 - "$ROOT/argosbx.sh" "$TMP/certdir" << 'PY'
-import re, sys
-t = open(sys.argv[1]).read()
-m = re.search(r"domain_cert_valid\(\)\{.*?\n\}\n", t, re.S)
-assert m, "domain_cert_valid not found"
-open(f"{sys.argv[2]}/domain_cert_valid.sh", "w").write(m.group(0))
-PY
 cat > "$TMP/run_valid.sh" << 'RUN'
 #!/bin/bash
 source "$1/certdir/domain_cert_valid.sh"
 export CERT_DIR="$1/certs" CERT_CRT="$1/certs/cert.crt" CERT_KEY="$1/certs/private.key"
 mkdir -p "$1/certs"
 ym="test.example.com"
-# valid cert, 30 days, matching SAN -> 0
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 30 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
 domain_cert_valid || { echo "FAIL: valid cert should pass"; exit 1; }
-# expiring in 3 days -> 1
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 3 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
 domain_cert_valid && { echo "FAIL: expiring cert should fail"; exit 1; }
-# wrong domain -> 1
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" -days 30 -nodes -subj "/CN=other.example.com" -addext "subjectAltName=DNS:other.example.com" 2>/dev/null
 domain_cert_valid && { echo "FAIL: wrong domain should fail"; exit 1; }
-# missing files -> 1
 rm -f "$CERT_CRT" "$CERT_KEY"
 domain_cert_valid && { echo "FAIL: missing files should fail"; exit 1; }
 echo "domain_cert_valid OK"
 RUN
 bash "$TMP/run_valid.sh" "$TMP"
-# ensure_caddy_download: GitHub Release direct download (generic releases repo), no private-server auth
-grep -q 'https://github.com/qytang2014/software/releases/download/${caddy_ver}' "$ROOT/argosbx.sh" || { echo "FAIL: caddy download URL"; exit 1; }
-grep -q 'caddy_ver="${CADDY_VER:-caddy-v2.11.9}"' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_VER default"; exit 1; }
-grep -q '缺少 Coraza WAF 模块，拒绝替换' "$ROOT/argosbx.sh" || { echo "FAIL: coraza waf hard check should be back"; exit 1; }
-grep -q 'http.handlers.waf' "$ROOT/argosbx.sh" || { echo "FAIL: waf module id check missing"; exit 1; }
-grep -q '缺少 layer4 四层分流模块，拒绝替换' "$ROOT/argosbx.sh" || { echo "FAIL: layer4 module check missing"; exit 1; }
-! grep -q 'files.quinn.de5.net' "$ROOT/argosbx.sh" || { echo "FAIL: old caddy server should be gone"; exit 1; }
-! grep -q 'CADDY_DOWNLOAD_PASS' "$ROOT/argosbx.sh" || { echo "FAIL: CADDY_DOWNLOAD_PASS should be gone"; exit 1; }
-! grep -q 'netrc-file' "$ROOT/argosbx.sh" || { echo "FAIL: netrc should be gone"; exit 1; }
-! grep -q 'caddy_x86_64' "$ROOT/argosbx.sh" || { echo "FAIL: old caddy_x86_64 name should be gone"; exit 1; }
-echo "ensure_caddy_download static checks OK"
-# ensure_caddy_download: URL construction per arch, override respected, no auth (curl stubbed to fail after recording args)
-sed -e 's|"$(id -u 2>/dev/null)" = "0"|"0" = "0"|g' "$TMP/certdir/ensure_caddy_download.sh" > "$TMP/caddy_dl_test.sh"
-cat > "$TMP/run_caddy_dl.sh" << 'RUN'
-#!/bin/bash
-source "$1"
-CURL_ARGS="$2/curl_args"
-curl() { printf '%s\n' "$@" > "$CURL_ARGS"; return 1; }
-check_url() {
-  cpu="$1"; rm -f "$CURL_ARGS"
-  unset CADDY_DOWNLOAD_URL
-  ensure_caddy_download >/dev/null 2>&1
-  grep -q "https://github.com/qytang2014/software/releases/download/caddy-v2.11.9/$2" "$CURL_ARGS" || { echo "FAIL: $3 got: $(cat "$CURL_ARGS" 2>/dev/null)"; exit 1; }
-  ! grep -q "netrc" "$CURL_ARGS" || { echo "FAIL: $3 should not use netrc"; exit 1; }
-}
-check_url amd64 "caddy-linux-amd64" "amd64 url"
-check_url arm64 "caddy-linux-arm64" "arm64 url"
-cpu="amd64"; CADDY_DOWNLOAD_URL="https://example.com/mirror"; rm -f "$CURL_ARGS"
-ensure_caddy_download >/dev/null 2>&1
-grep -q "https://example.com/mirror/caddy-linux-amd64" "$CURL_ARGS" || { echo "FAIL: CADDY_DOWNLOAD_URL override"; exit 1; }
-cpu="mips"; ensure_caddy_download >/dev/null 2>&1 && { echo "FAIL: mips should fail"; exit 1; }
-echo "ensure_caddy_download URL/auth/arch OK"
-RUN
-bash "$TMP/run_caddy_dl.sh" "$TMP/caddy_dl_test.sh" "$TMP"
+
 # caddy_fetch_cert: sync from Caddy storage to fixed dir (valid -> copy, wrong-domain/missing -> fail)
 mkdir -p "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com"
 openssl req -x509 -newkey rsa:2048 -keyout "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com/test.example.com.key" -out "$TMP/caddystore/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/test.example.com/test.example.com.crt" -days 30 -nodes -subj "/CN=test.example.com" -addext "subjectAltName=DNS:test.example.com" 2>/dev/null
@@ -191,6 +147,7 @@ caddy_fetch_cert && { echo "FAIL: missing storage should fail"; exit 1; }
 echo "caddy_fetch_cert OK"
 RUN
 bash "$TMP/run_caddy_fetch.sh" "$TMP" "$TMP"
+
 # wait_domain_cert in caddy mode picks up the cert via fetch on first iteration (no sleep)
 cat > "$TMP/run_wait_caddy.sh" << 'RUN'
 #!/bin/bash
@@ -203,4 +160,5 @@ wait_domain_cert || { echo "FAIL: wait should succeed via caddy fetch"; exit 1; 
 echo "wait_domain_cert caddy-mode OK"
 RUN
 bash "$TMP/run_wait_caddy.sh" "$TMP" "$TMP"
-echo "PASS: cert (certsrc, certmode, write_caddyfile, caddy-download, caddy-fetch)"
+
+echo "PASS: cert (certsrc, certmode, cert_setup_caddy_proxy, domain_cert_valid, caddy-fetch)"

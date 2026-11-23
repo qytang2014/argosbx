@@ -54,6 +54,16 @@ _auto_sni_valid_remote_ip() {
   return 0
 }
 
+# Check whether local curl supports --curves (introduced in curl 7.73.0).
+_auto_sni_curl_supports_curves() {
+  local ver major minor
+  ver=$(curl --version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+' | head -n 1 || true)
+  [ -n "$ver" ] || return 1
+  major="${ver%%.*}"
+  minor="${ver#*.}"
+  [ "$major" -gt 7 ] 2>/dev/null || { [ "$major" -eq 7 ] 2>/dev/null && [ "$minor" -ge 73 ] 2>/dev/null; }
+}
+
 # 单域名探测（由 xargs -P 并行调用）：通过则写一行
 # "tier|sub|握手ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
 # 状态码只记录、不过滤（Reality 只看握手）。
@@ -66,9 +76,16 @@ _auto_sni_probe_one() {
   if printf '%s' "$cname" | grep -Eq "(cloudflare|cloudfront|akamai|fastly|edgekey|edgesuite|incapsula|sucuri|azureedge|afd\.azure|edgecast|bunnycdn|gcore|cdn77|azion|cdn)"; then
     rm -f "$hdr_file"; return 0
   fi
-  # 2. 强制 IPv4 + TLS 1.3 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
+  # 2. 强制 IPv4 + TLS 1.3 + X25519 + HTTP/2 握手探测（默认严格验证证书链，不加 -k）
+  # REALITY 硬性要求目标站支持 X25519 密钥交换（不触发 HelloRetryRequest 强制 P-521/P-384），
+  # 否则服务端 REALITY 握手必定报 "REALITY: processed invalid connection"。
+  local -a curve_args=()
+  if _auto_sni_curl_supports_curves; then
+    curve_args=(--curves X25519)
+  fi
   metrics=$(curl -4 -sS -I -o /dev/null \
     --tlsv1.3 --tls-max 1.3 \
+    "${curve_args[@]}" \
     --http2 \
     --connect-timeout 3 \
     --max-time 5 \
@@ -76,6 +93,12 @@ _auto_sni_probe_one() {
     -D "$hdr_file" \
     -w "%{http_code}|%{time_connect}|%{time_appconnect}|%{remote_ip}" \
     "https://${domain}" 2>/dev/null) || { rm -f "$hdr_file"; return 0; }
+  # 老版本 curl (<7.73) 无 --curves 参数时，用 openssl 兜底验证目标站是否支持 X25519
+  if [ "${#curve_args[@]}" -eq 0 ] && command -v openssl >/dev/null 2>&1; then
+    if ! timeout 4 openssl s_client -connect "${domain}:443" -servername "$domain" -tls1_3 -groups X25519 -brief </dev/null 2>&1 | grep -qi "X25519"; then
+      rm -f "$hdr_file"; return 0
+    fi
+  fi
   http_code=$(printf '%s' "$metrics" | cut -d'|' -f1)
   t_app=$(printf '%s' "$metrics" | cut -d'|' -f3)
   remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f4)
@@ -322,7 +345,7 @@ _auto_sni_probe_tier() {
   { awk -F'|' -v t="$tier" '$1==t && $2==1' "$cands" | shuf; awk -F'|' -v t="$tier" '$1==t && $2==2' "$cands" | shuf; } | head -n "$_AUTO_SNI_MAX_TEST_DOMAINS" > "$test_file" 2>/dev/null || true
   [ -s "$test_file" ] || return 1
   export _AUTO_SNI_TMP _AUTO_SNI_RESULTS _AUTO_SNI_SELF_IP
-  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip
+  export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip _auto_sni_curl_supports_curves
   xargs -P 8 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
   [ -s "$_AUTO_SNI_RESULTS" ]
 }
