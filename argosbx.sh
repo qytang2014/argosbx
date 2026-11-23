@@ -7793,9 +7793,11 @@ cat >> "$HOME/agsbx/xr.json" <<EOF
 ${egress_xr_outbounds}    {
       "protocol": "freedom",
       "tag": "direct",
-      "settings": {
-      "domainStrategy":"${xryx}"
+      "streamSettings": {
+      "sockopt": {
+      "domainStrategy": "${xryx}"
      }
+  }
     },
     {
       "tag": "x-warp-out",
@@ -7816,20 +7818,19 @@ ${egress_xr_outbounds}    {
             "endpoint": "${xendip}:2408"
           }
         ],
+        "noKernelTun": true,
         "reserved": ${res}
         }
     },
     {
       "tag":"warp-out",
       "protocol":"freedom",
-        "settings":{
-        "domainStrategy":"${wxryx}"
-       },
       "streamSettings": {
       "sockopt": {
-       "dialerProxy":"x-warp-out"
-	   }
-     }
+      "domainStrategy": "${wxryx}",
+      "dialerProxy": "x-warp-out"
+    }
+  }
 }
   ],
   "routing": {

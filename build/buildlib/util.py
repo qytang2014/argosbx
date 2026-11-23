@@ -17,7 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 # Upstream HEAD (short SHA) these anchors were last verified against.
 # Bump on every upstream sync.
-UPSTREAM_VERIFIED = "8d2ec6d"
+UPSTREAM_VERIFIED = "b551e82"
 
 # Set by compose before each patch module runs; replace()/insert_after()
 # record it as the anchor's area. "index"/"container" for those builders.
