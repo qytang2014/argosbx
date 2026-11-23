@@ -990,4 +990,48 @@ EOF
 )
 echo "PASS: Test 25"
 
+echo "=== Test 26: vlpt_coexistence_cleanup never hangs on legacy interactive or stuck proxy scripts ==="
+(
+  # 26a: Legacy caddy_proxy.sh without get-port/set-port falls into interactive `while true; read -p`
+  export HOME="$WORK_DIR/home_del_hang"
+  mkdir -p "$HOME/agsbx" "$HOME/.local/bin"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << 'EOF'
+#!/bin/bash
+while true; do
+  read -p "请选择操作 [0-6]: " CHOICE
+  sleep 1
+done
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  ensure_proxy_script() { return 0; }
+  systemctl() { return 0; }
+
+  # Must NOT hang and must clean up cleanly
+  t0=$(date +%s)
+  out=$(vlpt_coexistence_cleanup 2>&1)
+  t1=$(date +%s)
+  elapsed=$((t1 - t0))
+  [ "$elapsed" -lt 5 ] || { echo "FAIL: Test 26a took ${elapsed}s (legacy script hung)"; exit 1; }
+  echo "$out" | grep -q '\[卸载 1/4\]' || { echo "FAIL: missing uninstall progress log: $out"; exit 1; }
+
+  # 26b: Proxy script that supports set-port but hangs internally (sleep 60) must be bounded by timeout
+  echo "8443" > "$HOME/agsbx/web_port"
+  export certsrc="caddy"
+  cat > "$HOME/.local/bin/caddy_proxy.sh" << 'EOF'
+#!/bin/bash
+case "$1" in
+  get-port) echo "8443"; exit 0 ;;
+  set-port) sleep 60; exit 0 ;;
+esac
+EOF
+  chmod +x "$HOME/.local/bin/caddy_proxy.sh"
+  t0=$(date +%s)
+  AGSBX_UNINSTALL_TIMEOUT=2 vlpt_coexistence_cleanup >/dev/null 2>&1 || true
+  t1=$(date +%s)
+  elapsed=$((t1 - t0))
+  [ "$elapsed" -lt 6 ] || { echo "FAIL: Test 26b took ${elapsed}s (timeout guard failed)"; exit 1; }
+  [ ! -f "$HOME/agsbx/web_port" ] || { echo "FAIL: web_port not removed after bounded timeout cleanup"; exit 1; }
+)
+echo "PASS: Test 26"
+
 echo "ALL TESTS PASSED!"

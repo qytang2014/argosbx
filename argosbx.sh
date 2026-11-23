@@ -129,6 +129,39 @@ command -v register_hook >/dev/null 2>&1 && {
 } || true
 # proxy-script.sh: Helper functions for managing caddy_proxy.sh and nginx_proxy.sh
 
+# Run a command non-interactively (stdin from /dev/null) with an upper-bound timeout.
+# Args: $1=timeout_seconds, $2...=command and arguments
+run_with_timeout(){
+  local sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
+# Static capability check before invoking a local proxy script subcommand.
+# Rejects legacy interactive proxy scripts that lack the requested subcommand
+# (which would otherwise fall through into `while true; read -p` and deadlock).
+proxy_script_supports_cmd(){
+  local bin="$1" cmd="$2"
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  case "$cmd" in
+    get-port)    grep -qE '^[[:space:]]*get-port\)' "$bin" 2>/dev/null && return 0 ;;
+    set-port)    grep -qE '^[[:space:]]*set-port\)' "$bin" 2>/dev/null && return 0 ;;
+    reload)      grep -qE '^[[:space:]]*reload\)' "$bin" 2>/dev/null && return 0 ;;
+    site-remove) grep -qE -- '--remove' "$bin" 2>/dev/null && grep -qE '^[[:space:]]*site\)' "$bin" 2>/dev/null && return 0 ;;
+    *) return 1 ;;
+  esac
+  # If the script contains an interactive menu loop/prompt and missed the subcommand above,
+  # treat it as a legacy script that would hang on stdin and refuse to invoke it.
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 # ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
 ensure_local_bin_in_path(){
   local target_dir="$HOME/.local/bin"
@@ -149,7 +182,7 @@ get_latest_github_vps_tag(){
   local repo="qytang2014/software"
   local fallback="vps-v1.0.0"
   local latest=""
-  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
+  latest=$(curl -sL --connect-timeout 4 --max-time 6 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
   if [ -n "$latest" ]; then
     echo "$latest"
   else
@@ -174,13 +207,13 @@ ensure_proxy_script(){
   elif [ "$script_name" = "caddy_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "caddy_safe_reload" "$target_path" 2>/dev/null; then
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "caddy_safe_reload" "$target_path" 2>/dev/null || ! grep -q "get-port)" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   elif [ "$script_name" = "nginx_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "nginx_safe_reload" "$target_path" 2>/dev/null; then
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "nginx_safe_reload" "$target_path" 2>/dev/null || ! grep -q "get-port)" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   fi
@@ -198,11 +231,11 @@ ensure_proxy_script(){
   tmpfile=$(mktemp 2>/dev/null || echo "/tmp/${script_name}.$$")
 
   local dl_ok=0
-  if curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$tmpfile" 2>/dev/null; then
+  if curl -fL --retry 1 --connect-timeout 4 --max-time 8 "$raw_url" -o "$tmpfile" 2>/dev/null; then
     dl_ok=1
   else
     echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
-    if curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$tmpfile" 2>/dev/null; then
+    if curl -fL --retry 1 --connect-timeout 4 --max-time 8 "$mirror_url" -o "$tmpfile" 2>/dev/null; then
       dl_ok=1
     fi
   fi
@@ -1959,6 +1992,38 @@ web_port_is_available_or_self(){
   return 1 # 被其他外部进程占用
 }
 
+# Safe non-interactive command execution with bounded timeout (works even when module is sourced standalone).
+_vlpt_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
+# Static capability check before invoking caddy_proxy.sh / nginx_proxy.sh subcommands.
+_vlpt_proxy_supports(){
+  local bin="$1" cmd="$2"
+  if command -v proxy_script_supports_cmd >/dev/null 2>&1; then
+    proxy_script_supports_cmd "$bin" "$cmd"
+    return $?
+  fi
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  case "$cmd" in
+    get-port) grep -qE '^[[:space:]]*get-port\)' "$bin" 2>/dev/null && return 0 ;;
+    set-port) grep -qE '^[[:space:]]*set-port\)' "$bin" 2>/dev/null && return 0 ;;
+    reload)   grep -qE '^[[:space:]]*reload\)' "$bin" 2>/dev/null && return 0 ;;
+    *) return 1 ;;
+  esac
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 # Query current non-443 HTTPS port from caddy_proxy.sh / nginx_proxy.sh via CLI.
 _proxy_get_port(){
   local eng="$1" bin="" p=""
@@ -1968,7 +2033,8 @@ _proxy_get_port(){
     *) return 1 ;;
   esac
   [ -x "$bin" ] || return 1
-  p=$("$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
+  _vlpt_proxy_supports "$bin" "get-port" || return 1
+  p=$(_vlpt_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-15}" "$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
   case "$p" in
     443|''|*[!0-9]*) return 1 ;;
     *) printf '%s' "$p"; return 0 ;;
@@ -1984,7 +2050,8 @@ _proxy_reload(){
     *) return 0 ;;
   esac
   [ -x "$bin" ] || return 0
-  "$bin" reload >/dev/null 2>&1 || true
+  _vlpt_proxy_supports "$bin" "reload" || return 0
+  _vlpt_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-20}" "$bin" reload >/dev/null 2>&1 || true
 }
 
 web_port_find_available(){
@@ -2163,20 +2230,26 @@ web_server_migrate_to_port(){
   # 任一实际执行的 set-port 失败都记下（Caddy 与 Nginx 两路同等处理）；
   # 失败时不再静默继续：Reality 入站已移到内网端口，路由器没生效则 443 无人监听，
   # 代理+订阅同时断，必须停装。
-  local _rc=0
+  local _rc=0 _t="${AGSBX_UNINSTALL_TIMEOUT:-20}"
   if [ -x "$caddy_bin" ] && { [ -z "$engine" ] || [ "$engine" = "caddy" ]; }; then
-    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
+    if ! _vlpt_proxy_supports "$caddy_bin" "set-port"; then
+      echo "警告: 本地 caddy_proxy.sh 版本过旧且不支持 set-port，跳过执行以避免阻塞" >&2
+      _rc=1
+    elif [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      _vlpt_run_timeout "$_t" "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$caddy_bin" set-port "$target_port" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
+      _vlpt_run_timeout "$_t" "$caddy_bin" set-port "$target_port" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     fi
   fi
 
   if [ -x "$nginx_bin" ] && { [ -z "$engine" ] || [ "$engine" = "nginx" ]; }; then
-    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
+    if ! _vlpt_proxy_supports "$nginx_bin" "set-port"; then
+      echo "警告: 本地 nginx_proxy.sh 版本过旧且不支持 set-port，跳过执行以避免阻塞" >&2
+      _rc=1
+    elif [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      _vlpt_run_timeout "$_t" "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$nginx_bin" set-port "$target_port" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
+      _vlpt_run_timeout "$_t" "$nginx_bin" set-port "$target_port" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     fi
   fi
 
@@ -2345,23 +2418,48 @@ vlpt_coexistence_check(){
 }
 
 vlpt_coexistence_cleanup(){
+  echo "[卸载 1/4] 检查并恢复 Web 服务 443 共存配置..."
   local wp=""
   [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  local caddy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  local nginx_bin="$HOME/.local/bin/nginx_proxy.sh"
+
+  # Scheme B: attempt a short-timeout update only for installed proxy scripts before querying ports
+  # so legacy scripts without get-port/set-port can upgrade when online without hanging when offline.
+  if [ -n "$wp" ] || [ -x "$caddy_bin" ] || [ -x "$nginx_bin" ]; then
+    if command -v ensure_proxy_script >/dev/null 2>&1; then
+      [ -x "$caddy_bin" ] && { ensure_proxy_script "caddy_proxy.sh" || true; }
+      [ -x "$nginx_bin" ] && { ensure_proxy_script "nginx_proxy.sh" || true; }
+    fi
+  fi
+
   local caddy_wp="" nginx_wp=""
   caddy_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
   nginx_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
 
   if [ -n "$wp" ] || [ -n "$caddy_wp" ] || [ -n "$nginx_wp" ]; then
     echo "检测到 Web 服务曾配置高位端口共存，正在恢复 Caddy / Nginx 默认 443 端口与初始配置..."
-    # 提前停止占有 443 端口的节点内核服务，确保 443 端口释放给 Web 服务接管
+    # Stop node kernels with a bounded timeout so 443 is released before reverting the Web server.
     if command -v systemctl >/dev/null 2>&1; then
-      systemctl stop xr sb >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 systemctl stop xr sb argo >/dev/null 2>&1 || true
     elif command -v rc-service >/dev/null 2>&1; then
-      rc-service xray stop >/dev/null 2>&1 || true
-      rc-service sing-box stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service xray stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service sing-box stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service argo stop >/dev/null 2>&1 || true
     fi
-    kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
-    web_server_migrate_to_port 443 || echo "错误：卸载回滚失败，Web 服务未恢复到 443 端口；请手动执行 caddy_proxy.sh / nginx_proxy.sh set-port 443 恢复。" >&2
+    kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) $(pgrep -f 'agsbx/c' 2>/dev/null) >/dev/null 2>&1 || true
+
+    # Revert only the engine(s) that actually hold a non-443 port or match the recorded coexistence engine.
+    local revert_engines="" det_eng="" eng=""
+    [ -n "$caddy_wp" ] && revert_engines="${revert_engines:+$revert_engines }caddy"
+    [ -n "$nginx_wp" ] && revert_engines="${revert_engines:+$revert_engines }nginx"
+    if [ -z "$revert_engines" ] && [ -n "$wp" ]; then
+      det_eng=$(_detect_coexistence_web_engine)
+      [ -n "$det_eng" ] && revert_engines="$det_eng"
+    fi
+    for eng in $revert_engines; do
+      web_server_migrate_to_port 443 "" "" "$eng" || echo "错误：卸载回滚失败，${eng} 未恢复到 443 端口；请手动执行 ${eng}_proxy.sh set-port 443 恢复。" >&2
+    done
   fi
   rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" 2>/dev/null || true
   return 0
@@ -3877,6 +3975,31 @@ subhttps_merge_system_caddy(){
   "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   return 1
 }
+_subhttps_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+_subhttps_proxy_supports(){
+  local bin="$1" cmd="$2"
+  if command -v proxy_script_supports_cmd >/dev/null 2>&1; then
+    proxy_script_supports_cmd "$bin" "$cmd"
+    return $?
+  fi
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  if [ "$cmd" = "site-remove" ]; then
+    grep -qE -- '--remove' "$bin" 2>/dev/null && grep -qE '^[[:space:]]*site\)' "$bin" 2>/dev/null && return 0
+  fi
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
 subhttps_unmerge_system_caddy(){
   # Strictly delegate subscription subpath removal to caddy_proxy.sh or nginx_proxy.sh.
   local ym_c="" token="" eng="" script_name="" proxy_bin=""
@@ -3890,11 +4013,15 @@ subhttps_unmerge_system_caddy(){
     script_name="caddy_proxy.sh"
   fi
   proxy_bin="$HOME/.local/bin/$script_name"
-  if command -v ensure_proxy_script >/dev/null 2>&1; then
+  if [ -x "$proxy_bin" ] && command -v ensure_proxy_script >/dev/null 2>&1; then
     ensure_proxy_script "$script_name" || true
   fi
   if [ -x "$proxy_bin" ]; then
-    "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+    if _subhttps_proxy_supports "$proxy_bin" "site-remove"; then
+      _subhttps_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-20}" "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+    else
+      echo "警告: 本地 ${script_name} 不支持 --remove，跳过订阅子路由清理以避免阻塞" >&2
+    fi
   fi
   return 0
 }
@@ -4053,8 +4180,8 @@ subhttps_fw_allow(){
 subhttps_fw_delete(){
   local backend="$1" rule="$2"
   case "$backend" in
-    ufw) ufw --force delete allow "$rule" >/dev/null 2>&1;;
-    firewalld) firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --remove-port="$rule" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1;;
+    ufw) _subhttps_run_timeout 15 ufw --force delete allow "$rule" >/dev/null 2>&1;;
+    firewalld) _subhttps_run_timeout 15 firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --remove-port="$rule" >/dev/null 2>&1 && _subhttps_run_timeout 15 firewall-cmd --reload >/dev/null 2>&1;;
   esac
 }
 subhttps_fw_backend_cmd(){
@@ -4186,6 +4313,7 @@ sub_https_sync(){
   return 0
 }
 sub_https_stop(){
+  echo "[卸载 2/4] 清理 HTTPS 订阅配置与定时任务..."
   subhttps_unmerge_system_caddy
   subhttps_stop_caddy
   subhttps_cron_remove
@@ -4458,13 +4586,23 @@ ufw_apply_saved(){
   echo "ufw 已按记录放行 $n 条规则"
   return 0
 }
+_fw_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
 ufw_cleanup(){
   local state="$HOME/agsbx/ufw.rules" r
   if [ -f "$state" ]; then
     if command -v ufw >/dev/null 2>&1; then
       while IFS= read -r r || [ -n "$r" ]; do
         case "$r" in '') continue;; esac
-        ufw --force delete allow "$r" >/dev/null 2>&1 || true
+        _fw_run_timeout 15 ufw --force delete allow "$r" >/dev/null 2>&1 || true
       done < "$state"
     fi
     rm -f "$state"
@@ -4473,7 +4611,7 @@ ufw_cleanup(){
   if command -v ufw >/dev/null 2>&1; then
     _ufw_fallback_rules | sort -u | while IFS= read -r r || [ -n "$r" ]; do
       case "$r" in '') continue;; esac
-      ufw --force delete allow "$r" >/dev/null 2>&1 || true
+      _fw_run_timeout 15 ufw --force delete allow "$r" >/dev/null 2>&1 || true
     done
   fi
   return 0
@@ -4519,12 +4657,12 @@ fw_allow_rule(){
 fw_delete_rule(){
   local backend="$1" rule="$2"
   case "$backend" in
-    ufw) ufw --force delete allow "$rule" >/dev/null 2>&1;;
-    firewalld) firewall-cmd --permanent --zone="$(fw_firewalld_zone)" --remove-port="$rule" >/dev/null 2>&1;;
+    ufw) _fw_run_timeout 15 ufw --force delete allow "$rule" >/dev/null 2>&1;;
+    firewalld) _fw_run_timeout 15 firewall-cmd --permanent --zone="$(fw_firewalld_zone)" --remove-port="$rule" >/dev/null 2>&1;;
   esac
 }
 fw_reload_backend(){
-  case "$1" in firewalld) firewall-cmd --reload >/dev/null 2>&1 || true;; esac
+  case "$1" in firewalld) _fw_run_timeout 15 firewall-cmd --reload >/dev/null 2>&1 || true;; esac
 }
 # firewalld mirror of ufw_sync, same diff semantics, state file
 # $HOME/agsbx/firewalld.rules. Reload once at the end, not per port.
@@ -4675,6 +4813,7 @@ fw_apply_saved(){
   return 0
 }
 fw_cleanup(){
+  echo "[卸载 3/4] 清理防火墙放行规则..."
   ufw_cleanup
   firewalld_cleanup
   return 0
@@ -5133,10 +5272,11 @@ cert_install_watch(){
   echo "证书续期 watcher 已安装：每天 03:00 检查证书变化并重启相关内核"
 }
 cert_remove_watch(){
+  echo "[卸载 4/4] 清理证书续期定时任务..."
   command -v crontab >/dev/null 2>&1 || return 0
   local tmp=""; tmp=$(mktemp 2>/dev/null) || return 0
-  crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
-  crontab "$tmp" 2>/dev/null || true
+  crontab -l </dev/null 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
+  crontab "$tmp" </dev/null 2>/dev/null || true
   rm -f "$tmp"
 }
 # dispatch handler (step 3): certwatch / certrestart subcommands.

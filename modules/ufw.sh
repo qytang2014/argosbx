@@ -202,13 +202,23 @@ ufw_apply_saved(){
   echo "ufw 已按记录放行 $n 条规则"
   return 0
 }
+_fw_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
 ufw_cleanup(){
   local state="$HOME/agsbx/ufw.rules" r
   if [ -f "$state" ]; then
     if command -v ufw >/dev/null 2>&1; then
       while IFS= read -r r || [ -n "$r" ]; do
         case "$r" in '') continue;; esac
-        ufw --force delete allow "$r" >/dev/null 2>&1 || true
+        _fw_run_timeout 15 ufw --force delete allow "$r" >/dev/null 2>&1 || true
       done < "$state"
     fi
     rm -f "$state"
@@ -217,7 +227,7 @@ ufw_cleanup(){
   if command -v ufw >/dev/null 2>&1; then
     _ufw_fallback_rules | sort -u | while IFS= read -r r || [ -n "$r" ]; do
       case "$r" in '') continue;; esac
-      ufw --force delete allow "$r" >/dev/null 2>&1 || true
+      _fw_run_timeout 15 ufw --force delete allow "$r" >/dev/null 2>&1 || true
     done
   fi
   return 0
@@ -263,12 +273,12 @@ fw_allow_rule(){
 fw_delete_rule(){
   local backend="$1" rule="$2"
   case "$backend" in
-    ufw) ufw --force delete allow "$rule" >/dev/null 2>&1;;
-    firewalld) firewall-cmd --permanent --zone="$(fw_firewalld_zone)" --remove-port="$rule" >/dev/null 2>&1;;
+    ufw) _fw_run_timeout 15 ufw --force delete allow "$rule" >/dev/null 2>&1;;
+    firewalld) _fw_run_timeout 15 firewall-cmd --permanent --zone="$(fw_firewalld_zone)" --remove-port="$rule" >/dev/null 2>&1;;
   esac
 }
 fw_reload_backend(){
-  case "$1" in firewalld) firewall-cmd --reload >/dev/null 2>&1 || true;; esac
+  case "$1" in firewalld) _fw_run_timeout 15 firewall-cmd --reload >/dev/null 2>&1 || true;; esac
 }
 # firewalld mirror of ufw_sync, same diff semantics, state file
 # $HOME/agsbx/firewalld.rules. Reload once at the end, not per port.
@@ -419,6 +429,7 @@ fw_apply_saved(){
   return 0
 }
 fw_cleanup(){
+  echo "[卸载 3/4] 清理防火墙放行规则..."
   ufw_cleanup
   firewalld_cleanup
   return 0

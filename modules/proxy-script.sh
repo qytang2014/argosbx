@@ -1,5 +1,38 @@
 # proxy-script.sh: Helper functions for managing caddy_proxy.sh and nginx_proxy.sh
 
+# Run a command non-interactively (stdin from /dev/null) with an upper-bound timeout.
+# Args: $1=timeout_seconds, $2...=command and arguments
+run_with_timeout(){
+  local sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
+# Static capability check before invoking a local proxy script subcommand.
+# Rejects legacy interactive proxy scripts that lack the requested subcommand
+# (which would otherwise fall through into `while true; read -p` and deadlock).
+proxy_script_supports_cmd(){
+  local bin="$1" cmd="$2"
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  case "$cmd" in
+    get-port)    grep -qE '^[[:space:]]*get-port\)' "$bin" 2>/dev/null && return 0 ;;
+    set-port)    grep -qE '^[[:space:]]*set-port\)' "$bin" 2>/dev/null && return 0 ;;
+    reload)      grep -qE '^[[:space:]]*reload\)' "$bin" 2>/dev/null && return 0 ;;
+    site-remove) grep -qE -- '--remove' "$bin" 2>/dev/null && grep -qE '^[[:space:]]*site\)' "$bin" 2>/dev/null && return 0 ;;
+    *) return 1 ;;
+  esac
+  # If the script contains an interactive menu loop/prompt and missed the subcommand above,
+  # treat it as a legacy script that would hang on stdin and refuse to invoke it.
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 # ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
 ensure_local_bin_in_path(){
   local target_dir="$HOME/.local/bin"
@@ -20,7 +53,7 @@ get_latest_github_vps_tag(){
   local repo="qytang2014/software"
   local fallback="vps-v1.0.0"
   local latest=""
-  latest=$(curl -sL --connect-timeout 4 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
+  latest=$(curl -sL --connect-timeout 4 --max-time 6 "https://github.com/${repo}/tags" 2>/dev/null | grep -oE "vps-v[0-9.]+" | head -n 1)
   if [ -n "$latest" ]; then
     echo "$latest"
   else
@@ -45,13 +78,13 @@ ensure_proxy_script(){
   elif [ "$script_name" = "caddy_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "caddy_safe_reload" "$target_path" 2>/dev/null; then
+    elif ! grep -q "caddy_apply_port_to_caddyfile" "$target_path" 2>/dev/null || ! grep -q "matches_domain" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["INJ_TEXT"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "caddy_safe_reload" "$target_path" 2>/dev/null || ! grep -q "get-port)" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   elif [ "$script_name" = "nginx_proxy.sh" ]; then
     if [ ! -f "$tag_file" ] || [ "$(cat "$tag_file" 2>/dev/null | tr -d '[:space:]')" != "$tag" ]; then
       is_old=1
-    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "nginx_safe_reload" "$target_path" 2>/dev/null; then
+    elif ! grep -q "cli_nginx_set_port" "$target_path" 2>/dev/null || ! grep -q "sni_router" "$target_path" 2>/dev/null || ! grep -q 'ENVIRON\["LOC_CONF"\]' "$target_path" 2>/dev/null || ! grep -q "NO_DEFAULT" "$target_path" 2>/dev/null || ! grep -q "nginx_safe_reload" "$target_path" 2>/dev/null || ! grep -q "get-port)" "$target_path" 2>/dev/null; then
       is_old=1
     fi
   fi
@@ -69,11 +102,11 @@ ensure_proxy_script(){
   tmpfile=$(mktemp 2>/dev/null || echo "/tmp/${script_name}.$$")
 
   local dl_ok=0
-  if curl -fL --retry 2 --connect-timeout 10 "$raw_url" -o "$tmpfile" 2>/dev/null; then
+  if curl -fL --retry 1 --connect-timeout 4 --max-time 8 "$raw_url" -o "$tmpfile" 2>/dev/null; then
     dl_ok=1
   else
     echo "官方直链连接超时，尝试通过镜像拉取 $script_name..."
-    if curl -fL --retry 2 --connect-timeout 15 "$mirror_url" -o "$tmpfile" 2>/dev/null; then
+    if curl -fL --retry 1 --connect-timeout 4 --max-time 8 "$mirror_url" -o "$tmpfile" 2>/dev/null; then
       dl_ok=1
     fi
   fi

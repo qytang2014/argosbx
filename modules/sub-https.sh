@@ -303,6 +303,31 @@ subhttps_merge_system_caddy(){
   "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
   return 1
 }
+_subhttps_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+_subhttps_proxy_supports(){
+  local bin="$1" cmd="$2"
+  if command -v proxy_script_supports_cmd >/dev/null 2>&1; then
+    proxy_script_supports_cmd "$bin" "$cmd"
+    return $?
+  fi
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  if [ "$cmd" = "site-remove" ]; then
+    grep -qE -- '--remove' "$bin" 2>/dev/null && grep -qE '^[[:space:]]*site\)' "$bin" 2>/dev/null && return 0
+  fi
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
 subhttps_unmerge_system_caddy(){
   # Strictly delegate subscription subpath removal to caddy_proxy.sh or nginx_proxy.sh.
   local ym_c="" token="" eng="" script_name="" proxy_bin=""
@@ -316,11 +341,15 @@ subhttps_unmerge_system_caddy(){
     script_name="caddy_proxy.sh"
   fi
   proxy_bin="$HOME/.local/bin/$script_name"
-  if command -v ensure_proxy_script >/dev/null 2>&1; then
+  if [ -x "$proxy_bin" ] && command -v ensure_proxy_script >/dev/null 2>&1; then
     ensure_proxy_script "$script_name" || true
   fi
   if [ -x "$proxy_bin" ]; then
-    "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+    if _subhttps_proxy_supports "$proxy_bin" "site-remove"; then
+      _subhttps_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-20}" "$proxy_bin" site --domain "$ym_c" --subpath "/$token*" --remove >/dev/null 2>&1 || true
+    else
+      echo "警告: 本地 ${script_name} 不支持 --remove，跳过订阅子路由清理以避免阻塞" >&2
+    fi
   fi
   return 0
 }
@@ -479,8 +508,8 @@ subhttps_fw_allow(){
 subhttps_fw_delete(){
   local backend="$1" rule="$2"
   case "$backend" in
-    ufw) ufw --force delete allow "$rule" >/dev/null 2>&1;;
-    firewalld) firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --remove-port="$rule" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1;;
+    ufw) _subhttps_run_timeout 15 ufw --force delete allow "$rule" >/dev/null 2>&1;;
+    firewalld) _subhttps_run_timeout 15 firewall-cmd --permanent --zone="$(subhttps_fw_zone)" --remove-port="$rule" >/dev/null 2>&1 && _subhttps_run_timeout 15 firewall-cmd --reload >/dev/null 2>&1;;
   esac
 }
 subhttps_fw_backend_cmd(){
@@ -612,6 +641,7 @@ sub_https_sync(){
   return 0
 }
 sub_https_stop(){
+  echo "[卸载 2/4] 清理 HTTPS 订阅配置与定时任务..."
   subhttps_unmerge_system_caddy
   subhttps_stop_caddy
   subhttps_cron_remove

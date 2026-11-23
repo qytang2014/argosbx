@@ -49,6 +49,38 @@ web_port_is_available_or_self(){
   return 1 # 被其他外部进程占用
 }
 
+# Safe non-interactive command execution with bounded timeout (works even when module is sourced standalone).
+_vlpt_run_timeout(){
+  local sec="$1"; shift
+  if command -v run_with_timeout >/dev/null 2>&1; then
+    run_with_timeout "$sec" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@" </dev/null
+  else
+    "$@" </dev/null
+  fi
+}
+
+# Static capability check before invoking caddy_proxy.sh / nginx_proxy.sh subcommands.
+_vlpt_proxy_supports(){
+  local bin="$1" cmd="$2"
+  if command -v proxy_script_supports_cmd >/dev/null 2>&1; then
+    proxy_script_supports_cmd "$bin" "$cmd"
+    return $?
+  fi
+  [ -f "$bin" ] && [ -r "$bin" ] || return 1
+  case "$cmd" in
+    get-port) grep -qE '^[[:space:]]*get-port\)' "$bin" 2>/dev/null && return 0 ;;
+    set-port) grep -qE '^[[:space:]]*set-port\)' "$bin" 2>/dev/null && return 0 ;;
+    reload)   grep -qE '^[[:space:]]*reload\)' "$bin" 2>/dev/null && return 0 ;;
+    *) return 1 ;;
+  esac
+  if grep -qE 'read -p|while true' "$bin" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 # Query current non-443 HTTPS port from caddy_proxy.sh / nginx_proxy.sh via CLI.
 _proxy_get_port(){
   local eng="$1" bin="" p=""
@@ -58,7 +90,8 @@ _proxy_get_port(){
     *) return 1 ;;
   esac
   [ -x "$bin" ] || return 1
-  p=$("$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
+  _vlpt_proxy_supports "$bin" "get-port" || return 1
+  p=$(_vlpt_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-15}" "$bin" get-port 2>/dev/null | tr -d '[:space:]' || true)
   case "$p" in
     443|''|*[!0-9]*) return 1 ;;
     *) printf '%s' "$p"; return 0 ;;
@@ -74,7 +107,8 @@ _proxy_reload(){
     *) return 0 ;;
   esac
   [ -x "$bin" ] || return 0
-  "$bin" reload >/dev/null 2>&1 || true
+  _vlpt_proxy_supports "$bin" "reload" || return 0
+  _vlpt_run_timeout "${AGSBX_UNINSTALL_TIMEOUT:-20}" "$bin" reload >/dev/null 2>&1 || true
 }
 
 web_port_find_available(){
@@ -253,20 +287,26 @@ web_server_migrate_to_port(){
   # 任一实际执行的 set-port 失败都记下（Caddy 与 Nginx 两路同等处理）；
   # 失败时不再静默继续：Reality 入站已移到内网端口，路由器没生效则 443 无人监听，
   # 代理+订阅同时断，必须停装。
-  local _rc=0
+  local _rc=0 _t="${AGSBX_UNINSTALL_TIMEOUT:-20}"
   if [ -x "$caddy_bin" ] && { [ -z "$engine" ] || [ "$engine" = "caddy" ]; }; then
-    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
+    if ! _vlpt_proxy_supports "$caddy_bin" "set-port"; then
+      echo "警告: 本地 caddy_proxy.sh 版本过旧且不支持 set-port，跳过执行以避免阻塞" >&2
+      _rc=1
+    elif [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      _vlpt_run_timeout "$_t" "$caddy_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$caddy_bin" set-port "$target_port" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
+      _vlpt_run_timeout "$_t" "$caddy_bin" set-port "$target_port" || { echo "警告: caddy_proxy.sh set-port 失败"; _rc=1; }
     fi
   fi
 
   if [ -x "$nginx_bin" ] && { [ -z "$engine" ] || [ "$engine" = "nginx" ]; }; then
-    if [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
-      "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
+    if ! _vlpt_proxy_supports "$nginx_bin" "set-port"; then
+      echo "警告: 本地 nginx_proxy.sh 版本过旧且不支持 set-port，跳过执行以避免阻塞" >&2
+      _rc=1
+    elif [ -n "$sni_dom" ] && [ -n "$sni_tgt" ] && [ "$target_port" != "443" ]; then
+      _vlpt_run_timeout "$_t" "$nginx_bin" set-port "$target_port" --sni "$sni_dom" --sni-target "$sni_tgt" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     else
-      "$nginx_bin" set-port "$target_port" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
+      _vlpt_run_timeout "$_t" "$nginx_bin" set-port "$target_port" || { echo "警告: nginx_proxy.sh set-port 失败"; _rc=1; }
     fi
   fi
 
@@ -435,23 +475,48 @@ vlpt_coexistence_check(){
 }
 
 vlpt_coexistence_cleanup(){
+  echo "[卸载 1/4] 检查并恢复 Web 服务 443 共存配置..."
   local wp=""
   [ -f "$HOME/agsbx/web_port" ] && wp=$(cat "$HOME/agsbx/web_port" 2>/dev/null | tr -d '[:space:]')
+  local caddy_bin="$HOME/.local/bin/caddy_proxy.sh"
+  local nginx_bin="$HOME/.local/bin/nginx_proxy.sh"
+
+  # Scheme B: attempt a short-timeout update only for installed proxy scripts before querying ports
+  # so legacy scripts without get-port/set-port can upgrade when online without hanging when offline.
+  if [ -n "$wp" ] || [ -x "$caddy_bin" ] || [ -x "$nginx_bin" ]; then
+    if command -v ensure_proxy_script >/dev/null 2>&1; then
+      [ -x "$caddy_bin" ] && { ensure_proxy_script "caddy_proxy.sh" || true; }
+      [ -x "$nginx_bin" ] && { ensure_proxy_script "nginx_proxy.sh" || true; }
+    fi
+  fi
+
   local caddy_wp="" nginx_wp=""
   caddy_wp=$(_proxy_get_port "caddy" 2>/dev/null || true)
   nginx_wp=$(_proxy_get_port "nginx" 2>/dev/null || true)
 
   if [ -n "$wp" ] || [ -n "$caddy_wp" ] || [ -n "$nginx_wp" ]; then
     echo "检测到 Web 服务曾配置高位端口共存，正在恢复 Caddy / Nginx 默认 443 端口与初始配置..."
-    # 提前停止占有 443 端口的节点内核服务，确保 443 端口释放给 Web 服务接管
+    # Stop node kernels with a bounded timeout so 443 is released before reverting the Web server.
     if command -v systemctl >/dev/null 2>&1; then
-      systemctl stop xr sb >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 systemctl stop xr sb argo >/dev/null 2>&1 || true
     elif command -v rc-service >/dev/null 2>&1; then
-      rc-service xray stop >/dev/null 2>&1 || true
-      rc-service sing-box stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service xray stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service sing-box stop >/dev/null 2>&1 || true
+      _vlpt_run_timeout 15 rc-service argo stop >/dev/null 2>&1 || true
     fi
-    kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) >/dev/null 2>&1 || true
-    web_server_migrate_to_port 443 || echo "错误：卸载回滚失败，Web 服务未恢复到 443 端口；请手动执行 caddy_proxy.sh / nginx_proxy.sh set-port 443 恢复。" >&2
+    kill -15 $(pgrep -f 'agsbx/s' 2>/dev/null) $(pgrep -f 'agsbx/x' 2>/dev/null) $(pgrep -f 'agsbx/c' 2>/dev/null) >/dev/null 2>&1 || true
+
+    # Revert only the engine(s) that actually hold a non-443 port or match the recorded coexistence engine.
+    local revert_engines="" det_eng="" eng=""
+    [ -n "$caddy_wp" ] && revert_engines="${revert_engines:+$revert_engines }caddy"
+    [ -n "$nginx_wp" ] && revert_engines="${revert_engines:+$revert_engines }nginx"
+    if [ -z "$revert_engines" ] && [ -n "$wp" ]; then
+      det_eng=$(_detect_coexistence_web_engine)
+      [ -n "$det_eng" ] && revert_engines="$det_eng"
+    fi
+    for eng in $revert_engines; do
+      web_server_migrate_to_port 443 "" "" "$eng" || echo "错误：卸载回滚失败，${eng} 未恢复到 443 端口；请手动执行 ${eng}_proxy.sh set-port 443 恢复。" >&2
+    done
   fi
   rm -f "$HOME/agsbx/web_port" "$HOME/agsbx/reality_port" 2>/dev/null || true
   return 0

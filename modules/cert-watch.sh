@@ -73,10 +73,11 @@ cert_install_watch(){
   echo "证书续期 watcher 已安装：每天 03:00 检查证书变化并重启相关内核"
 }
 cert_remove_watch(){
+  echo "[卸载 4/4] 清理证书续期定时任务..."
   command -v crontab >/dev/null 2>&1 || return 0
   local tmp=""; tmp=$(mktemp 2>/dev/null) || return 0
-  crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
-  crontab "$tmp" 2>/dev/null || true
+  crontab -l </dev/null 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
+  crontab "$tmp" </dev/null 2>/dev/null || true
   rm -f "$tmp"
 }
 # dispatch handler (step 3): certwatch / certrestart subcommands.
