@@ -14,10 +14,10 @@
 | 类别 | 数量 | 决定 |
 | --- | --- | --- |
 | A 模块插入 | 55 | 全部保留 |
-| B 直接内容 patch | 175 | 全部保留 |
+| B 直接内容 patch | 171 | 全部保留 |
 | C 可转 hook | 19 | 迁移 7（分发链），保留 12（订阅/分组列表，见原因） |
 | D 其他 | 1 | 保留 |
-| **合计** | **250** | **迁移后 244**（7 个分发锚点 → 1 个 `dispatch-hook`；auto-sni 2026-11-21 加 2 个 A 锚点；Reality-443 泛化 2026-11-22 加 6 个 B 锚点） |
+| **合计** | **246** | **迁移后 240**（7 个分发锚点 → 1 个 `dispatch-hook`；auto-sni 2026-11-21 加 2 个 A 锚点；Reality-443 泛化 2026-11-22 加 6 个 B 锚点；reym-autosync 2026-11-23 删 4 个 B 锚点） |
 
 第 3 步第 1 批（已做，见下）：子命令分发 7 个锚点 → 1 个 `run_hook dispatch` 调用锚点 + 9 个 handler（写进对应 `modules/*.sh`，`register_hook dispatch` 注册）。`BUDGET` 由 242 改为 236。
 
@@ -266,10 +266,6 @@
 | index-vlpt-kernel-dynamic | B | 保留：vlpt_kernel 联动 JS |
 | index-reset-egress | B | 保留：重置加清 egress 字段 |
 | index-egress-listeners | B | 保留：egress 输入监听 JS |
-| index-reym-autosync | B | 保留：reym 跟随 ym 的 JS |
-| index-reym-autosync-enable | B | 保留：同上启用时同步 |
-| index-reym-autosync-reset | B | 保留：同上重置清标记 |
-| index-reym-autosync-parse | B | 保留：同上粘贴回填重判 |
 | index-collect-egress | B | 保留：收集 egress 时多行转 `;` |
 | index-tobash-order | B | 保留：生成命令字段顺序加私有字段 |
 | index-add-button | B | 保留：加 add 按钮 |

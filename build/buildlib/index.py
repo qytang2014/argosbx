@@ -280,49 +280,6 @@ def build_index():
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', render);
   });""", "index-egress-listeners", 1)
-    # reym 自动跟随 ym：填了节点域名后，Reality 域名自动填 ym 的内容；
-    # 清空 ym 则恢复默认（reym 留空 = 脚本默认 apple.com）。手动改过
-    # reym 的值不会被覆盖；重置表单、粘贴回填时重新判定。
-    h = replace(h, """  ['egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', render);
-  });""",
-                """  ['egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', render);
-  });
-  // reym 自动跟随 ym：填节点域名后自动同步，清空 ym 则恢复默认；
-  // 手动改过 reym 后不再覆盖（render 由 allInputs 通用监听触发）。
-  const ymInput = document.getElementById('ym');
-  let reymManual = false;
-  function syncReymFromYm() {
-    if (!reymManual) reymInput.value = ymInput.value.trim();
-  }
-  ymInput.addEventListener('input', syncReymFromYm);
-  reymInput.addEventListener('input', () => {
-    const rv = reymInput.value.trim();
-    reymManual = !(rv === '' || rv === ymInput.value.trim());
-  });""", "index-reym-autosync", 1)
-    # 勾选 Reality 协议启用 reym 输入框时，也按 ym 同步一次（ym 可能先填好）
-    h = replace(h, """      reymInput.disabled = !isRealityEnabled;
-      if (!isRealityEnabled) reymInput.value = '';""",
-                """      reymInput.disabled = !isRealityEnabled;
-      if (!isRealityEnabled) reymInput.value = '';
-      else syncReymFromYm();""", "index-reym-autosync-enable", 1)
-    # 重置表单时清除"手动改过 reym"标记
-    h = replace(h, """    document.getElementById('reym').value = '';""",
-                """    document.getElementById('reym').value = '';
-    reymManual = false;""", "index-reym-autosync-reset", 1)
-    # 粘贴命令回填后，按回填的值重新判定是否手动改过
-    h = replace(h, """    isUpdatingFromOutput = false;
-  }
-
-  output.addEventListener('input', parseAndFillOutput);""",
-                """    reymManual = !(reymInput.value.trim() === '' || reymInput.value.trim() === (document.getElementById('ym').value || '').trim());
-    isUpdatingFromOutput = false;
-  }
-
-  output.addEventListener('input', parseAndFillOutput);""", "index-reym-autosync-parse", 1)
     h = replace(h, """    optIds.forEach(id => {
       const el = document.getElementById(id);
       const v = (el.value || '').trim();""",

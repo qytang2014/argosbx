@@ -68,12 +68,13 @@ assert m, "FAIL: optIds not found"
 ids = re.findall(r"'([^']+)'", m.group(1))
 missing = [i for i in ids if f'id="{i}"' not in html]
 assert not missing, f"FAIL: optIds without element: {missing}"
-# reym auto-follows ym (user request 2026-10-31): filling the node
-# domain auto-fills the Reality domain, clearing ym restores the
-# default, and a manually typed reym is never overwritten.
-assert "syncReymFromYm" in html, "FAIL: reym auto-sync JS missing"
-assert "reymManual" in html, "FAIL: reym manual-override flag missing"
-assert "reym 会自动同步" in html, "FAIL: ym hint should mention reym auto-sync"
+# reym is independent of ym (user decision 2026-11-23): no auto-sync
+# since auto-SNI probes reym when left blank; the user fills reym
+# themselves or leaves it blank for auto-probe.
+assert "syncReymFromYm" not in html, "FAIL: reym auto-sync JS should be removed"
+assert "reymManual" not in html, "FAIL: reym manual-override flag should be removed"
+assert "reym 会自动同步" not in html, "FAIL: ym hint should not mention reym auto-sync"
+assert "reym 留空则自动探测" in html, "FAIL: ym hint should still mention reym auto-probe"
 # Upstream files must NOT contain private markers (they are pristine)
 for f, markers in [("upstream/argosbx.sh", ["egress_nodes", "certsrc", "EGRESS MODULE"]),
                    ("upstream/index.html", ["egress_nodes", "certsrc", "Vincent"])]:

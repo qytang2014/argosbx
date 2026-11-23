@@ -474,7 +474,7 @@
             <button id="generateUuidBtn" type="button" class="primary">生成 UUID</button>
           </div>
         </div>
-        <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后各协议地址优先用该域名（TLS 仍按证书就绪切换；Reality 域名 reym 会自动同步，reym 留空则自动探测），留空则用 IP"/></div>
+        <div class="row"><label>节点域名 <span class="pill">ym</span></label><input id="ym" type="text" placeholder="填域名后各协议地址优先用该域名（TLS 仍按证书就绪切换；reym 留空则自动探测），留空则用 IP"/></div>
         <div class="row"><label>伪装博客 <span class="pill">camouflage</span></label>
           <select id="camouflage">
             <option value="">默认（webroot 无 index.html 时自动部署）</option>
@@ -750,7 +750,6 @@
     document.getElementById('camouflage').value = '';
     document.getElementById('vlpt_kernel').value = '';
     document.getElementById('reym').value = '';
-    reymManual = false;
     document.getElementById('cfip').value = '';
     document.getElementById('alns').value = '';
     document.getElementById('hyjpt').value = '';
@@ -774,7 +773,6 @@
       const isRealityEnabled = vlessTcpRealityCheckbox.checked || vlessXhttpRealityCheckbox.checked || anyRealityCheckbox.checked;
       reymInput.disabled = !isRealityEnabled;
       if (!isRealityEnabled) reymInput.value = '';
-      else syncReymFromYm();
       const vlptKernelSelect = document.getElementById('vlpt_kernel');
       if (vlptKernelSelect) {
         vlptKernelSelect.disabled = !vlessTcpRealityCheckbox.checked;
@@ -877,18 +875,6 @@
   ['egress_nodes', 'egress_bind', 'egress_rules', 'egress_add'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', render);
-  });
-  // reym 自动跟随 ym：填节点域名后自动同步，清空 ym 则恢复默认；
-  // 手动改过 reym 后不再覆盖（render 由 allInputs 通用监听触发）。
-  const ymInput = document.getElementById('ym');
-  let reymManual = false;
-  function syncReymFromYm() {
-    if (!reymManual) reymInput.value = ymInput.value.trim();
-  }
-  ymInput.addEventListener('input', syncReymFromYm);
-  reymInput.addEventListener('input', () => {
-    const rv = reymInput.value.trim();
-    reymManual = !(rv === '' || rv === ymInput.value.trim());
   });
 
   commandTypeRadios.forEach(radio => {
@@ -1043,7 +1029,6 @@
       }
     });
 
-    reymManual = !(reymInput.value.trim() === '' || reymInput.value.trim() === (document.getElementById('ym').value || '').trim());
     isUpdatingFromOutput = false;
   }
 

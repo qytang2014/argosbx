@@ -15,7 +15,7 @@
 # first be justified as un-hookable (see build/README.md and
 # build/ANCHORS.md); bumping BUDGET without converting to a hook needs
 # a reason in the commit message.
-BUDGET=244
+BUDGET=240
 
 cd "$(dirname "$0")/.." || exit 1
 out=$(python3 build/build.py --check-anchors 2>&1) || {
