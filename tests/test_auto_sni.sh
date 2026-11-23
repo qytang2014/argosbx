@@ -113,12 +113,17 @@ case "$url" in
       code=$(awk -v d="$domain" '$1==d {print $2; exit}' "$FAKE_HTTP_CODE_FILE" 2>/dev/null || true)
       [ -n "$code" ] || code="200"
     fi
+    dns="0.000"
+    if [ -n "${FAKE_DNS_DELAY_FILE:-}" ]; then
+      dns=$(awk -v d="$domain" '$1==d {print $2; exit}' "$FAKE_DNS_DELAY_FILE" 2>/dev/null || true)
+      [ -n "$dns" ] || dns="0.000"
+    fi
     if [ -n "${FAKE_H2_FILE:-}" ] && grep -qx "$domain" "$FAKE_H2_FILE" 2>/dev/null; then
       [ -n "$hdrfile" ] && printf 'HTTP/2 %s\r\ncontent-type: text/html\r\n\r\n' "$code" > "$hdrfile"
     else
       [ -n "$hdrfile" ] && printf 'HTTP/1.1 %s\r\ncontent-type: text/html\r\n\r\n' "$code" > "$hdrfile"
     fi
-    printf '%s|0.010|%s|93.184.216.34' "$code" "$lat"
+    printf '%s|%s|%s|0.250|93.184.216.34' "$code" "$dns" "$lat"
     exit 0 ;;
 esac
 echo "fake-curl: unexpected URL: $url" >&2
@@ -198,6 +203,7 @@ run_case() {
   out=$(FAKE_GEO_FILE="$FAKE_GEO_FILE" FAKE_UNIV_FILE="$TMP/univ.json" \
     FAKE_GFW_FILE="${FAKE_GFW_FILE:-$TMP/gfw-empty.txt}" \
     FAKE_H2_FILE="$FAKE_H2_FILE" FAKE_LATENCY_FILE="$FAKE_LATENCY_FILE" \
+    FAKE_DNS_DELAY_FILE="${FAKE_DNS_DELAY_FILE:-}" \
     FAKE_HTTP_CODE_FILE="${FAKE_HTTP_CODE_FILE:-}" \
     FAKE_CNAME_FILE="${FAKE_CNAME_FILE:-}" \
     FAKE_CN_CNAME_FILE="${FAKE_CN_CNAME_FILE:-}" \
@@ -441,26 +447,41 @@ FAKE_CNAME_FILE="$TMP/local_cname.txt" FAKE_CN_CNAME_FILE="$TMP/cn_cname.txt" \
   run_case 0 www.ox.ac.uk "Geo-DNS split-horizon CDN (CN ECS) rejected"
 FAKE_CNAME_FILE="" FAKE_CN_CNAME_FILE=""
 
-# 6f. Tier 1 latency >= 80ms also probes Tier 2 and switches only if Tier 2 is faster,
+# 6f. Tier 1 TCP RTT >= 60ms also probes Tier 2 and switches only if Tier 2 is faster,
 #     and merges Tier 1 + Tier 2 results in Top candidates with T1/T2 tags
 mk_h2 www.ed.ac.uk git.kernel.org
-mk_lat "www.ed.ac.uk 0.080" "git.kernel.org 0.030"
+mk_lat "www.ed.ac.uk 0.060" "git.kernel.org 0.030"
 err_merge="$TMP/merge.err"
 out=$(FAKE_GEO_FILE="$TMP/geo-gb-eng.json" FAKE_UNIV_FILE="$TMP/univ.json" \
   FAKE_GFW_FILE="$TMP/gfw-empty.txt" FAKE_H2_FILE="$FAKE_H2_FILE" \
   FAKE_LATENCY_FILE="$FAKE_LATENCY_FILE" \
-  PATH="$TMP/stubbin:$PATH" bash "$STANDALONE" 2>"$err_merge") || fail "tier1>=80ms merge run failed"
-[ "$out" = "git.kernel.org" ] || fail "tier1>=80ms stdout=[$out] want git.kernel.org"
-grep -q '第 1 档最优 www.ed.ac.uk（80.0 ms >= 80 ms）' "$err_merge" || fail "missing clean Tier1 trigger log: $(cat "$err_merge")"
-grep -q 'Top 候选（第 1/2 档合并）：git.kernel.org(T2/30ms/200) www.ed.ac.uk(T1/80ms/200)' "$err_merge" || fail "missing merged T1/T2 Top list: $(cat "$err_merge")"
-echo "ok: tier1 >= 80ms switches to faster tier2 and merges T1/T2 Top list"
+  PATH="$TMP/stubbin:$PATH" bash "$STANDALONE" 2>"$err_merge") || fail "tier1>=60ms merge run failed"
+[ "$out" = "git.kernel.org" ] || fail "tier1>=60ms stdout=[$out] want git.kernel.org"
+grep -q '第 1 档最优 www.ed.ac.uk（TCP 60.0 ms >= 60 ms）' "$err_merge" || fail "missing clean Tier1 trigger log: $(cat "$err_merge")"
+grep -q 'Top 候选（第 1/2 档合并）：git.kernel.org(T2/30ms/200) www.ed.ac.uk(T1/60ms/200)' "$err_merge" || fail "missing merged T1/T2 Top list: $(cat "$err_merge")"
+echo "ok: tier1 >= 60ms switches to faster tier2 and merges T1/T2 Top list"
 
 mk_h2 www.ed.ac.uk git.kernel.org
-mk_lat "www.ed.ac.uk 0.090" "git.kernel.org 0.120"
-run_case 0 www.ed.ac.uk "tier1 >= 80ms keeps tier1 when tier2 is slower"
+mk_lat "www.ed.ac.uk 0.070" "git.kernel.org 0.120"
+run_case 0 www.ed.ac.uk "tier1 >= 60ms keeps tier1 when tier2 is slower"
 
 mk_h2 www.ed.ac.uk git.kernel.org
-mk_lat "www.ed.ac.uk 0.079" "git.kernel.org 0.020"
-run_case 0 www.ed.ac.uk "tier1 < 80ms early stops and ignores faster tier2"
+mk_lat "www.ed.ac.uk 0.059" "git.kernel.org 0.020"
+run_case 0 www.ed.ac.uk "tier1 < 60ms early stops and ignores faster tier2"
+
+# 6g. DNS lookup time is deducted from handshake latency (pure TCP+TLS handshake)
+mk_h2 www.ed.ac.uk www.ox.ac.uk
+mk_lat "www.ed.ac.uk 0.530" "www.ox.ac.uk 0.055"
+printf 'www.ed.ac.uk 0.500\nwww.ox.ac.uk 0.005\n' > "$TMP/dns_delay.txt"
+FAKE_DNS_DELAY_FILE="$TMP/dns_delay.txt" run_case 0 www.ed.ac.uk "DNS delay deducted (30ms net beats 50ms net)"
+FAKE_DNS_DELAY_FILE=""
+
+# 6h. Adaptive probe concurrency scales with CPU count (1->2, 2->3, 4->4, 8->6)
+for pair in "1:2" "2:3" "4:4" "8:6"; do
+  c="${pair%:*}"; want="${pair#*:}"
+  got=$(bash -c 'nproc(){ echo "'"$c"'"; }; . "'"$MOD"'"; _auto_sni_probe_jobs')
+  [ "$got" = "$want" ] || fail "probe_jobs(cpu=$c)=$got want $want"
+done
+echo "ok: adaptive probe concurrency scales with CPU count (1->2, 2->3, 4->4, 8->6)"
 
 echo "PASS: auto-sni"

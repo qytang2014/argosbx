@@ -22,7 +22,7 @@ set -euo pipefail
 
 _AUTO_SNI_MAX_TEST_DOMAINS=15
 _AUTO_SNI_MAX_UNIV=8
-_AUTO_SNI_TIER1_SLOW_MS=80
+_AUTO_SNI_TIER1_SLOW_MS=60
 _AUTO_SNI_IPINFO_URL="https://ipinfo.io/json"
 _AUTO_SNI_UNIV_URL="https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json"
 _AUTO_SNI_GFW_URL="https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/gfw.txt"
@@ -95,11 +95,11 @@ _auto_sni_curl_supports_pq() {
 }
 
 # 单域名探测（由 xargs -P 并行调用）：通过则写一行
-# "tier|sub|握手ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
+# "tier|sub|TCP_ms|域名|IP|状态码" 到 $_AUTO_SNI_RESULTS，不通过则静默跳过。
 # 一/二档硬要求 HTTP/2 200（剔除 301/302 裸域空跳转及 403/5xx 拦截页）；三档兜底池允许 2xx/3xx/404。
 _auto_sni_probe_one() {
   local tier="$1" sub="$2" domain="$3"
-  local hdr_file cname metrics http_code t_app remote_ip total_ms
+  local hdr_file cname metrics http_code t_dns t_conn remote_ip total_ms
   hdr_file=$(mktemp "$_AUTO_SNI_TMP/hdr.XXXXXX") || return 0
   # 1. CNAME CDN 过滤（同时覆盖本机视角与中国大陆 ECS 视角）
   cname=$(_auto_sni_lookup_cname "$domain")
@@ -121,7 +121,7 @@ _auto_sni_probe_one() {
     --max-time 5 \
     -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
     -D "$hdr_file" \
-    -w "%{http_code}|%{time_connect}|%{time_appconnect}|%{remote_ip}" \
+    -w "%{http_code}|%{time_namelookup}|%{time_connect}|%{time_appconnect}|%{remote_ip}" \
     "https://${domain}" 2>/dev/null) || { rm -f "$hdr_file"; return 0; }
   # 老版本 curl (<7.73) 无 --curves 参数时，用 openssl 兜底验证目标站是否支持 X25519
   if [ "${#curve_args[@]}" -eq 0 ] && command -v openssl >/dev/null 2>&1; then
@@ -130,8 +130,9 @@ _auto_sni_probe_one() {
     fi
   fi
   http_code=$(printf '%s' "$metrics" | cut -d'|' -f1)
-  t_app=$(printf '%s' "$metrics" | cut -d'|' -f3)
-  remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f4)
+  t_dns=$(printf '%s' "$metrics" | cut -d'|' -f2)
+  t_conn=$(printf '%s' "$metrics" | cut -d'|' -f3)
+  remote_ip=$(printf '%s' "$metrics" | cut -d'|' -f5)
   # 3. 校验远端 IP 合法性（防 DNS 污染与本机回环假阳性）
   if ! _auto_sni_valid_remote_ip "$remote_ip"; then
     rm -f "$hdr_file"; return 0
@@ -166,7 +167,8 @@ _auto_sni_probe_one() {
       rm -f "$hdr_file"; return 0
     fi
   fi
-  total_ms=$(awk -v a="$t_app" 'BEGIN { printf "%.1f", a * 1000 }')
+  # 仅计纯 TCP RTT（time_connect - time_namelookup），扣除本地 DNS 与 curl 冷加载 CA 证书的 CPU 伪耗时
+  total_ms=$(awk -v c="$t_conn" -v d="$t_dns" 'BEGIN { v = (c - d) * 1000; if (v < 0) v = c * 1000; printf "%.1f", v }')
   printf "%s|%s|%08.1f|%s|%s|%s\n" "$tier" "$sub" "$total_ms" "$domain" "$remote_ip" "$http_code" >> "$_AUTO_SNI_RESULTS"
   rm -f "$hdr_file"
 }
@@ -389,11 +391,31 @@ _auto_sni_gfw_filter() {
   fi
 }
 
+# 按 CPU 核数自适应并发度（防 1~2 核低配 VPS 上多路 curl TLS 握手抢核导致延迟失真）
+_auto_sni_probe_jobs() {
+  local cpus=2
+  if command -v nproc >/dev/null 2>&1; then
+    cpus=$(nproc 2>/dev/null || echo 2)
+  elif [ -r /proc/cpuinfo ]; then
+    cpus=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 2)
+  fi
+  case "$cpus" in ''|*[!0-9]*) cpus=2 ;; esac
+  if [ "$cpus" -le 1 ]; then
+    echo 2
+  elif [ "$cpus" -le 2 ]; then
+    echo 3
+  elif [ "$cpus" -le 4 ]; then
+    echo 4
+  else
+    echo 6
+  fi
+}
+
 # 单档探测：$1=档位，$2=候选文件，$3=本档测试文件。
 # 同 sub 内随机、按 sub=1→2→3 优先级抽样，最多测 _AUTO_SNI_MAX_TEST_DOMAINS 个候选。
 # 返回 0 且结果文件非空表示本档有通过者。
 _auto_sni_probe_tier() {
-  local tier="$1" cands="$2" test_file="$3"
+  local tier="$1" cands="$2" test_file="$3" jobs
   : > "$_AUTO_SNI_RESULTS"
   {
     awk -F'|' -v t="$tier" '$1==t && $2==1' "$cands" | shuf
@@ -401,9 +423,10 @@ _auto_sni_probe_tier() {
     awk -F'|' -v t="$tier" '$1==t && $2==3' "$cands" | shuf
   } | head -n "$_AUTO_SNI_MAX_TEST_DOMAINS" > "$test_file" 2>/dev/null || true
   [ -s "$test_file" ] || return 1
+  jobs=$(_auto_sni_probe_jobs)
   export _AUTO_SNI_TMP _AUTO_SNI_RESULTS _AUTO_SNI_SELF_IP
   export -f _auto_sni_probe_one _auto_sni_lookup_cname _auto_sni_valid_remote_ip _auto_sni_curl_supports_curves _auto_sni_curl_supports_pq
-  xargs -P 8 -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
+  xargs -P "$jobs" -I {} bash -c 'line="{}"; tier="${line%%|*}"; rest="${line#*|}"; sub="${rest%%|*}"; domain="${rest#*|}"; _auto_sni_probe_one "$tier" "$sub" "$domain"' < "$test_file" || true
   [ -s "$_AUTO_SNI_RESULTS" ]
 }
 
@@ -452,12 +475,12 @@ _auto_sni_run() {
     if [ -n "$best" ]; then
       best_ms=$(printf '%s' "$best" | cut -d'|' -f3)
       merged_t12=0
-      # 第 1 档最优握手延迟 >= _AUTO_SNI_TIER1_SLOW_MS (80ms) 时，顺手探测第 2 档对比延迟；仅当第 2 档更快时改用第 2 档
+      # 第 1 档最优 TCP RTT >= _AUTO_SNI_TIER1_SLOW_MS (60ms) 时，顺手探测第 2 档对比延迟；仅当第 2 档更快时改用第 2 档
       if [ "$tier" = "1" ] && awk -v a="$best_ms" -v b="$_AUTO_SNI_TIER1_SLOW_MS" 'BEGIN { exit !(a + 0 >= b + 0) }'; then
         t1_best="$best"; t1_ms="$best_ms"; t1_dom=$(printf '%s' "$best" | cut -d'|' -f4); t2_best=""; t2_ms=""
         t1_ms_disp=$(awk -v a="$t1_ms" 'BEGIN { printf "%.1f", a + 0 }')
         cp "$sorted_file" "$t1_sorted"
-        echo "自动探测：第 1 档最优 ${t1_dom}（${t1_ms_disp} ms >= ${_AUTO_SNI_TIER1_SLOW_MS} ms），顺手探测第 2 档对比延迟"
+        echo "自动探测：第 1 档最优 ${t1_dom}（TCP ${t1_ms_disp} ms >= ${_AUTO_SNI_TIER1_SLOW_MS} ms），顺手探测第 2 档对比延迟"
         if _auto_sni_probe_tier 2 "$cands" "$_AUTO_SNI_TMP/test-t2.txt"; then
           sort -t'|' -k2,2n -k3,3n "$_AUTO_SNI_RESULTS" > "$t2_sorted"
           t2_best=$(head -n 1 "$t2_sorted")
@@ -487,7 +510,7 @@ _auto_sni_run() {
         vlpt_coexistence_sync_sni "$reym" || return 1
       fi
       best_ms_disp=$(awk -v a="$best_ms" 'BEGIN { printf "%.1f", a + 0 }')
-      echo "自动探测：Reality 伪装域名 $reym（第 $tier 档，握手 ${best_ms_disp} ms）"
+      echo "自动探测：Reality 伪装域名 $reym（第 $tier 档，TCP ${best_ms_disp} ms）"
       if [ "$merged_t12" = "1" ]; then
         top_list=$(head -n 5 "$sorted_file" | awk -F'|' '{ printf "%s(T%s/%.0fms/%s) ", $4, $1, $3+0, $6 }')
         echo "自动探测：Top 候选（第 1/2 档合并）：${top_list% }"
