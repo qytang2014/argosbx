@@ -1,9 +1,9 @@
 # Cert renewal auto-restart: Caddy has no post-renewal hook, and acme.sh
 # renewal alone does not restart sing-box/xray, so both paths are covered:
-#  - acme: --install-cert --reloadcmd "bash $HOME/bin/agsbx certrestart"
+#  - acme: --install-cert --reloadcmd "bash $HOME/.local/bin/agsbx certrestart"
 #    runs immediately on acme renewal (see modules/cert-main.sh).
 #  - Caddy (and as a backstop for acme): a daily cron entry
-#    "bash $HOME/bin/agsbx certwatch" checks the cert hash in the fixed
+#    "bash $HOME/.local/bin/agsbx certwatch" checks the cert hash in the fixed
 #    dir and restarts only the kernels whose config uses that cert.
 # Rules: hash is sha256 of the cert file (following symlinks); a change
 # is acted on only if the new cert parses and, when a domain is known,
@@ -67,8 +67,8 @@ cert_install_watch(){
   command -v crontab >/dev/null 2>&1 || { echo "未找到 crontab，证书续期 watcher 未安装，acme 续期仍可通过 reloadcmd 重启"; return 0; }
   tmp=$(mktemp 2>/dev/null) || return 0
   crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
-  printf '0 3 * * * bash "$HOME/bin/agsbx" certwatch >/dev/null 2>&1  # argosbx-certwatch\n' >> "$tmp"
-  crontab "$tmp" 2>/dev/null || echo "证书续期 watcher cron 安装失败，请手动添加：0 3 * * * bash \$HOME/bin/agsbx certwatch"
+  printf '0 3 * * * bash "$HOME/.local/bin/agsbx" certwatch >/dev/null 2>&1  # argosbx-certwatch\n' >> "$tmp"
+  crontab "$tmp" 2>/dev/null || echo "证书续期 watcher cron 安装失败，请手动添加：0 3 * * * bash \$HOME/.local/bin/agsbx certwatch"
   rm -f "$tmp"
   echo "证书续期 watcher 已安装：每天 03:00 检查证书变化并重启相关内核"
 }

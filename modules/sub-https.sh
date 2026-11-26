@@ -463,7 +463,7 @@ subhttps_cron_install(){
   command -v crontab >/dev/null 2>&1 || return 0
   local tmp=""; tmp=$(mktemp 2>/dev/null) || return 0
   crontab -l 2>/dev/null | grep -v "argosbx-subhttps" > "$tmp" 2>/dev/null || true
-  printf '@reboot sleep 10 && bash "$HOME/bin/agsbx" subhttpsync >/dev/null 2>&1  # argosbx-subhttps\n' >> "$tmp"
+  printf '@reboot sleep 10 && bash "$HOME/.local/bin/agsbx" subhttpsync >/dev/null 2>&1  # argosbx-subhttps\n' >> "$tmp"
   crontab "$tmp" 2>/dev/null || true
   rm -f "$tmp" 2>/dev/null || true
   return 0

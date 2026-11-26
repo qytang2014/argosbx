@@ -11,7 +11,7 @@ fail(){ echo "FAIL: $1"; exit 1; }
 
 # Isolated HOME and mock environment
 export HOME="$TMP/home"
-mkdir -p "$HOME/agsbx" "$HOME/bin"
+mkdir -p "$HOME/agsbx" "$HOME/.local/bin" "$TMP/cwd"
 MOCKBIN="$TMP/mockbin"
 mkdir -p "$MOCKBIN"
 export PATH="$MOCKBIN:$PATH"
@@ -49,9 +49,10 @@ exit 0
 EOF
 chmod +x "$MOCKBIN/curl"
 
-# 1. Test uninstalled state
-out=$(bash "$ROOT/argosbx.sh" 2>&1 || true)
+# 1. Test uninstalled state (and verify no sbx_update file is created in cwd)
+out=$(cd "$TMP/cwd" && bash "$ROOT/argosbx.sh" 2>&1 || true)
 echo "$out" | grep -q "提示：未安装argosbx脚本" || fail "uninstalled agsbx should warn uninstalled"
+[ ! -e "$TMP/cwd/sbx_update" ] || fail "argosbx.sh must not create sbx_update in cwd"
 
 # 2. Test installed state with vars.env present, but NO running processes
 echo "uuid=test" > "$HOME/agsbx/vars.env"
@@ -97,7 +98,7 @@ grep -q "restart sb" "$RESTART_LOG" || fail "agsbx res should restart sb"
 
 # 4. Test script copy priority when running from local file
 cp "$ROOT/argosbx.sh" "$TMP/my_argosbx.sh"
-SCRIPT_PATH="$HOME/bin/agsbx"
+SCRIPT_PATH="$HOME/.local/bin/agsbx"
 rm -f "$SCRIPT_PATH"
 bash "$TMP/my_argosbx.sh" <<'EOF' >/dev/null 2>&1 || true
 EOF

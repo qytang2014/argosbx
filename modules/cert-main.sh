@@ -15,15 +15,15 @@ if [ -n "$ym" ]; then
         echo "检测到已有有效域名证书（$ym），跳过申请，直接使用"
       elif [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       elif [ "$certmode_selected" = "webroot" ]; then
         _webroot="${webroot:-/var/www/html}"
         mkdir -p "$_webroot/.well-known/acme-challenge" 2>/dev/null || true
         "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt -w "$_webroot" -d "$ym" >/dev/null 2>&1 || echo "acme.sh webroot 发证失败（检查 nginx 是否有 /.well-known/acme-challenge/ location 且指向 $_webroot），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
         "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       fi
     else
       echo "未检测到 acme.sh（$HOME/.acme.sh/acme.sh），请先安装 acme.sh，脚本仍会继续等待证书，超时回落自签"

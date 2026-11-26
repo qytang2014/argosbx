@@ -126,23 +126,50 @@ echo "HY2/TUIC/Naive/Anytls/Xhttp-tls将使用IP证书或域名证书的TLS"'''
     # hostname 允许用户自定义（节点名称后缀），不填用系统 hostname
     t = replace(t, "hostname=$(uname -a | awk '{print $2}')",
                 "hostname=${hostname:-$(uname -a | awk '{print $2}')}", "hostname-override", 1)
-    # 卸载时删除 /usr/local/bin/agsbx 软链
-    t = replace(t, 'rm -rf  "$HOME/bin/agsbx"',
-                'rm -rf  "$HOME/bin/agsbx"\nrm -f /usr/local/bin/agsbx 2>/dev/null || true', "del-symlink", 1)
-    # agsbx 立即可用：root 时建 /usr/local/bin 软链
-    t = insert_after(t, 'echo \'export PATH="$HOME/bin:$PATH"\' >> "$HOME/.bashrc"\n',
-                     'if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi\n',
-                     "agsbx-symlink")
-    # 安装后提示：如果 agsbx 不在 PATH，提示 source
-    t = insert_after(t, 'if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi\n',
-                     'if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 \"source ~/.bashrc\" 或重新登录后再试"; fi\n',
-                     "agsbx-path-hint")
+    # 卸载时清理 $HOME/.local/bin/agsbx、旧 $HOME/bin/agsbx 及 /usr/local/bin/agsbx 软链
+    t = replace(t, 'rm -rf  "$HOME/.local/bin/agsbx"',
+                'rm -rf "$HOME/.local/bin/agsbx" "$HOME/bin/agsbx"\nrm -f /usr/local/bin/agsbx 2>/dev/null || true', "del-symlink", 1)
+    # 安装后清理旧路径、维护 PATH（若已在 env PATH 中则不重复添加）、建 /usr/local/bin 软链
+    _path_old = 'sed -i \'/export PATH="\\$HOME\\/bin:\\$PATH"/d\' ~/.bashrc\n' + \
+                'echo \'export PATH="$HOME/bin:$PATH"\' >> "$HOME/.bashrc"\n' + \
+                'grep -qxF \'source ~/.bashrc\' ~/.bash_profile 2>/dev/null || echo \'source ~/.bashrc\' >> ~/.bash_profile\n' + \
+                '. ~/.bashrc 2>/dev/null'
+    _path_new = '[ -s "$SCRIPT_PATH" ] && rm -f "$HOME/bin/agsbx" 2>/dev/null || true\n' + \
+                'sed -i \'/export PATH="\\$HOME\\/bin:\\$PATH"/d\' ~/.bashrc\n' + \
+                'ensure_local_bin_in_path\n' + \
+                'grep -qxF \'source ~/.bashrc\' ~/.bash_profile 2>/dev/null || echo \'source ~/.bashrc\' >> ~/.bash_profile\n' + \
+                'if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/.local/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi\n' + \
+                'if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 \\"source ~/.bashrc\\" 或重新登录后再试"; fi'
+    t = replace(t, _path_old, _path_new, "agsbx-local-bin-path", 1)
 
-    # 移除 iptables-persistent：它与 ufw 冲突会导致 ufw 被卸载，且脚本并不依赖它
-    # （持久化走 ~/agsbx/ufw.rules + fwsync，netfilter-persistent save 只是清理时的 best-effort）
-    t = replace(t, "printf 'iptables-persistent iptables-persistent/autosave_v4 boolean true\\niptables-persistent iptables-persistent/autosave_v6 boolean true\\n' | debconf-set-selections\n", "", "no-iptables-persistent-debconf", 1)
-    t = replace(t, "apt install -y busybox coreutils util-linux iptables iptables-persistent cron openssl",
-                "apt install -y busybox coreutils util-linux iptables cron openssl", "no-iptables-persistent", 1)
+    # 去掉 sbx_update 标记文件，改为本地按需检查依赖（且不装与 ufw 冲突的 iptables-persistent）
+    _deps_old = 'if [ ! -f sbx_update ]; then\n' + \
+                'echo "执行必要的脚本依赖中，请稍等10秒……"\n' + \
+                'if command -v apk >/dev/null 2>&1; then\n' + \
+                'apk update >/dev/null 2>&1 && apk add --no-cache bash busybox-extras gcompat libc6-compat iptables openssl >/dev/null 2>&1\n' + \
+                'elif command -v apt >/dev/null 2>&1; then\n' + \
+                'export DEBIAN_FRONTEND=noninteractive\n' + \
+                'printf \'iptables-persistent iptables-persistent/autosave_v4 boolean true\\niptables-persistent iptables-persistent/autosave_v6 boolean true\\n\' | debconf-set-selections\n' + \
+                'apt update >/dev/null 2>&1 && apt install -y busybox coreutils util-linux iptables iptables-persistent cron openssl >/dev/null 2>&1\n' + \
+                'fi\n' + \
+                'touch sbx_update\n' + \
+                'fi'
+    _deps_new = '_need_deps=0\n' + \
+                'if command -v apk >/dev/null 2>&1; then\n' + \
+                'for _pkg in bash busybox-extras gcompat libc6-compat iptables openssl; do apk info -e "$_pkg" >/dev/null 2>&1 || { _need_deps=1; break; }; done\n' + \
+                'if [ "$_need_deps" = "1" ]; then\n' + \
+                'echo "执行必要的脚本依赖中，请稍等10秒……"\n' + \
+                'apk update >/dev/null 2>&1 && apk add --no-cache bash busybox-extras gcompat libc6-compat iptables openssl >/dev/null 2>&1\n' + \
+                'fi\n' + \
+                'elif command -v apt >/dev/null 2>&1; then\n' + \
+                'for _cmd in busybox shuf flock iptables crontab openssl; do command -v "$_cmd" >/dev/null 2>&1 || { _need_deps=1; break; }; done\n' + \
+                'if [ "$_need_deps" = "1" ]; then\n' + \
+                'echo "执行必要的脚本依赖中，请稍等10秒……"\n' + \
+                'export DEBIAN_FRONTEND=noninteractive\n' + \
+                'apt update >/dev/null 2>&1 && apt install -y busybox coreutils util-linux iptables cron openssl >/dev/null 2>&1\n' + \
+                'fi\n' + \
+                'fi'
+    t = replace(t, _deps_old, _deps_new, "deps-check-no-stamp", 1)
     # name 为空时清理残留的 ~/agsbx/name，避免旧前缀残留
     _name_old = 'if [ -n "$name" ]; then' + chr(10) + 'sxname=$name-' + chr(10) + 'echo "$sxname" > "$HOME/agsbx/name"'
     _name_new = _name_old + chr(10) + 'else' + chr(10) + 'rm -f "$HOME/agsbx/name" 2>/dev/null || true' + chr(10) + 'sxname=""'

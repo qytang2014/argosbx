@@ -30,6 +30,32 @@ grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" || { echo "FAIL: 
 # Idempotent call
 ensure_local_bin_in_path
 [ "$(grep -c 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc")" = "1" ] || { echo "FAIL: duplicate PATH export in .bashrc"; exit 1; }
+
+# Test 1b: if PATH already has $HOME/.local/bin (with or without trailing slash), do NOT modify PATH or .bashrc
+export HOME="$TMP/home1b"
+mkdir -p "$HOME"
+touch "$HOME/.bashrc"
+export PATH="$HOME/.local/bin:/usr/bin:/bin"
+ensure_local_bin_in_path
+[ "$PATH" = "$HOME/.local/bin:/usr/bin:/bin" ] || { echo "FAIL: PATH should stay untouched when .local/bin already present"; exit 1; }
+[ ! -s "$HOME/.bashrc" ] || { echo "FAIL: .bashrc should stay empty when .local/bin already in PATH"; exit 1; }
+
+export PATH="/usr/bin:$HOME/.local/bin/:/bin"
+ensure_local_bin_in_path
+[ "$PATH" = "/usr/bin:$HOME/.local/bin/:/bin" ] || { echo "FAIL: PATH with trailing slash should stay untouched"; exit 1; }
+[ ! -s "$HOME/.bashrc" ] || { echo "FAIL: .bashrc should stay empty when .local/bin/ already in PATH"; exit 1; }
+
+# Test 1c: if PATH lacks .local/bin, but .bashrc already references .local/bin, export PATH without duplicating .bashrc
+export HOME="$TMP/home1c"
+mkdir -p "$HOME"
+echo 'PATH="$PATH:$HOME/.local/bin"' > "$HOME/.bashrc"
+export PATH="/usr/bin:/bin"
+ensure_local_bin_in_path
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) echo "FAIL: PATH should include .local/bin"; exit 1 ;;
+esac
+[ "$(wc -l < "$HOME/.bashrc")" -eq 1 ] || { echo "FAIL: .bashrc should not get duplicate .local/bin line"; exit 1; }
 echo "ensure_local_bin_in_path OK"
 
 # Test 2: check_and_prompt_force_email

@@ -14,7 +14,7 @@ cert_migrate_paths(){
     [ -s "$HOME/agsbx/cert/cert.crt" ] || cp -P "$HOME/argosbx/cert/cert.crt" "$HOME/agsbx/cert/cert.crt" 2>/dev/null || true
     [ -s "$HOME/agsbx/cert/private.key" ] || { [ -s "$HOME/argosbx/cert/private.key" ] && cp -P "$HOME/argosbx/cert/private.key" "$HOME/agsbx/cert/private.key" 2>/dev/null || true; }
     if [ -x "$HOME/.acme.sh/acme.sh" ] && [ -n "$ym" ]; then
-      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
     fi
   fi
   if [ -s "$HOME/agsbx/cert.crt" ] && [ ! -s "$HOME/agsbx/selfsigned/cert.crt" ]; then

@@ -71,6 +71,10 @@ else
 fi'''
     t = replace(t, '(command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")', script_install_cmd, "script-copy-priority", 1)
 
+    # --- Migrate CLI target path from $HOME/bin/agsbx to $HOME/.local/bin/agsbx ---
+    t = replace(t, '$HOME/bin/agsbx', '$HOME/.local/bin/agsbx', "agsbx-local-bin-refs", 5)
+    t = replace(t, 'mkdir -p "$HOME/bin"', 'mkdir -p "$HOME/.local/bin"', "agsbx-local-bin-mkdir", 1)
+
     # dead-private-key-block REMOVED: upstream d4f4b91 deleted the
     # commented-out private.key/cert.crt block itself; nothing left
     # to strip (final state already matches).

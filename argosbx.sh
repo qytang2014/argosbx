@@ -162,19 +162,17 @@ proxy_script_supports_cmd(){
   return 0
 }
 
-# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
+# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在；若当前 PATH 已包含则不重复写入
 ensure_local_bin_in_path(){
   local target_dir="$HOME/.local/bin"
   mkdir -p "$target_dir" 2>/dev/null || true
   case ":$PATH:" in
-    *":$target_dir:"*) ;;
-    *)
-      export PATH="$target_dir:$PATH"
-      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-      fi
-      ;;
+    *":$target_dir:"*|*":$target_dir/:"*) return 0 ;;
   esac
+  export PATH="$target_dir:$PATH"
+  if [ -f "$HOME/.bashrc" ] && ! grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  fi
 }
 
 # get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0
@@ -2708,8 +2706,13 @@ agsbx_update(){
     return 1
   fi
 
-  # 获取版本信息
-  local cur_bin="${SCRIPT_PATH:-$HOME/bin/agsbx}"
+  # 获取版本信息（兼容旧路径 $HOME/bin/agsbx 平滑迁移）
+  local target_bin="$HOME/.local/bin/agsbx"
+  local legacy_bin="$HOME/bin/agsbx"
+  local cur_bin="${SCRIPT_PATH:-$target_bin}"
+  if [ ! -s "$cur_bin" ] && [ -s "$legacy_bin" ]; then
+    cur_bin="$legacy_bin"
+  fi
   if [ ! -s "$cur_bin" ] && [ -n "$0" ] && [ -f "$0" ]; then
     cur_bin="$0"
   fi
@@ -2717,28 +2720,34 @@ agsbx_update(){
   old_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$cur_bin" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
   new_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$tmp_file" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
 
+  local canon_0="" canon_legacy=""
+  if [ -n "$0" ] && [ -f "$0" ]; then
+    canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
+  fi
+  canon_legacy=$(readlink -f "$legacy_bin" 2>/dev/null || echo "$legacy_bin")
+
   chmod +x "$tmp_file"
   local updated=0
-  mkdir -p "$HOME/bin" 2>/dev/null || true
-  if cp -f "$tmp_file" "$HOME/bin/agsbx" 2>/dev/null; then
-    chmod +x "$HOME/bin/agsbx" 2>/dev/null || true
+  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+  if cp -f "$tmp_file" "$target_bin" 2>/dev/null; then
+    chmod +x "$target_bin" 2>/dev/null || true
     updated=1
+    rm -f "$legacy_bin" 2>/dev/null || true
+    command -v ensure_local_bin_in_path >/dev/null 2>&1 && ensure_local_bin_in_path
+    if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then
+      ln -sf "$target_bin" /usr/local/bin/agsbx 2>/dev/null || true
+    fi
   fi
 
-  if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then
-    ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true
-  fi
-
-  # 如果当前执行脚本本身是本地 argosbx.sh 且非 $HOME/bin/agsbx，也同步更新
+  # 如果当前执行脚本本身是本地 argosbx.sh 且非 $target_bin / 旧 $legacy_bin，也同步更新
   if [ -n "$0" ] && [ -f "$0" ]; then
     local b0
     b0=$(basename "$0" 2>/dev/null || echo "")
     case "$b0" in
       argosbx.sh|agsbx)
-        local canon_0 canon_bin
-        canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
-        canon_bin=$(readlink -f "$HOME/bin/agsbx" 2>/dev/null || echo "$HOME/bin/agsbx")
-        if [ "$canon_0" != "$canon_bin" ]; then
+        local canon_bin
+        canon_bin=$(readlink -f "$target_bin" 2>/dev/null || echo "$target_bin")
+        if [ "$canon_0" != "$canon_bin" ] && [ "$canon_0" != "$canon_legacy" ] && [ "$0" != "$legacy_bin" ]; then
           cp -f "$tmp_file" "$0" 2>/dev/null || true
           chmod +x "$0" 2>/dev/null || true
         fi
@@ -4136,7 +4145,7 @@ subhttps_cron_install(){
   command -v crontab >/dev/null 2>&1 || return 0
   local tmp=""; tmp=$(mktemp 2>/dev/null) || return 0
   crontab -l 2>/dev/null | grep -v "argosbx-subhttps" > "$tmp" 2>/dev/null || true
-  printf '@reboot sleep 10 && bash "$HOME/bin/agsbx" subhttpsync >/dev/null 2>&1  # argosbx-subhttps\n' >> "$tmp"
+  printf '@reboot sleep 10 && bash "$HOME/.local/bin/agsbx" subhttpsync >/dev/null 2>&1  # argosbx-subhttps\n' >> "$tmp"
   crontab "$tmp" 2>/dev/null || true
   rm -f "$tmp" 2>/dev/null || true
   return 0
@@ -4974,7 +4983,7 @@ cert_migrate_paths(){
     [ -s "$HOME/agsbx/cert/cert.crt" ] || cp -P "$HOME/argosbx/cert/cert.crt" "$HOME/agsbx/cert/cert.crt" 2>/dev/null || true
     [ -s "$HOME/agsbx/cert/private.key" ] || { [ -s "$HOME/argosbx/cert/private.key" ] && cp -P "$HOME/argosbx/cert/private.key" "$HOME/agsbx/cert/private.key" 2>/dev/null || true; }
     if [ -x "$HOME/.acme.sh/acme.sh" ] && [ -n "$ym" ]; then
-      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+      "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$HOME/agsbx/cert/private.key" --fullchain-file "$HOME/agsbx/cert/cert.crt" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
     fi
   fi
   if [ -s "$HOME/agsbx/cert.crt" ] && [ ! -s "$HOME/agsbx/selfsigned/cert.crt" ]; then
@@ -5200,10 +5209,10 @@ wait_domain_cert(){
 }
 # Cert renewal auto-restart: Caddy has no post-renewal hook, and acme.sh
 # renewal alone does not restart sing-box/xray, so both paths are covered:
-#  - acme: --install-cert --reloadcmd "bash $HOME/bin/agsbx certrestart"
+#  - acme: --install-cert --reloadcmd "bash $HOME/.local/bin/agsbx certrestart"
 #    runs immediately on acme renewal (see modules/cert-main.sh).
 #  - Caddy (and as a backstop for acme): a daily cron entry
-#    "bash $HOME/bin/agsbx certwatch" checks the cert hash in the fixed
+#    "bash $HOME/.local/bin/agsbx certwatch" checks the cert hash in the fixed
 #    dir and restarts only the kernels whose config uses that cert.
 # Rules: hash is sha256 of the cert file (following symlinks); a change
 # is acted on only if the new cert parses and, when a domain is known,
@@ -5267,8 +5276,8 @@ cert_install_watch(){
   command -v crontab >/dev/null 2>&1 || { echo "未找到 crontab，证书续期 watcher 未安装，acme 续期仍可通过 reloadcmd 重启"; return 0; }
   tmp=$(mktemp 2>/dev/null) || return 0
   crontab -l 2>/dev/null | grep -v 'argosbx-certwatch' > "$tmp" || true
-  printf '0 3 * * * bash "$HOME/bin/agsbx" certwatch >/dev/null 2>&1  # argosbx-certwatch\n' >> "$tmp"
-  crontab "$tmp" 2>/dev/null || echo "证书续期 watcher cron 安装失败，请手动添加：0 3 * * * bash \$HOME/bin/agsbx certwatch"
+  printf '0 3 * * * bash "$HOME/.local/bin/agsbx" certwatch >/dev/null 2>&1  # argosbx-certwatch\n' >> "$tmp"
+  crontab "$tmp" 2>/dev/null || echo "证书续期 watcher cron 安装失败，请手动添加：0 3 * * * bash \$HOME/.local/bin/agsbx certwatch"
   rm -f "$tmp"
   echo "证书续期 watcher 已安装：每天 03:00 检查证书变化并重启相关内核"
 }
@@ -5339,15 +5348,20 @@ amd64|x86_64) cpu=amd64;;
 *) echo "目前脚本不支持$(uname -m)架构" && exit
 esac
 if [ "$1" != "del" ]; then
-if [ ! -f sbx_update ]; then
-echo "执行必要的脚本依赖中，请稍等10秒……"
+_need_deps=0
 if command -v apk >/dev/null 2>&1; then
+for _pkg in bash busybox-extras gcompat libc6-compat iptables openssl; do apk info -e "$_pkg" >/dev/null 2>&1 || { _need_deps=1; break; }; done
+if [ "$_need_deps" = "1" ]; then
+echo "执行必要的脚本依赖中，请稍等10秒……"
 apk update >/dev/null 2>&1 && apk add --no-cache bash busybox-extras gcompat libc6-compat iptables openssl >/dev/null 2>&1
+fi
 elif command -v apt >/dev/null 2>&1; then
+for _cmd in busybox shuf flock iptables crontab openssl; do command -v "$_cmd" >/dev/null 2>&1 || { _need_deps=1; break; }; done
+if [ "$_need_deps" = "1" ]; then
+echo "执行必要的脚本依赖中，请稍等10秒……"
 export DEBIAN_FRONTEND=noninteractive
 apt update >/dev/null 2>&1 && apt install -y busybox coreutils util-linux iptables cron openssl >/dev/null 2>&1
 fi
-touch sbx_update
 fi
 fi
 v4v6(){
@@ -8320,8 +8334,8 @@ echo
 if find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' || pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1 ; then
 [ -f ~/.bashrc ] || touch ~/.bashrc
 sed -i '/agsbx/d' ~/.bashrc
-SCRIPT_PATH="$HOME/bin/agsbx"
-mkdir -p "$HOME/bin"
+SCRIPT_PATH="$HOME/.local/bin/agsbx"
+mkdir -p "$HOME/.local/bin"
 if [ -n "$0" ] && [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "-bash" ] && [ "$0" != "sh" ] && [ -s "$0" ]; then
 cp -f "$0" "$SCRIPT_PATH" 2>/dev/null || (command -v curl >/dev/null 2>&1 && curl -sL "$agsbxurl" -o "$SCRIPT_PATH") || (command -v wget >/dev/null 2>&1 && wget -qO "$SCRIPT_PATH" "$agsbxurl")
 else
@@ -8329,14 +8343,14 @@ else
 fi
 chmod +x "$SCRIPT_PATH"
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
-echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export agqc=\"${agqc}\" alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $snp=\"${port_sn}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/bin/agsbx"; fi" >> ~/.bashrc
+echo "if ! find /proc/*/exe -type l 2>/dev/null | grep -E '/proc/[0-9]+/exe' | xargs -r readlink 2>/dev/null | grep -Eq 'agsbx/(s|x)' && ! pgrep -f 'agsbx/(s|x)' >/dev/null 2>&1; then echo '检测到系统可能中断过，或者变量格式错误？建议在SSH对话框输入 reboot 重启下服务器。现在自动执行Argosbx脚本的节点恢复操作，请稍等……'; sleep 6; export agqc=\"${agqc}\" alns=\"${alns}\" ym=\"${ym}\" certmode=\"${certmode}\" certsrc=\"${certsrc}\" vlpt_kernel=\"${vlpt_kernel}\" egress_nodes=\"${egress_nodes}\" egress_bind=\"${egress_bind}\" egress_rules=\"${egress_rules}\" cfip=\"${cfip}\" hyjpt=\"${hyjpt}\" cdnym=\"${cdnym}\" name=\"${name}\" ippz=\"${ippz}\" argo=\"${argo}\" uuid=\"${uuid}\" $wap=\"${warp}\" $xhp=\"${port_xh}\" $xup=\"${port_xu}\" $vxp=\"${port_vx}\" $ssp=\"${port_ss}\" $sop=\"${port_so}\" $snp=\"${port_sn}\" $anp=\"${port_an}\" $arp=\"${port_ar}\" $vlp=\"${port_vl_re}\" $vwp=\"${port_vw}\" $vmp=\"${port_vm_ws}\" $vmt=\"${port_vm_tls}\" $hyp=\"${port_hy2}\" $tup=\"${port_tu}\" $xcp=\"${port_xc}\" $nvp=\"${port_nv}\" reym=\"${ym_vl_re}\" agn=\"${ARGO_DOMAIN}\" agk=\"${ARGO_AUTH}\"; bash "$HOME/.local/bin/agsbx"; fi" >> ~/.bashrc
 fi
+[ -s "$SCRIPT_PATH" ] && rm -f "$HOME/bin/agsbx" 2>/dev/null || true
 sed -i '/export PATH="\$HOME\/bin:\$PATH"/d' ~/.bashrc
-echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
-if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi
-if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 "source ~/.bashrc" 或重新登录后再试"; fi
+ensure_local_bin_in_path
 grep -qxF 'source ~/.bashrc' ~/.bash_profile 2>/dev/null || echo 'source ~/.bashrc' >> ~/.bash_profile
-. ~/.bashrc 2>/dev/null
+if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then ln -sf "$HOME/.local/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true; fi
+if ! command -v agsbx >/dev/null 2>&1; then echo "提示：agsbx 命令未在当前 PATH 中，请执行 \"source ~/.bashrc\" 或重新登录后再试"; fi
 crontab -l > /tmp/crontab.tmp 2>/dev/null
 if ! pidof systemd >/dev/null 2>&1 && ! command -v rc-service >/dev/null 2>&1; then
 sed -i '/agsbx\/sing-box/d' /tmp/crontab.tmp
@@ -8361,12 +8375,12 @@ cat > /etc/local.d/alpineargosbx.start <<EOF
 sleep 10
 nohup $HOME/agsbx/cloudflared tunnel --url http://localhost:\$(cat $HOME/agsbx/argoport.log) --edge-ip-version auto --no-autoupdate --protocol $(cat $HOME/agsbx/cftupr.log 2>/dev/null) > $HOME/agsbx/argo.log 2>&1 &
 sleep 10
-HOME="$HOME" $HOME/bin/agsbx list >/dev/null 2>&1
+HOME="$HOME" $HOME/.local/bin/agsbx list >/dev/null 2>&1
 EOF
 chmod +x /etc/local.d/alpineargosbx.start
 rc-update add local default >/dev/null 2>&1
 else
-echo '@reboot sleep 10 && /bin/bash -c "nohup $HOME/agsbx/cloudflared tunnel --url http://localhost:$(cat $HOME/agsbx/argoport.log) --edge-ip-version auto --no-autoupdate --protocol $(cat $HOME/agsbx/cftupr.log 2>/dev/null) > $HOME/agsbx/argo.log 2>&1 & sleep 10 && bash $HOME/bin/agsbx list >/dev/null 2>&1"' >> /tmp/crontab.tmp
+echo '@reboot sleep 10 && /bin/bash -c "nohup $HOME/agsbx/cloudflared tunnel --url http://localhost:$(cat $HOME/agsbx/argoport.log) --edge-ip-version auto --no-autoupdate --protocol $(cat $HOME/agsbx/cftupr.log 2>/dev/null) > $HOME/agsbx/argo.log 2>&1 & sleep 10 && bash $HOME/.local/bin/agsbx list >/dev/null 2>&1"' >> /tmp/crontab.tmp
 fi
 fi
 fi
@@ -10601,7 +10615,7 @@ sed -i '/agsbx\/cloudflared/d' /tmp/crontab.tmp
 sed -i '/websbx/d' /tmp/crontab.tmp
 crontab /tmp/crontab.tmp >/dev/null 2>&1
 rm /tmp/crontab.tmp
-rm -rf  "$HOME/bin/agsbx"
+rm -rf "$HOME/.local/bin/agsbx" "$HOME/bin/agsbx"
 rm -f /usr/local/bin/agsbx 2>/dev/null || true
 if pidof systemd >/dev/null 2>&1; then
 for svc in xr sb argo; do
@@ -10775,15 +10789,15 @@ if [ -n "$ym" ]; then
         echo "检测到已有有效域名证书（$ym），跳过申请，直接使用"
       elif [ "$certmode_selected" = "dns" ]; then
         CF_Token="${CF_Token:-$CLOUDFLARE_API_TOKEN}" "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --dns dns_cf -d "$ym" >/dev/null 2>&1 || echo "acme.sh DNS 发证失败，脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       elif [ "$certmode_selected" = "webroot" ]; then
         _webroot="${webroot:-/var/www/html}"
         mkdir -p "$_webroot/.well-known/acme-challenge" 2>/dev/null || true
         "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt -w "$_webroot" -d "$ym" >/dev/null 2>&1 || echo "acme.sh webroot 发证失败（检查 nginx 是否有 /.well-known/acme-challenge/ location 且指向 $_webroot），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       else
         "$HOME/.acme.sh/acme.sh" --issue --server letsencrypt --standalone -d "$ym" >/dev/null 2>&1 || echo "acme.sh standalone 发证失败（需 80 端口空闲），脚本仍会继续等待证书，超时回落自签"
-        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/bin/agsbx certrestart" >/dev/null 2>&1 || true
+        "$HOME/.acme.sh/acme.sh" --install-cert -d "$ym" --key-file "$CERT_KEY" --fullchain-file "$CERT_CRT" --reloadcmd "bash $HOME/.local/bin/agsbx certrestart" >/dev/null 2>&1 || true
       fi
     else
       echo "未检测到 acme.sh（$HOME/.acme.sh/acme.sh），请先安装 acme.sh，脚本仍会继续等待证书，超时回落自签"

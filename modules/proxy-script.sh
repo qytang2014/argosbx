@@ -33,19 +33,17 @@ proxy_script_supports_cmd(){
   return 0
 }
 
-# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在并在当前 PATH 及 ~/.bashrc 中
+# ensure_local_bin_in_path：确保 $HOME/.local/bin 存在；若当前 PATH 已包含则不重复写入
 ensure_local_bin_in_path(){
   local target_dir="$HOME/.local/bin"
   mkdir -p "$target_dir" 2>/dev/null || true
   case ":$PATH:" in
-    *":$target_dir:"*) ;;
-    *)
-      export PATH="$target_dir:$PATH"
-      if [ -f "$HOME/.bashrc" ] && ! grep -q 'export PATH="\$HOME/\.local/bin:\$PATH"' "$HOME/.bashrc" 2>/dev/null; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-      fi
-      ;;
+    *":$target_dir:"*|*":$target_dir/:"*) return 0 ;;
   esac
+  export PATH="$target_dir:$PATH"
+  if [ -f "$HOME/.bashrc" ] && ! grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  fi
 }
 
 # get_latest_github_vps_tag：动态探测 GitHub Release 中 vps- 前缀的最新 tag，默认保底 vps-v1.0.0

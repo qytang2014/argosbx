@@ -38,12 +38,12 @@ echo "=== Test 1: _is_install_run 逻辑验证 ==="
 )
 echo "PASS: Test 1"
 
-echo "=== Test 2: agsbx_update 成功更新逻辑与版本号提取 ==="
+echo "=== Test 2: agsbx_update 成功更新逻辑、版本号提取与旧路径迁移 ==="
 (
   export HOME="$TMPDIR/home"
   mkdir -p "$HOME/bin"
 
-  # 创建一个旧版本脚本
+  # 创建一个旧路径 ($HOME/bin/agsbx) 的旧版本脚本
   cat > "$HOME/bin/agsbx" <<'EOF'
 #!/bin/bash
 # agsbx
@@ -59,6 +59,7 @@ EOF
 echo "当前版本：V26.7.16"
 EOF
 
+  source "$ROOT/modules/proxy-script.sh"
   source "$ROOT/modules/update.sh"
 
   # 用 file:// 模拟远程下载
@@ -71,8 +72,11 @@ EOF
     echo "FAIL: expected version string not matched, got: $out"; exit 1;
   }
 
-  grep -q "V26.7.16" "$HOME/bin/agsbx" || {
-    echo "FAIL: target binary was not updated"; exit 1;
+  grep -q "V26.7.16" "$HOME/.local/bin/agsbx" || {
+    echo "FAIL: target binary was not updated in $HOME/.local/bin/agsbx"; exit 1;
+  }
+  [ ! -e "$HOME/bin/agsbx" ] || {
+    echo "FAIL: legacy $HOME/bin/agsbx should be removed after migration"; exit 1;
   }
 
   # 确认当前测试文件本身没有被意外覆盖
@@ -84,10 +88,11 @@ echo "PASS: Test 2"
 
 echo "=== Test 3: agsbx_update 语法错误或非法文件校验拦截 ==="
 (
-  export HOME="$TMPDIR/home"
-  mkdir -p "$HOME/bin"
-  echo -e '#!/bin/bash\n# 当前版本：V26.7.15\necho "old agsbx"' > "$HOME/bin/agsbx"
+  export HOME="$TMPDIR/home3"
+  mkdir -p "$HOME/.local/bin"
+  echo -e '#!/bin/bash\n# 当前版本：V26.7.15\necho "old agsbx"' > "$HOME/.local/bin/agsbx"
 
+  source "$ROOT/modules/proxy-script.sh"
   source "$ROOT/modules/update.sh"
 
   # 1. 缺少 agsbx 标识的文件（例如 404 HTML）
@@ -109,13 +114,13 @@ echo "=== Test 3: agsbx_update 语法错误或非法文件校验拦截 ==="
   }
 
   # 确认原文件未被篡改
-  grep -q "old agsbx" "$HOME/bin/agsbx" || {
+  grep -q "old agsbx" "$HOME/.local/bin/agsbx" || {
     echo "FAIL: old binary was modified on error"; exit 1;
   }
 )
 echo "PASS: Test 3"
 
-echo "=== Test 4: 检查 built 脚本中包含 update 子命令与分发 ==="
+echo "=== Test 4: 检查 built 脚本中包含 update 子命令、~/.local/bin 路径且无 sbx_update 生成 ==="
 (
   built="$ROOT/argosbx.sh"
   grep -Fq 'agsbx_update' "$built" || {
@@ -130,6 +135,15 @@ echo "=== Test 4: 检查 built 脚本中包含 update 子命令与分发 ==="
   grep -Fq 'if _is_install_run "$1"; then vlpt_coexistence_check || exit 1; fi' "$built" || {
     echo "FAIL: vlpt_coexistence_check not gated by _is_install_run in built script"; exit 1;
   }
+  grep -Fq 'SCRIPT_PATH="$HOME/.local/bin/agsbx"' "$built" || {
+    echo "FAIL: SCRIPT_PATH should be $HOME/.local/bin/agsbx in built script"; exit 1;
+  }
+  grep -Fq 'ensure_local_bin_in_path' "$built" || {
+    echo "FAIL: ensure_local_bin_in_path missing in built script"; exit 1;
+  }
+  if grep -qE 'touch sbx_update|\[ ! -f sbx_update \]' "$built"; then
+    echo "FAIL: built script must not generate sbx_update"; exit 1
+  fi
 )
 echo "PASS: Test 4"
 

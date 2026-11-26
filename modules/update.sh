@@ -32,8 +32,13 @@ agsbx_update(){
     return 1
   fi
 
-  # 获取版本信息
-  local cur_bin="${SCRIPT_PATH:-$HOME/bin/agsbx}"
+  # 获取版本信息（兼容旧路径 $HOME/bin/agsbx 平滑迁移）
+  local target_bin="$HOME/.local/bin/agsbx"
+  local legacy_bin="$HOME/bin/agsbx"
+  local cur_bin="${SCRIPT_PATH:-$target_bin}"
+  if [ ! -s "$cur_bin" ] && [ -s "$legacy_bin" ]; then
+    cur_bin="$legacy_bin"
+  fi
   if [ ! -s "$cur_bin" ] && [ -n "$0" ] && [ -f "$0" ]; then
     cur_bin="$0"
   fi
@@ -41,28 +46,34 @@ agsbx_update(){
   old_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$cur_bin" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
   new_ver=$(grep -E '^[[:space:]]*(echo|#)[[:space:]]+.*[当]前版本' "$tmp_file" 2>/dev/null | grep -oE '[vV]?[0-9]+(\.[0-9]+)+' | head -n 1 || echo "")
 
+  local canon_0="" canon_legacy=""
+  if [ -n "$0" ] && [ -f "$0" ]; then
+    canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
+  fi
+  canon_legacy=$(readlink -f "$legacy_bin" 2>/dev/null || echo "$legacy_bin")
+
   chmod +x "$tmp_file"
   local updated=0
-  mkdir -p "$HOME/bin" 2>/dev/null || true
-  if cp -f "$tmp_file" "$HOME/bin/agsbx" 2>/dev/null; then
-    chmod +x "$HOME/bin/agsbx" 2>/dev/null || true
+  mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+  if cp -f "$tmp_file" "$target_bin" 2>/dev/null; then
+    chmod +x "$target_bin" 2>/dev/null || true
     updated=1
+    rm -f "$legacy_bin" 2>/dev/null || true
+    command -v ensure_local_bin_in_path >/dev/null 2>&1 && ensure_local_bin_in_path
+    if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then
+      ln -sf "$target_bin" /usr/local/bin/agsbx 2>/dev/null || true
+    fi
   fi
 
-  if [ "$(id -u 2>/dev/null)" = "0" ] && [ -d /usr/local/bin ]; then
-    ln -sf "$HOME/bin/agsbx" /usr/local/bin/agsbx 2>/dev/null || true
-  fi
-
-  # 如果当前执行脚本本身是本地 argosbx.sh 且非 $HOME/bin/agsbx，也同步更新
+  # 如果当前执行脚本本身是本地 argosbx.sh 且非 $target_bin / 旧 $legacy_bin，也同步更新
   if [ -n "$0" ] && [ -f "$0" ]; then
     local b0
     b0=$(basename "$0" 2>/dev/null || echo "")
     case "$b0" in
       argosbx.sh|agsbx)
-        local canon_0 canon_bin
-        canon_0=$(readlink -f "$0" 2>/dev/null || echo "$0")
-        canon_bin=$(readlink -f "$HOME/bin/agsbx" 2>/dev/null || echo "$HOME/bin/agsbx")
-        if [ "$canon_0" != "$canon_bin" ]; then
+        local canon_bin
+        canon_bin=$(readlink -f "$target_bin" 2>/dev/null || echo "$target_bin")
+        if [ "$canon_0" != "$canon_bin" ] && [ "$canon_0" != "$canon_legacy" ] && [ "$0" != "$legacy_bin" ]; then
           cp -f "$tmp_file" "$0" 2>/dev/null || true
           chmod +x "$0" 2>/dev/null || true
         fi
