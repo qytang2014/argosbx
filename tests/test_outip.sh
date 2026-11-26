@@ -226,6 +226,47 @@ EOF
   }
 }
 EOF
+  # Also test geosite rule_set emission for sing-box 1.12+ with IPv6 bind1 (no legacy geosite/geoip fields)
+  egress_bind="2001:db8::2"
+  egress_rules="geosite:youtube=>bind1"
+  egress_init
+  cat > "$2/sb_geosite.json" << EOF
+{
+  "inbounds": [{"type": "socks", "tag": "s", "listen": "127.0.0.1", "listen_port": 19995}],
+  "outbounds": [${egress_sb_outbounds}{"type": "direct", "tag": "direct"}],
+  "route": {
+    ${egress_sb_geo_cfg}
+    "rules": [
+      {"action": "sniff"},
+      ${egress_sb_pre_rules}
+      {"action": "resolve", "strategy": "${sbyx}"},
+      ${egress_sb_rules}
+      {"ip_cidr": [${sip}], "outbound": "${s1outtag}"}
+    ],
+    "final": "${s2outtag}"
+  }
+}
+EOF
+  # Mixed geosite=>bind1 and geoip=>direct: geosite stays pre-resolve only, geoip stays post-resolve only
+  egress_rules="geosite:youtube=>bind1;geoip:cn=>direct"
+  egress_init
+  cat > "$2/sb_mixed_geo.json" << EOF
+{
+  "inbounds": [{"type": "socks", "tag": "s", "listen": "127.0.0.1", "listen_port": 19994}],
+  "outbounds": [${egress_sb_outbounds}{"type": "direct", "tag": "direct"}],
+  "route": {
+    ${egress_sb_geo_cfg}
+    "rules": [
+      {"action": "sniff"},
+      ${egress_sb_pre_rules}
+      {"action": "resolve", "strategy": "${sbyx}"},
+      ${egress_sb_rules}
+      {"ip_cidr": [${sip}], "outbound": "${s1outtag}"}
+    ],
+    "final": "${s2outtag}"
+  }
+}
+EOF
   # Also ensure egress_sb_pre_rules stays empty when no rule targets bindN
   egress_rules="domain:example.org=>direct"
   egress_init
@@ -236,6 +277,8 @@ python3 - "$TMP" << 'PY'
 import json, sys
 sb = json.load(open(f"{sys.argv[1]}/sb_bind.json"))
 xr = json.load(open(f"{sys.argv[1]}/xr_bind.json"))
+sb_geo = json.load(open(f"{sys.argv[1]}/sb_geosite.json"))
+sb_mix = json.load(open(f"{sys.argv[1]}/sb_mixed_geo.json"))
 sb_out = {o["tag"]: o for o in sb["outbounds"]}
 assert sb_out["bind1"].get("inet6_bind_address") == "2001:db8::2" and "bind_address" not in sb_out["bind1"], sb_out["bind1"]
 assert sb_out["bind2"].get("inet4_bind_address") == "1.2.3.4" and "bind_address" not in sb_out["bind2"], sb_out["bind2"]
@@ -253,7 +296,31 @@ assert pre[3] == {"domain_suffix": ["ai.google.com"], "outbound": "bind1"}, pre
 assert pre[4] == {"domain_suffix": ["v4only.example"], "action": "resolve", "strategy": "ipv4_only"}, pre
 assert pre[5] == {"domain_suffix": ["v4only.example"], "outbound": "bind2"}, pre
 assert pre[7]["outbound"] == "bind1" and pre[6]["strategy"] == "ipv6_only", pre[6:8]
-print("ok: egress_bind IPv4/IPv6 pre-resolve and bind fields aligned")
+assert rules[idx_global+1:] == [{"ip_cidr": ["::/0", "0.0.0.0/0"], "outbound": "direct"}], rules[idx_global+1:]
+# Verify sing-box 1.12+ rule_set migration and deduplication for geosite:youtube=>bind1
+assert "geoip" not in sb_geo["route"] and "geosite" not in sb_geo["route"], sb_geo["route"]
+rs = {r["tag"]: r for r in sb_geo["route"]["rule_set"]}
+assert rs["geosite-youtube"]["format"] == "binary" and rs["geosite-youtube"]["path"].endswith("geosite-youtube.srs"), rs
+g_rules = sb_geo["route"]["rules"]
+assert len(g_rules) == 5, g_rules
+assert g_rules == [
+    {"action": "sniff"},
+    {"rule_set": ["geosite-youtube"], "action": "resolve", "strategy": "ipv6_only"},
+    {"rule_set": ["geosite-youtube"], "outbound": "bind1"},
+    {"action": "resolve", "strategy": "prefer_ipv4"},
+    {"ip_cidr": ["::/0", "0.0.0.0/0"], "outbound": "direct"},
+], g_rules
+# Verify mixed geosite (pre-resolve only) + geoip (post-resolve only)
+m_rules = sb_mix["route"]["rules"]
+assert m_rules == [
+    {"action": "sniff"},
+    {"rule_set": ["geosite-youtube"], "action": "resolve", "strategy": "ipv6_only"},
+    {"rule_set": ["geosite-youtube"], "outbound": "bind1"},
+    {"action": "resolve", "strategy": "prefer_ipv4"},
+    {"rule_set": ["geoip-cn"], "outbound": "direct"},
+    {"ip_cidr": ["::/0", "0.0.0.0/0"], "outbound": "direct"},
+], m_rules
+print("ok: egress_bind IPv4/IPv6 pre-resolve, bind fields, and sing-box 1.12+ rule_set aligned")
 PY
 
 if [ -x /root/agsbx/sing-box ]; then

@@ -25,7 +25,7 @@ egress_rules='domain:example.com,foo.org=>socks-out;ip:1.2.3.0/24=>reality-out;s
 egress_init
 printf '{"outbounds":[\n%s{"type":"direct","tag":"direct"}\n]}\n' "$egress_sb_outbounds" > "$2/sb_out.json"
 printf '{"outbounds":[\n%s{"protocol":"freedom","tag":"direct"}\n]}\n' "$egress_xr_outbounds" > "$2/xr_out.json"
-printf '{"rules":[\n%s{"action":"route","outbound":"direct"}\n]}\n' "$egress_sb_rules" > "$2/sb_rules.json"
+printf '{"rules":[\n%s{"action":"resolve","strategy":"prefer_ipv4"},\n%s{"action":"route","outbound":"direct"}\n]}\n' "$egress_sb_pre_rules" "$egress_sb_rules" > "$2/sb_rules.json"
 printf '{"rules":[\n%s{"type":"field","outboundTag":"direct"}\n]}\n' "$egress_xr_rules" > "$2/xr_rules.json"
 RUN
 bash "$TMP/run.sh" "$TMP/egress.sh" "$TMP"
@@ -48,7 +48,14 @@ for o in xr["outbounds"]:
     if o.get("protocol")=="vless":
         for u in o["settings"]["vnext"][0]["users"]:
             assert u.get("encryption")=="none", o["tag"]
-rules = json.load(open(f"{tmp}/sb_rules.json"))
-assert len(rules["rules"])==5, rules  # 4 valid rules + 1 final placeholder, invalid rule skipped
+rules = json.load(open(f"{tmp}/sb_rules.json"))["rules"]
+out_rules = [r for r in rules if "outbound" in r]
+assert len(out_rules) == 5, out_rules  # 4 valid rules + 1 final placeholder, no duplicates
+idx_global = next(i for i, r in enumerate(rules) if r.get("action") == "resolve" and set(r.keys()) == {"action", "strategy"})
+pre_out = [r for r in rules[:idx_global] if "outbound" in r]
+post_out = [r for r in rules[idx_global+1:] if "outbound" in r]
+assert [r["outbound"] for r in pre_out] == ["socks-out", "bind1", "bind2"], pre_out
+assert post_out[0] == {"ip_cidr": ["1.2.3.0/24"], "outbound": "reality-out"}, post_out
+assert len(post_out) == 2 and post_out[1]["outbound"] == "direct", post_out
 print("PASS: egress (unlimited nodes, reality, bind, rules, invalid-rule skip)")
 PY

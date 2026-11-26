@@ -56,13 +56,13 @@ assert xr["rules"][1]["ip"] == ["1.2.3.0/24"], xr["rules"][1]
 assert sb["rules"][2]["inbound"] == ["hy2-xr", "hy2-sb"], sb["rules"][2]
 assert sb["rules"][2]["port"] == [443], sb["rules"][2]
 assert xr["rules"][2]["port"] == "443", xr["rules"][2]
-# 4. geosite AND domain: SB keeps two keys, XR merges into one domain list
-assert sb["rules"][3]["geosite"] == ["google"], sb["rules"][3]
+# 4. geosite AND domain: SB uses rule_set, XR merges into one domain list
+assert sb["rules"][3]["rule_set"] == ["geosite-google"], sb["rules"][3]
 assert sb["rules"][3]["domain_suffix"] == ["example.com"], sb["rules"][3]
 assert xr["rules"][3]["domain"] == ["geosite:google", "example.com"], xr["rules"][3]
 # 5. inbound AND geoip
 assert sb["rules"][4]["inbound"] == ["reality-vision", "vl-reality-sb"], sb["rules"][4]
-assert sb["rules"][4]["geoip"] == ["cn"], sb["rules"][4]
+assert sb["rules"][4]["rule_set"] == ["geoip-cn"], sb["rules"][4]
 # 6. single rule after AND rules still works
 assert sb["rules"][5]["domain_suffix"] == ["google.com"], sb["rules"][5]
 # geo detection: AND geoip triggers, domain value containing geosite does not

@@ -110,6 +110,17 @@ egress_is_insecure(){
   esac
 }
 egress_json_array(){ local list="$1" out="" item="" oldifs="$IFS"; IFS=','; for item in $list; do item=$(printf '%s' "$item" | xargs 2>/dev/null || printf '%s' "$item"); [ -n "$item" ] || continue; [ -n "$out" ] && out="${out}, "; out="${out}\"$(egress_json_escape "$item")\""; done; IFS="$oldifs"; printf '%s' "$out"; }
+# Format comma-separated geoip/geosite names into sing-box 1.12+ rule_set tag array (lowercase).
+egress_sb_ruleset_array(){
+  local prefix="$1" list="$2" out="" item="" oldifs="$IFS"
+  IFS=','; for item in $list; do
+    item=$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null || printf '%s' "$item" | tr '[:upper:]' '[:lower:]')
+    [ -n "$item" ] || continue
+    [ -n "$out" ] && out="${out}, "
+    out="${out}\"$(egress_json_escape "${prefix}-${item}")\""
+  done; IFS="$oldifs"
+  printf '%s' "$out"
+}
 egress_b64_decode(){ local s="$1"; s=$(printf '%s' "$s" | tr '_-' '+/'); local pad=$(( (4 - ${#s} % 4) % 4 )) i=0; while [ $i -lt $pad ]; do s="${s}="; i=$((i + 1)); done; printf '%s' "$s" | base64 -d 2>/dev/null; }
 # $2 = xr|sb|both (default both): which kernels get an outbound for this tag.
 # Single-kernel tags (e.g. tuic on sing-box only) stay in egress_tags so rules
@@ -384,8 +395,8 @@ egress_parse_and_rule(){
       source) carr=$(egress_json_array "$cval"); [ -n "$sb_source" ] && sb_source="${sb_source}, "; sb_source="${sb_source}${carr}"; [ -n "$xr_source" ] && xr_source="${xr_source}, "; xr_source="${xr_source}${carr}";;
       inbound) _exp=""; IFS=','; for _it in $cval; do _it=$(printf '%s' "$_it" | xargs 2>/dev/null || printf '%s' "$_it"); [ -n "$_it" ] || continue; IFS=','; for _tg in $(egress_inbound_tags "$_it"); do _tg=$(printf '%s' "$_tg" | xargs 2>/dev/null || printf '%s' "$_tg"); case ",$_exp," in *",$_tg,"*) ;; *) _exp="${_exp:+$_exp,}$_tg";; esac; done; IFS=','; case "$(printf '%s' "$_it" | tr 'A-Z' 'a-z')" in vlpt[0-9]*) if [ -n "$vlpt" ] && [ -z "$vlpt_more" ]; then echo "⚠ 提示：分流规则中指定了 $_it，但本机仅配置了单端口 Reality (vlpt)，若要匹配主 Reality 流量请使用 inbound:vlpt"; fi;; esac; done; IFS="$oldifs2"
         carr=$(egress_json_array "$_exp"); [ -n "$sb_inbound" ] && sb_inbound="${sb_inbound}, "; sb_inbound="${sb_inbound}${carr}"; [ -n "$xr_inbound" ] && xr_inbound="${xr_inbound}, "; xr_inbound="${xr_inbound}${carr}";;
-      geoip) carr=$(egress_json_array "$cval"); [ -n "$sb_geoip" ] && sb_geoip="${sb_geoip}, "; sb_geoip="${sb_geoip}${carr}"; [ -n "$xr_geoip" ] && xr_geoip="${xr_geoip}, "; xr_geoip="${xr_geoip}${carr}";;
-      geosite) carr=$(egress_json_array "$cval"); [ -n "$sb_geosite" ] && sb_geosite="${sb_geosite}, "; sb_geosite="${sb_geosite}${carr}"
+      geoip) carr=$(egress_sb_ruleset_array "geoip" "$cval"); [ -n "$sb_geoip" ] && sb_geoip="${sb_geoip}, "; sb_geoip="${sb_geoip}${carr}"; carr=$(egress_json_array "$cval"); [ -n "$xr_geoip" ] && xr_geoip="${xr_geoip}, "; xr_geoip="${xr_geoip}${carr}";;
+      geosite) carr=$(egress_sb_ruleset_array "geosite" "$cval"); [ -n "$sb_geosite" ] && sb_geosite="${sb_geosite}, "; sb_geosite="${sb_geosite}${carr}"
         goldifs2="$IFS"; IFS=','; for gitem in $cval; do gitem=$(printf '%s' "$gitem" | xargs 2>/dev/null || printf '%s' "$gitem"); [ -n "$gitem" ] || continue; [ -n "$xr_domain" ] && xr_domain="${xr_domain}, "; xr_domain="${xr_domain}\"geosite:$(egress_json_escape "$gitem")\""; done; IFS="$goldifs2";;
       port) port_seen=1; poldifs2="$IFS"; IFS=','; for pitem in $cval; do pitem=$(printf '%s' "$pitem" | xargs 2>/dev/null || printf '%s' "$pitem"); case "$pitem" in *'-'*) case "$pitem" in [0-9]*-[0-9]*) sb_r="${sb_r:+$sb_r, }\"${pitem%-*}:${pitem#*-}\""; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口范围格式错误，已跳过该项：$pitem";; esac;; [0-9]*) sb_p="${sb_p:+$sb_p, }$pitem"; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口格式错误，已跳过该项：$pitem";; esac; done; IFS="$poldifs2";;
       protocol) carr=$(egress_json_array "$cval"); [ -n "$sb_protocol" ] && sb_protocol="${sb_protocol}, "; sb_protocol="${sb_protocol}${carr}"; [ -n "$xr_protocol" ] && xr_protocol="${xr_protocol}, "; xr_protocol="${xr_protocol}${carr}";;
@@ -393,14 +404,15 @@ egress_parse_and_rule(){
     esac
   done; IFS="$oldifs2"
   if [ "$port_seen" = "1" ] && [ -z "$sb_p" ] && [ -z "$sb_r" ]; then echo "分流规则无有效端口，已跳过整条：$rule"; return 0; fi
-  local sb_match="" has_ip=0
+  local sb_match="" has_ip=0 sb_rs=""
   sep=""
   if [ -n "$sb_domain" ]; then sb_match="${sb_match}${sep}\"domain_suffix\": [$sb_domain]"; sep=", "; fi
   if [ -n "$sb_ip" ]; then sb_match="${sb_match}${sep}\"ip_cidr\": [$sb_ip]"; sep=", "; has_ip=1; fi
   if [ -n "$sb_source" ]; then sb_match="${sb_match}${sep}\"source_ip_cidr\": [$sb_source]"; sep=", "; fi
   if [ -n "$sb_inbound" ]; then sb_match="${sb_match}${sep}\"inbound\": [$sb_inbound]"; sep=", "; fi
-  if [ -n "$sb_geoip" ]; then sb_match="${sb_match}${sep}\"geoip\": [$sb_geoip]"; sep=", "; has_ip=1; fi
-  if [ -n "$sb_geosite" ]; then sb_match="${sb_match}${sep}\"geosite\": [$sb_geosite]"; sep=", "; fi
+  if [ -n "$sb_geoip" ]; then sb_rs="$sb_geoip"; has_ip=1; fi
+  if [ -n "$sb_geosite" ]; then sb_rs="${sb_rs:+$sb_rs, }$sb_geosite"; fi
+  if [ -n "$sb_rs" ]; then sb_match="${sb_match}${sep}\"rule_set\": [$sb_rs]"; sep=", "; fi
   if [ -n "$sb_p" ]; then sb_match="${sb_match}${sep}\"port\": [$sb_p]"; sep=", "; fi
   if [ -n "$sb_r" ]; then sb_match="${sb_match}${sep}\"port_range\": [$sb_r]"; sep=", "; fi
   if [ -n "$sb_protocol" ]; then sb_match="${sb_match}${sep}\"protocol\": [$sb_protocol]"; sep=", "; fi
@@ -418,12 +430,13 @@ egress_parse_and_rule(){
   xr_obj="${xr_obj}${sep}\"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "
   [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}${sb_obj}"
+  [ "$_rule_sb" = "1" ] && [ "$has_ip" = "1" ] && _egress_sb_post_buf="${_egress_sb_post_buf}${sb_obj}"
   [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}${xr_obj}"
   return 0
 }
 egress_parse_rules(){
   local rules="$1" rule="" mp="" tag="" typ="" val="" arr="" oldifs="$IFS"
-  local _egress_sb_pre_buf="" _egress_sb_pre_has_bind=0
+  local _egress_sb_pre_buf="" _egress_sb_post_buf="" _egress_sb_pre_has_bind=0
   IFS=';'; for rule in $rules; do
     [ -n "$rule" ] || continue
     case "$rule" in *'=>'*) mp="${rule%%=>*}"; tag="${rule##*=>}";; *) echo "分流规则格式错误，已跳过：$rule"; continue;; esac
@@ -450,8 +463,8 @@ egress_parse_rules(){
       domain) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"domain_suffix\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "; egress_sb_pre_emit "\"domain_suffix\": [$arr]" "$tag" 0;;
-      ip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"ip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      ip) [ "$_rule_sb" = "1" ] && { _sb_ip="      {\"ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; egress_sb_rules="${egress_sb_rules}${_sb_ip}"; _egress_sb_post_buf="${_egress_sb_post_buf}${_sb_ip}"; }; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"ip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       source) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"source_ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"source\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
@@ -459,13 +472,17 @@ egress_parse_rules(){
       inbound) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"inbound\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"inboundTag\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "; egress_sb_pre_emit "\"inbound\": [$arr]" "$tag" 0;;
-      geoip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geoip\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
-"; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"geoip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
+      geoip) local sb_rs=""
+        sb_rs=$(egress_sb_ruleset_array "geoip" "$val")
+        [ "$_rule_sb" = "1" ] && { _sb_geoip="      {\"rule_set\": [$sb_rs], \"outbound\": \"$(egress_json_escape "$tag")\"},
+"; egress_sb_rules="${egress_sb_rules}${_sb_geoip}"; _egress_sb_post_buf="${_egress_sb_post_buf}${_sb_geoip}"; }; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"geoip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
-      geosite) local garr="" gitem="" goldifs="$IFS"; IFS=','; for gitem in $val; do gitem=$(printf '%s' "$gitem" | xargs 2>/dev/null || printf '%s' "$gitem"); [ -n "$gitem" ] || continue; [ -n "$garr" ] && garr="${garr}, "; garr="${garr}\"geosite:$(egress_json_escape "$gitem")\""; done; IFS="$goldifs"
-        [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geosite\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
+      geosite) local sb_rs="" garr="" gitem="" goldifs="$IFS"
+        sb_rs=$(egress_sb_ruleset_array "geosite" "$val")
+        IFS=','; for gitem in $val; do gitem=$(printf '%s' "$gitem" | xargs 2>/dev/null || printf '%s' "$gitem"); [ -n "$gitem" ] || continue; [ -n "$garr" ] && garr="${garr}, "; garr="${garr}\"geosite:$(egress_json_escape "$gitem")\""; done; IFS="$goldifs"
+        [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"rule_set\": [$sb_rs], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$garr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-"; egress_sb_pre_emit "\"geosite\": [$arr]" "$tag" 0;;
+"; egress_sb_pre_emit "\"rule_set\": [$sb_rs]" "$tag" 0;;
       port) local sb_p="" sb_r="" sb_pm="" xr_p="" pitem="" poldifs="$IFS"; IFS=','; for pitem in $val; do pitem=$(printf '%s' "$pitem" | xargs 2>/dev/null || printf '%s' "$pitem"); case "$pitem" in *'-'*) case "$pitem" in [0-9]*-[0-9]*) sb_r="${sb_r:+$sb_r, }\"${pitem%-*}:${pitem#*-}\""; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口范围格式错误，已跳过：$pitem";; esac;; [0-9]*) sb_p="${sb_p:+$sb_p, }$pitem"; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口格式错误，已跳过：$pitem";; esac; done; IFS="$poldifs"
         if [ -n "$sb_p" ] || [ -n "$sb_r" ]; then
           [ -n "$sb_p" ] && sb_pm="\"port\": [$sb_p]"
@@ -484,36 +501,99 @@ egress_parse_rules(){
       *) echo "分流规则类型 $typ 暂不支持，已跳过：$rule";;
     esac
   done; IFS="$oldifs"
-  if [ "$_egress_sb_pre_has_bind" = "1" ]; then egress_sb_pre_rules="$_egress_sb_pre_buf"; fi
+  if [ "$_egress_sb_pre_has_bind" = "1" ]; then
+    egress_sb_pre_rules="$_egress_sb_pre_buf"
+    egress_sb_rules="$_egress_sb_post_buf"
+  fi
 }
+# Collect needed geoip/geosite tags and emit sing-box 1.12+ binary .srs rule_set config.
 egress_geo_needed(){
-  egress_geo_needed=0; egress_sb_geo_cfg=""
-  local r="" typ="" part="" left="" oldifs="$IFS" goldifs2=""
-  IFS=';'; for r in $egress_rules; do left="${r%%=>*}"; goldifs2="$IFS"; IFS='&'; for part in $left; do typ="${part%%:*}"; case "$typ" in geoip|geosite) egress_geo_needed=1;; esac; done; IFS="$goldifs2"; done; IFS="$oldifs"
+  egress_geo_needed=0; egress_sb_geo_cfg=""; egress_sb_geoip_tags=""; egress_sb_geosite_tags=""
+  local r="" typ="" part="" left="" cval="" item="" oldifs="$IFS" goldifs2="" goldifs3="" rs_items=""
+  IFS=';'; for r in $egress_rules; do
+    left="${r%%=>*}"; goldifs2="$IFS"; IFS='&'
+    for part in $left; do
+      part=$(printf '%s' "$part" | xargs 2>/dev/null || printf '%s' "$part")
+      typ="${part%%:*}"; cval="${part#*:}"
+      case "$typ" in
+        geoip|geosite)
+          egress_geo_needed=1
+          goldifs3="$IFS"; IFS=','
+          for item in $cval; do
+            item=$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null || printf '%s' "$item" | tr '[:upper:]' '[:lower:]')
+            [ -n "$item" ] || continue
+            if [ "$typ" = "geoip" ]; then
+              case " $egress_sb_geoip_tags " in *" $item "*) ;; *) egress_sb_geoip_tags="${egress_sb_geoip_tags:+$egress_sb_geoip_tags }$item";; esac
+            else
+              case " $egress_sb_geosite_tags " in *" $item "*) ;; *) egress_sb_geosite_tags="${egress_sb_geosite_tags:+$egress_sb_geosite_tags }$item";; esac
+            fi
+          done
+          IFS="$goldifs3"
+          ;;
+      esac
+    done
+    IFS="$goldifs2"
+  done; IFS="$oldifs"
   if [ "$egress_geo_needed" = 1 ]; then
-    egress_sb_geo_cfg="    \"geoip\": {\"path\": \"$HOME/agsbx/geo/sing-box/geoip.db\"},
-    \"geosite\": {\"path\": \"$HOME/agsbx/geo/sing-box/geosite.db\"},
+    local rs_path="" rs_tag=""
+    for item in $egress_sb_geoip_tags; do
+      rs_tag=$(egress_json_escape "geoip-${item}")
+      rs_path=$(egress_json_escape "$HOME/agsbx/geo/sing-box/geoip-${item}.srs")
+      rs_items="${rs_items:+${rs_items},
+}      {\"tag\": \"${rs_tag}\", \"type\": \"local\", \"format\": \"binary\", \"path\": \"${rs_path}\"}"
+    done
+    for item in $egress_sb_geosite_tags; do
+      rs_tag=$(egress_json_escape "geosite-${item}")
+      rs_path=$(egress_json_escape "$HOME/agsbx/geo/sing-box/geosite-${item}.srs")
+      rs_items="${rs_items:+${rs_items},
+}      {\"tag\": \"${rs_tag}\", \"type\": \"local\", \"format\": \"binary\", \"path\": \"${rs_path}\"}"
+    done
+    if [ -n "$rs_items" ]; then
+      egress_sb_geo_cfg="    \"rule_set\": [
+${rs_items}
+    ],
 "
+    fi
   fi
 }
-egress_geo_download(){ # $1=url $2=file ; skip existing non-empty files
-  local url="$1" file="$2"
+egress_geo_download(){ # $1=url $2=file [$3=fallback_url] ; skip existing non-empty files
+  local url="$1" file="$2" fallback="${3:-}"
   [ -s "$file" ] && return 0
-  if command -v curl >/dev/null 2>&1; then
-    curl -L --connect-timeout 15 -o "$file" "$url" >/dev/null 2>&1 || { rm -f "$file"; echo "geo 数据库下载失败：$url，请手动下载到 $file"; return 1; }
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$file" "$url" >/dev/null 2>&1 || { rm -f "$file"; echo "geo 数据库下载失败：$url，请手动下载到 $file"; return 1; }
-  else
-    echo "geo 数据库需要下载但本机没有 curl/wget，请手动下载到 $file"; return 1
-  fi
-  [ -s "$file" ] || { rm -f "$file"; echo "geo 数据库下载后文件为空：$file"; return 1; }
-  return 0
+  local u=""
+  for u in "$url" "$fallback"; do
+    [ -n "$u" ] || continue
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fL --connect-timeout 15 --max-time 30 -o "$file" "$u" >/dev/null 2>&1 && [ -s "$file" ]; then
+        return 0
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if timeout 30 wget -q -O "$file" "$u" >/dev/null 2>&1 && [ -s "$file" ]; then
+        return 0
+      fi
+    else
+      echo "geo 数据库需要下载但本机没有 curl/wget，请手动下载到 $file"; return 1
+    fi
+    rm -f "$file"
+  done
+  echo "geo 数据库下载失败：$url，请手动下载到 $file"
+  return 1
 }
 egress_geo_setup(){
   [ "$egress_geo_needed" = 1 ] || return 0
   mkdir -p "$HOME/agsbx/geo/sing-box" "$HOME/agsbx/geo/xray" 2>/dev/null || true
-  egress_geo_download "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db" "$HOME/agsbx/geo/sing-box/geoip.db"
-  egress_geo_download "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db" "$HOME/agsbx/geo/sing-box/geosite.db"
+  local item=""
+  for item in $egress_sb_geoip_tags; do
+    egress_geo_download \
+      "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-${item}.srs" \
+      "$HOME/agsbx/geo/sing-box/geoip-${item}.srs" \
+      "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/${item}.srs"
+  done
+  for item in $egress_sb_geosite_tags; do
+    egress_geo_download \
+      "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${item}.srs" \
+      "$HOME/agsbx/geo/sing-box/geosite-${item}.srs" \
+      "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/${item}.srs"
+  done
   egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" "$HOME/agsbx/geo/xray/geoip.dat"
   egress_geo_download "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" "$HOME/agsbx/geo/xray/geosite.dat"
   export XRAY_LOCATION_ASSET="$HOME/agsbx/geo/xray"

@@ -55,8 +55,8 @@ assert xby["ss2022-out"]["settings"]["servers"][0]["uot"] is True
 assert xby["xhttp-out"]["streamSettings"]["network"] == "xhttp"
 assert xby["xhttp-out"]["streamSettings"]["xhttpSettings"]["mode"] == "auto"
 sbr = json.load(open(f"{tmp}/sb_rules.json"))["rules"]
-assert sbr[0]["geoip"] == ["CN", "US"] and sbr[0]["outbound"] == "trojan-out", sbr[0]
-assert sbr[1]["geosite"] == ["google"] and sbr[1]["outbound"] == "vmess-out", sbr[1]
+assert sbr[0]["rule_set"] == ["geoip-cn", "geoip-us"] and sbr[0]["outbound"] == "trojan-out", sbr[0]
+assert sbr[1]["rule_set"] == ["geosite-google"] and sbr[1]["outbound"] == "vmess-out", sbr[1]
 assert sbr[2]["port"] == [80, 443] and sbr[2]["outbound"] == "ss-out", sbr[2]
 # port:1000-2000=>xhttp-out is Xray-only now, so it is absent from sb rules
 assert sbr[3]["protocol"] == ["http", "tls"], sbr[3]

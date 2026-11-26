@@ -31,11 +31,11 @@ chmod +x "$TMP/fakebin/curl"
 cat > "$TMP/run.sh" << 'RUN'
 #!/bin/bash
 source "$1"
-# Case A: geo rule -> needed, sb cfg, sb/xr rules present
+# Case A: geo rule -> needed, sb rule_set cfg, sb/xr rules present
 egress_nodes="socks5://u:p@203.0.113.10:1080#socks-out"; egress_bind=""; egress_rules="geoip:cn=>socks-out;geosite:google=>socks-out"
 egress_init
 [ "$egress_geo_needed" = 1 ] || { echo "FAIL: geo needed not set"; exit 1; }
-case "$egress_sb_geo_cfg" in *"geoip.db"*|*"geosite.db"*) ;; *) echo "FAIL: sb geo cfg missing db paths"; exit 1;; esac
+case "$egress_sb_geo_cfg" in *"geoip-cn.srs"*|*"geosite-google.srs"*) ;; *) echo "FAIL: sb geo cfg missing srs paths: $egress_sb_geo_cfg"; exit 1;; esac
 printf '{"route": {%s"rules": [\n%s{"action":"route","outbound":"direct"}\n]}}\n' "$egress_sb_geo_cfg" "$egress_sb_rules" > "$2/sb_route.json"
 # Case B: domain value containing 'geosite' must NOT trigger geo
 egress_rules="domain:geosite.example.com=>socks-out"; egress_init
@@ -46,15 +46,15 @@ egress_nodes=""; egress_bind=""; egress_rules=""; egress_init
 [ "$egress_geo_needed" = 0 ] && [ -z "$egress_sb_geo_cfg" ] && [ -z "$egress_sb_rules" ] || { echo "FAIL: empty egress not clean"; exit 1; }
 # Case D: download with fake curl, then skip existing
 export HOME="$2/home"
-egress_nodes="socks5://u:p@203.0.113.10:1080#socks-out"; egress_rules="geoip:cn=>socks-out"; egress_init
+egress_nodes="socks5://u:p@203.0.113.10:1080#socks-out"; egress_rules="geoip:cn=>socks-out;geosite:google=>socks-out"; egress_init
 egress_geo_setup
-for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do
+for f in geo/sing-box/geoip-cn.srs geo/sing-box/geosite-google.srs geo/xray/geoip.dat geo/xray/geosite.dat; do
   [ "$(cat "$HOME/agsbx/$f")" = "FAKE" ] || { echo "FAIL: $f not downloaded by fake curl"; exit 1; }
 done
 [ "$XRAY_LOCATION_ASSET" = "$HOME/agsbx/geo/xray" ] || { echo "FAIL: XRAY_LOCATION_ASSET not set"; exit 1; }
-for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do printf 'EXISTING' > "$HOME/agsbx/$f"; done
+for f in geo/sing-box/geoip-cn.srs geo/sing-box/geosite-google.srs geo/xray/geoip.dat geo/xray/geosite.dat; do printf 'EXISTING' > "$HOME/agsbx/$f"; done
 egress_geo_setup
-for f in geo/sing-box/geoip.db geo/sing-box/geosite.db geo/xray/geoip.dat geo/xray/geosite.dat; do
+for f in geo/sing-box/geoip-cn.srs geo/sing-box/geosite-google.srs geo/xray/geoip.dat geo/xray/geosite.dat; do
   [ "$(cat "$HOME/agsbx/$f")" = "EXISTING" ] || { echo "FAIL: existing $f was re-downloaded"; exit 1; }
 done
 # Case E: download failure warns, removes partial file, setup does not abort
@@ -63,19 +63,21 @@ cat > "$2/fakebin/curl" << 'EOF2'
 exit 1
 EOF2
 chmod +x "$2/fakebin/curl"
-rm -f "$HOME/agsbx/geo/sing-box/geoip.db"
+rm -f "$HOME/agsbx/geo/sing-box/geoip-cn.srs"
 egress_geo_setup || true
-[ ! -e "$HOME/agsbx/geo/sing-box/geoip.db" ] || { echo "FAIL: failed download left a file"; exit 1; }
+[ ! -e "$HOME/agsbx/geo/sing-box/geoip-cn.srs" ] || { echo "FAIL: failed download left a file"; exit 1; }
 RUN
 PATH="$TMP/fakebin:$PATH" bash "$TMP/run.sh" "$TMP/egress.sh" "$TMP"
 python3 - "$TMP" << 'PY'
 import json, sys
 tmp = sys.argv[1]
 d = json.load(open(f"{tmp}/sb_route.json"))
-assert d["route"]["geoip"]["path"].endswith("/agsbx/geo/sing-box/geoip.db"), d["route"]
-assert d["route"]["geosite"]["path"].endswith("/agsbx/geo/sing-box/geosite.db"), d["route"]
+rs = {r["tag"]: r for r in d["route"]["rule_set"]}
+assert rs["geoip-cn"]["path"].endswith("/agsbx/geo/sing-box/geoip-cn.srs"), rs
+assert rs["geosite-google"]["path"].endswith("/agsbx/geo/sing-box/geosite-google.srs"), rs
+assert rs["geoip-cn"]["type"] == "local" and rs["geoip-cn"]["format"] == "binary", rs
 rules = d["route"]["rules"]
-assert rules[0]["geoip"] == ["cn"], rules[0]
-assert rules[1]["geosite"] == ["google"], rules[1]
-print("PASS: egress geo (detection, sb route cfg, gated download, xray asset, failure handling)")
+assert rules[0]["rule_set"] == ["geoip-cn"], rules[0]
+assert rules[1]["rule_set"] == ["geosite-google"], rules[1]
+print("PASS: egress geo (detection, sb rule_set cfg, gated download, xray asset, failure handling)")
 PY

@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Hooks: egress_init at xrsbout start + 4 fragment placeholders in xrsbout
 grep -q '^xrsbout(){' "$F" || { echo "FAIL: xrsbout missing"; exit 1; }
 awk '/^xrsbout\(\)\{/{flag=1} flag && /^egress_init$/{found=1} /^ins\(\)\{/{flag=0} END{exit !found}' "$F" || { echo "FAIL: egress_init not at xrsbout start"; exit 1; }
-for h in 'egress_xr_outbounds' 'egress_xr_rules' 'egress_sb_outbounds' 'egress_sb_rules'; do
+for h in 'egress_xr_outbounds' 'egress_xr_rules' 'egress_sb_outbounds' 'egress_sb_pre_rules' 'egress_sb_rules'; do
   grep -q "^\${$h}" "$F" || { echo "FAIL: container hook missing: $h"; exit 1; }
 done
 # Env passthrough in ins()
@@ -37,7 +37,7 @@ egress_rules='geoip:CN=>trojan-out;port:443=>bind1'
 egress_init
 printf '{"outbounds":[\n%s{"type":"direct","tag":"direct"}\n]}\n' "$egress_sb_outbounds" > "$2/sb_out.json"
 printf '{"outbounds":[\n%s{"protocol":"freedom","tag":"direct"}\n]}\n' "$egress_xr_outbounds" > "$2/xr_out.json"
-printf '{"rules":[\n%s{"action":"route","outbound":"direct"}\n]}\n' "$egress_sb_rules" > "$2/sb_rules.json"
+printf '{"rules":[\n%s{"action":"resolve","strategy":"prefer_ipv4"},\n%s{"action":"route","outbound":"direct"}\n]}\n' "$egress_sb_pre_rules" "$egress_sb_rules" > "$2/sb_rules.json"
 printf '{"rules":[\n%s{"type":"field","outboundTag":"direct"}\n]}\n' "$egress_xr_rules" > "$2/xr_rules.json"
 RUN
 bash "$TMP/run.sh" "$TMP/egress.sh" "$TMP"
@@ -50,7 +50,11 @@ sb = json.load(open(f"{tmp}/sb_out.json"))
 assert [o["tag"] for o in sb["outbounds"]] == ["trojan-out","bind1","direct"], sb["outbounds"]
 assert sb["outbounds"][0]["type"] == "trojan"
 sbr = json.load(open(f"{tmp}/sb_rules.json"))["rules"]
-assert sbr[0]["geoip"] == ["CN"] and sbr[0]["outbound"] == "trojan-out"
-assert sbr[1]["port"] == [443] and sbr[1]["outbound"] == "bind1"
+idx_global = next(i for i, r in enumerate(sbr) if r.get("action") == "resolve" and set(r.keys()) == {"action", "strategy"})
+assert sbr[0] == {"port": [443], "action": "resolve", "strategy": "ipv4_only"}, sbr
+assert sbr[1] == {"port": [443], "outbound": "bind1"}, sbr
+post = sbr[idx_global + 1:]
+assert post[0]["rule_set"] == ["geoip-cn"] and post[0]["outbound"] == "trojan-out", post
+assert len([r for r in sbr if "outbound" in r]) == 3, sbr
 print("PASS: container egress (module + hooks + env passthrough, empty zero-change)")
 PY
