@@ -1357,6 +1357,30 @@ egress_parse_link(){
     *) echo "出口节点协议 $scheme 暂不支持，已跳过：$tag";;
   esac
 }
+# Return strict sing-box resolve strategy ("ipv6_only" / "ipv4_only") for a bindN tag, or empty for non-bind tags.
+egress_bind_sb_strategy(){
+  case " ${egress_bind_v6_tags:-} " in *" $1 "*) printf 'ipv6_only'; return 0 ;; esac
+  case " ${egress_bind_v4_tags:-} " in *" $1 "*) printf 'ipv4_only'; return 0 ;; esac
+  return 1
+}
+# Buffer pre-resolve + route rules before global `action: resolve` in sb.json so non-IP rules targeting
+# single-family bindN outbounds resolve strictly to that IP family while preserving first-match-wins order.
+egress_sb_pre_emit(){
+  local match_fields="$1" tag="$2" has_ip="$3" bstrat="" etag=""
+  [ "$_rule_sb" = "1" ] && [ "$has_ip" = "0" ] && [ -n "${egress_bind:-}" ] || return 0
+  etag=$(egress_json_escape "$tag")
+  bstrat=$(egress_bind_sb_strategy "$tag" 2>/dev/null || true)
+  if [ -n "$bstrat" ]; then
+    _egress_sb_pre_has_bind=1
+    _egress_sb_pre_buf="${_egress_sb_pre_buf}      {${match_fields}, \"action\": \"resolve\", \"strategy\": \"${bstrat}\"},
+      {${match_fields}, \"outbound\": \"${etag}\"},
+"
+  else
+    _egress_sb_pre_buf="${_egress_sb_pre_buf}      {${match_fields}, \"action\": \"resolve\", \"strategy\": \"${sbyx:-prefer_ipv4}\"},
+      {${match_fields}, \"outbound\": \"${etag}\"},
+"
+  fi
+}
 egress_parse_and_rule(){
   # One combined rule: conditions joined by '&' are AND, comma lists
   # inside one condition are OR, rules in order are first-match-wins.
@@ -1392,18 +1416,20 @@ egress_parse_and_rule(){
     esac
   done; IFS="$oldifs2"
   if [ "$port_seen" = "1" ] && [ -z "$sb_p" ] && [ -z "$sb_r" ]; then echo "分流规则无有效端口，已跳过整条：$rule"; return 0; fi
-  sb_obj="      {"; sep=""
-  if [ -n "$sb_domain" ]; then sb_obj="${sb_obj}${sep}\"domain_suffix\": [$sb_domain]"; sep=", "; fi
-  if [ -n "$sb_ip" ]; then sb_obj="${sb_obj}${sep}\"ip_cidr\": [$sb_ip]"; sep=", "; fi
-  if [ -n "$sb_source" ]; then sb_obj="${sb_obj}${sep}\"source_ip_cidr\": [$sb_source]"; sep=", "; fi
-  if [ -n "$sb_inbound" ]; then sb_obj="${sb_obj}${sep}\"inbound\": [$sb_inbound]"; sep=", "; fi
-  if [ -n "$sb_geoip" ]; then sb_obj="${sb_obj}${sep}\"geoip\": [$sb_geoip]"; sep=", "; fi
-  if [ -n "$sb_geosite" ]; then sb_obj="${sb_obj}${sep}\"geosite\": [$sb_geosite]"; sep=", "; fi
-  if [ -n "$sb_p" ]; then sb_obj="${sb_obj}${sep}\"port\": [$sb_p]"; sep=", "; fi
-  if [ -n "$sb_r" ]; then sb_obj="${sb_obj}${sep}\"port_range\": [$sb_r]"; sep=", "; fi
-  if [ -n "$sb_protocol" ]; then sb_obj="${sb_obj}${sep}\"protocol\": [$sb_protocol]"; sep=", "; fi
-  sb_obj="${sb_obj}${sep}\"outbound\": \"$(egress_json_escape "$tag")\"},
+  local sb_match="" has_ip=0
+  sep=""
+  if [ -n "$sb_domain" ]; then sb_match="${sb_match}${sep}\"domain_suffix\": [$sb_domain]"; sep=", "; fi
+  if [ -n "$sb_ip" ]; then sb_match="${sb_match}${sep}\"ip_cidr\": [$sb_ip]"; sep=", "; has_ip=1; fi
+  if [ -n "$sb_source" ]; then sb_match="${sb_match}${sep}\"source_ip_cidr\": [$sb_source]"; sep=", "; fi
+  if [ -n "$sb_inbound" ]; then sb_match="${sb_match}${sep}\"inbound\": [$sb_inbound]"; sep=", "; fi
+  if [ -n "$sb_geoip" ]; then sb_match="${sb_match}${sep}\"geoip\": [$sb_geoip]"; sep=", "; has_ip=1; fi
+  if [ -n "$sb_geosite" ]; then sb_match="${sb_match}${sep}\"geosite\": [$sb_geosite]"; sep=", "; fi
+  if [ -n "$sb_p" ]; then sb_match="${sb_match}${sep}\"port\": [$sb_p]"; sep=", "; fi
+  if [ -n "$sb_r" ]; then sb_match="${sb_match}${sep}\"port_range\": [$sb_r]"; sep=", "; fi
+  if [ -n "$sb_protocol" ]; then sb_match="${sb_match}${sep}\"protocol\": [$sb_protocol]"; sep=", "; fi
+  sb_obj="      {${sb_match}${sep}\"outbound\": \"$(egress_json_escape "$tag")\"},
 "
+  egress_sb_pre_emit "$sb_match" "$tag" "$has_ip"
   xr_obj="      {\"type\": \"field\", "; sep=""
   if [ -n "$xr_domain" ]; then xr_obj="${xr_obj}${sep}\"domain\": [$xr_domain]"; sep=", "; fi
   if [ -n "$xr_ip" ]; then xr_obj="${xr_obj}${sep}\"ip\": [$xr_ip]"; sep=", "; fi
@@ -1420,6 +1446,7 @@ egress_parse_and_rule(){
 }
 egress_parse_rules(){
   local rules="$1" rule="" mp="" tag="" typ="" val="" arr="" oldifs="$IFS"
+  local _egress_sb_pre_buf="" _egress_sb_pre_has_bind=0
   IFS=';'; for rule in $rules; do
     [ -n "$rule" ] || continue
     case "$rule" in *'=>'*) mp="${rule%%=>*}"; tag="${rule##*=>}";; *) echo "分流规则格式错误，已跳过：$rule"; continue;; esac
@@ -1445,30 +1472,30 @@ egress_parse_rules(){
     case "$typ" in
       domain) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"domain_suffix\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-";;
+"; egress_sb_pre_emit "\"domain_suffix\": [$arr]" "$tag" 0;;
       ip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"ip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       source) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"source_ip_cidr\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"source\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-";;
+"; egress_sb_pre_emit "\"source_ip_cidr\": [$arr]" "$tag" 0;;
       inbound) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"inbound\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"inboundTag\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-";;
+"; egress_sb_pre_emit "\"inbound\": [$arr]" "$tag" 0;;
       geoip) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geoip\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"geoip\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 ";;
       geosite) local garr="" gitem="" goldifs="$IFS"; IFS=','; for gitem in $val; do gitem=$(printf '%s' "$gitem" | xargs 2>/dev/null || printf '%s' "$gitem"); [ -n "$gitem" ] || continue; [ -n "$garr" ] && garr="${garr}, "; garr="${garr}\"geosite:$(egress_json_escape "$gitem")\""; done; IFS="$goldifs"
         [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"geosite\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"domain\": [$garr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-";;
-      port) local sb_p="" sb_r="" xr_p="" pitem="" poldifs="$IFS"; IFS=','; for pitem in $val; do pitem=$(printf '%s' "$pitem" | xargs 2>/dev/null || printf '%s' "$pitem"); case "$pitem" in *'-'*) case "$pitem" in [0-9]*-[0-9]*) sb_r="${sb_r:+$sb_r, }\"${pitem%-*}:${pitem#*-}\""; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口范围格式错误，已跳过：$pitem";; esac;; [0-9]*) sb_p="${sb_p:+$sb_p, }$pitem"; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口格式错误，已跳过：$pitem";; esac; done; IFS="$poldifs"
+"; egress_sb_pre_emit "\"geosite\": [$arr]" "$tag" 0;;
+      port) local sb_p="" sb_r="" sb_pm="" xr_p="" pitem="" poldifs="$IFS"; IFS=','; for pitem in $val; do pitem=$(printf '%s' "$pitem" | xargs 2>/dev/null || printf '%s' "$pitem"); case "$pitem" in *'-'*) case "$pitem" in [0-9]*-[0-9]*) sb_r="${sb_r:+$sb_r, }\"${pitem%-*}:${pitem#*-}\""; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口范围格式错误，已跳过：$pitem";; esac;; [0-9]*) sb_p="${sb_p:+$sb_p, }$pitem"; xr_p="${xr_p:+$xr_p,}$pitem";; *) echo "分流规则端口格式错误，已跳过：$pitem";; esac; done; IFS="$poldifs"
         if [ -n "$sb_p" ] || [ -n "$sb_r" ]; then
-          [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {"
-          [ "$_rule_sb" = "1" ] && [ -n "$sb_p" ] && egress_sb_rules="${egress_sb_rules}\"port\": [$sb_p], "
-          [ "$_rule_sb" = "1" ] && [ -n "$sb_r" ] && egress_sb_rules="${egress_sb_rules}\"port_range\": [$sb_r], "
-          [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}\"outbound\": \"$(egress_json_escape "$tag")\"},
+          [ -n "$sb_p" ] && sb_pm="\"port\": [$sb_p]"
+          [ -n "$sb_r" ] && sb_pm="${sb_pm:+$sb_pm, }\"port_range\": [$sb_r]"
+          [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {${sb_pm}, \"outbound\": \"$(egress_json_escape "$tag")\"},
 "
+          egress_sb_pre_emit "$sb_pm" "$tag" 0
           [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"port\": \"$(egress_json_escape "$xr_p")\", \"outboundTag\": \"$(egress_json_escape "$tag")\"},
 "
         else
@@ -1476,10 +1503,11 @@ egress_parse_rules(){
         fi;;
       protocol) [ "$_rule_sb" = "1" ] && egress_sb_rules="${egress_sb_rules}      {\"protocol\": [$arr], \"outbound\": \"$(egress_json_escape "$tag")\"},
 "; [ "$_rule_xr" = "1" ] && egress_xr_rules="${egress_xr_rules}      {\"type\": \"field\", \"protocol\": [$arr], \"outboundTag\": \"$(egress_json_escape "$tag")\"},
-";;
+"; egress_sb_pre_emit "\"protocol\": [$arr]" "$tag" 0;;
       *) echo "分流规则类型 $typ 暂不支持，已跳过：$rule";;
     esac
   done; IFS="$oldifs"
+  if [ "$_egress_sb_pre_has_bind" = "1" ]; then egress_sb_pre_rules="$_egress_sb_pre_buf"; fi
 }
 egress_geo_needed(){
   egress_geo_needed=0; egress_sb_geo_cfg=""
@@ -1622,7 +1650,7 @@ egress_resolve_outip(){
   return 0
 }
 egress_init(){
-  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_xr_only_tags=""; egress_sb_only_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
+  egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_sb_pre_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_xr_only_tags=""; egress_sb_only_tags=""; egress_bind_v4_tags=""; egress_bind_v6_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
   # sing-box-only egress nodes (tuic/anytls/naive) need a sing-box config to
   # live in; at pre_xrsbout time sb.json exists iff sing-box was installed.
   [ -e "$HOME/agsbx/sb.json" ] && egress_sb_ready=1
@@ -1652,10 +1680,25 @@ egress_init(){
   local oldifs="$IFS" item="" n=0
   IFS=';'; for item in $egress_nodes; do [ -n "$item" ] && egress_parse_link "$item"; done; IFS="$oldifs"
   IFS=','; for item in $egress_bind; do item=$(printf '%s' "$item" | xargs 2>/dev/null || printf '%s' "$item"); [ -n "$item" ] || continue; n=$((n + 1))
-    egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"direct\", \"tag\": \"bind${n}\", \"bind_address\": \"$(egress_json_escape "$item")\"},
+    local _esc_ip=""
+    _esc_ip=$(egress_json_escape "$item")
+    # Match IP family so single-family bind outbounds never fail dialing the opposite IP version
+    case "$item" in
+      *:*)
+        egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"direct\", \"tag\": \"bind${n}\", \"inet6_bind_address\": \"${_esc_ip}\"},
 "
-    egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"freedom\", \"tag\": \"bind${n}\", \"sendThrough\": \"$(egress_json_escape "$item")\"},
+        egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"freedom\", \"tag\": \"bind${n}\", \"sendThrough\": \"${_esc_ip}\", \"streamSettings\": {\"sockopt\": {\"domainStrategy\": \"ForceIPv6\"}}},
 "
+        egress_bind_v6_tags="${egress_bind_v6_tags} bind${n}"
+        ;;
+      *)
+        egress_sb_outbounds="${egress_sb_outbounds}    {\"type\": \"direct\", \"tag\": \"bind${n}\", \"inet4_bind_address\": \"${_esc_ip}\"},
+"
+        egress_xr_outbounds="${egress_xr_outbounds}    {\"protocol\": \"freedom\", \"tag\": \"bind${n}\", \"sendThrough\": \"${_esc_ip}\", \"streamSettings\": {\"sockopt\": {\"domainStrategy\": \"ForceIPv4\"}}},
+"
+        egress_bind_v4_tags="${egress_bind_v4_tags} bind${n}"
+        ;;
+    esac
     egress_add_tag "bind${n}"; done; IFS="$oldifs"
   egress_parse_rules "$egress_rules"
   egress_warn_misalign
@@ -1771,7 +1814,7 @@ ${egress_sb_geo_cfg}    "rules": [
        {
           "action": "sniff"
         },
-       {
+${egress_sb_pre_rules}       {
         "action": "resolve",
          "strategy": "${sbyx}"
        },

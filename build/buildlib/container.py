@@ -136,7 +136,7 @@ if [ -n "$hy2_c_sha" ]; then hy2_c_ins=0; hy2_c_pin="&pinSHA256=$hy2_c_sha"; els
     c = replace(c, '    "rules": [\n      {\n        "type": "field",\n        "ip": [ ${xip} ],',
                 '    "rules": [\n${egress_xr_rules}      {\n        "type": "field",\n        "ip": [ ${xip} ],', "container-xr-routing-hook", 1)
     c = replace(c, '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n      {',
-                '       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n${egress_sb_rules}      {', "container-sb-routing-hook", 1)
+                '${egress_sb_pre_rules}       {\n        "action": "resolve",\n         "strategy": "${sbyx}"\n       },\n${egress_sb_rules}      {', "container-sb-routing-hook", 1)
     c = replace(c, 'fi\nif [ -n "$argo" ]; then\necho\necho "=========启用Cloudflared-argo内核========="',
                 'fi\ncontainer_vars_save\nif [ -n "$argo" ]; then\necho\necho "=========启用Cloudflared-argo内核========="', "container-vars-save", 1)
     c = replace(c, "container_vars_save\nif [ -n \"$argo\" ]",
