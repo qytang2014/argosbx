@@ -549,6 +549,15 @@
             <option value="y">开启 执行一次即可关闭</option>
           </select>
         </div>
+                <div class="row"><label>出站 IP 优先级 <span class="pill">outip</span></label>
+          <select id="outip">
+            <option value="">默认 自动（双栈优先 IPv4，单栈及单栈 WARP 自动匹配）</option>
+            <option value="4">优先 IPv4（prefer_ipv4 / ForceIPv4v6）</option>
+            <option value="6">优先 IPv6（prefer_ipv6 / ForceIPv6v4）</option>
+            <option value="4only">仅 IPv4（ipv4_only / ForceIPv4）</option>
+            <option value="6only">仅 IPv6（ipv6_only / ForceIPv6）</option>
+          </select>
+        </div>
         <div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>
         <div class="row"><label>节点名称后缀 <span class="pill">hostname</span></label><input id="hostname" type="text" placeholder="留空则用系统 hostname"/></div>
       </section>
@@ -655,7 +664,7 @@
   const CURL = 'bash <(curl -Ls https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)';
   const protoKeys = ['sopt','vmpt','vmtls','vlpt','xhpt','vxpt','vwpt','xupt','xcpt','hypt','tupt','nvpt','anpt','arpt','sspt','snpt'];
-  const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'web_proxy'];
+  const optIds = ['warp','outip','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'web_proxy'];
 
   const argoSelect = document.getElementById('argoSelect');
   const agqc = document.getElementById('agqc');
@@ -754,6 +763,7 @@
     document.getElementById('alns').value = '';
     document.getElementById('hyjpt').value = '';
     document.getElementById('name').value = '';
+    document.getElementById('outip').value = '';
     document.getElementById('egress_nodes').value = '';
     document.getElementById('egress_bind').value = '';
     document.getElementById('egress_rules').value = '';
@@ -920,7 +930,7 @@
     const keys = Object.keys(m);
     const ordered = [];
     protoKeys.forEach(k => { if (keys.includes(k)) ordered.push(k); });
-    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
+    ['warp', 'outip', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });
     if (keys.includes('argo')) ordered.push('argo');
     if (keys.includes('agqc')) ordered.push('agqc');
     if (keys.includes('agn')) ordered.push('agn');

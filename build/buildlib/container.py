@@ -121,7 +121,7 @@ if [ -n "$hy2_c_sha" ]; then hy2_c_ins=0; hy2_c_pin="&pinSHA256=$hy2_c_sha"; els
     c = replace(c, 'echo "客户端地址：$server_ip"', 'echo "客户端地址：$domain_addr"', "container-socks5-addr", 1)
     # --- egress parity (final egress module, same as main script) ---
     egress_mod = read("modules/egress.sh")
-    c = replace(c, "export ym=${ym}", "export ym=${ym}\nexport egress_nodes=${egress_nodes}\nexport egress_bind=${egress_bind}\nexport egress_rules=${egress_rules}\nexport egress_add=${egress_add}", "container-egress-exports", 1)
+    c = replace(c, "export ym=${ym}", "export ym=${ym}\nexport outip=${outip}\nexport egress_nodes=${egress_nodes}\nexport egress_bind=${egress_bind}\nexport egress_rules=${egress_rules}\nexport egress_add=${egress_add}", "container-egress-exports", 1)
     c = replace(c, '"certificate_path": "$HOME/agsbx/cert.pem",', '"certificate_path": "$HOME/agsbx/selfsigned/cert.pem",', "container-tls-cert-path", 3)
     c = replace(c, '"key_path": "$HOME/agsbx/private.key"', '"key_path": "$HOME/agsbx/selfsigned/private.key"', "container-tls-key-path", 3)
     c = replace(c, "xrsbout(){", egress_mod + "xrsbout(){", "container-egress-module", 1)

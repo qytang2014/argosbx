@@ -41,7 +41,7 @@ container_vars_save(){
   local f="$HOME/agsbx/container_vars.env" tmp
   tmp="$f.tmp.$$"
   : > "$tmp" 2>/dev/null || return 1
-  for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt snpt sopt reym cdnym argo agn agk agqc ippz warp name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
+  for v in uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt snpt sopt reym cdnym argo agn agk agqc ippz warp outip name ym vlpt_kernel egress_nodes egress_bind egress_rules; do
     if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}" >> "$tmp"; fi
   done
   chmod 600 "$tmp" 2>/dev/null || true
@@ -149,6 +149,7 @@ export ippz=${ippz}
 export warp=${warp}
 export name=${name}
 export ym=${ym}
+export outip=${outip}
 export egress_nodes=${egress_nodes}
 export egress_bind=${egress_bind}
 export egress_rules=${egress_rules}
@@ -1532,11 +1533,101 @@ egress_warn_misalign(){
     echo "  修复（二选一）：1) 设 vlpt_kernel=xray，把 vlpt 建到 Xray 上；2) 换 Xray 和 sing-box 都支持的出口协议（如 vless/trojan/vmess/ss/socks）"
   fi
 }
+# Resolve outbound IPv4/IPv6 domain strategy (sbyx / xryx / wxryx) before xrsbout writes xr.json & sb.json.
+# Shared by main script (argosbx.sh) and container (container/nodejs/start.sh).
+egress_resolve_outip(){
+  local mode="" s1="${s1outtag:-direct}" s2="${s2outtag:-direct}" x1="${x1outtag:-direct}" x2="${x2outtag:-direct}"
+  mode=$(printf '%s' "${outip:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+  case "$mode" in
+    ""|auto) mode="" ;;
+    4|prefer_ipv4) mode="4" ;;
+    6|prefer_ipv6) mode="6" ;;
+    4only|ipv4_only) mode="4only" ;;
+    6only|ipv6_only) mode="6only" ;;
+    *)
+      echo "⚠ 未知 outip 值 '${outip}'，已回退默认自动策略（可选：4 / 6 / 4only / 6only）" >&2
+      mode=""
+      ;;
+  esac
+
+  if [ -n "$mode" ]; then
+    case "$mode" in
+      4)     sbyx="prefer_ipv4"; xryx="ForceIPv4v6"; wxryx="ForceIPv4v6" ;;
+      6)     sbyx="prefer_ipv6"; xryx="ForceIPv6v4"; wxryx="ForceIPv6v4" ;;
+      4only) sbyx="ipv4_only";   xryx="ForceIPv4";   wxryx="ForceIPv4" ;;
+      6only) sbyx="ipv6_only";   xryx="ForceIPv6";   wxryx="ForceIPv6" ;;
+    esac
+    # Warn on mutually exclusive single-stack WARP or native single-stack combinations
+    if [ "$mode" = "4only" ]; then
+      if { [ "$s1" = "warp-out" ] && [ "$s2" = "direct" ] && [ "${sip:-}" = '"::/0"' ]; } || \
+         { [ "$x1" = "warp-out" ] && [ "$x2" = "direct" ] && [ "${xip:-}" = '"::/0"' ]; }; then
+        echo "⚠ 注意：当前配置了 WARP IPv6 分流（warp=${warp:-}），但 outip=4only 仅解析 IPv4，WARP IPv6 分支将不会命中" >&2
+      elif [ "${v4_ok:-}" != "true" ] && [ "${v6_ok:-}" = "true" ] && [ "$s1" = "direct" ] && [ "$x1" = "direct" ]; then
+        echo "⚠ 注意：当前机器仅检测到 IPv6 连通性且未启用 WARP，强制 outip=4only 可能导致出站断连" >&2
+      fi
+    elif [ "$mode" = "6only" ]; then
+      if { [ "$s1" = "warp-out" ] && [ "$s2" = "direct" ] && [ "${sip:-}" = '"0.0.0.0/0"' ]; } || \
+         { [ "$x1" = "warp-out" ] && [ "$x2" = "direct" ] && [ "${xip:-}" = '"0.0.0.0/0"' ]; }; then
+        echo "⚠ 注意：当前配置了 WARP IPv4 分流（warp=${warp:-}），但 outip=6only 仅解析 IPv6，WARP IPv4 分支将不会命中" >&2
+      elif [ "${v4_ok:-}" = "true" ] && [ "${v6_ok:-}" != "true" ] && [ "$s1" = "direct" ] && [ "$x1" = "direct" ]; then
+        echo "⚠ 注意：当前机器仅检测到 IPv4 连通性且未启用 WARP，强制 outip=6only 可能导致出站断连" >&2
+      fi
+    fi
+    return 0
+  fi
+
+  # Auto mode: Sing-box strategy (sbyx)
+  if [ "$s2" = "warp-out" ]; then
+    sbyx="prefer_ipv4"
+  elif [ "$s1" = "warp-out" ]; then
+    if [ "${sip:-}" = '"::/0"' ]; then
+      if [ "${v4_ok:-}" = "true" ]; then sbyx="prefer_ipv6"; else sbyx="ipv6_only"; fi
+    else
+      if [ "${v6_ok:-}" = "true" ]; then sbyx="prefer_ipv4"; else sbyx="ipv4_only"; fi
+    fi
+  else
+    if [ "${v4_ok:-}" = "true" ] && [ "${v6_ok:-}" = "true" ]; then
+      sbyx="prefer_ipv4"
+    elif [ "${v4_ok:-}" = "true" ]; then
+      sbyx="ipv4_only"
+    elif [ "${v6_ok:-}" = "true" ]; then
+      sbyx="ipv6_only"
+    else
+      sbyx="prefer_ipv4"
+    fi
+  fi
+
+  # Auto mode: Xray direct strategy (xryx) and warp-out strategy (wxryx)
+  if [ "${v4_ok:-}" = "true" ] && [ "${v6_ok:-}" = "true" ]; then
+    xryx="ForceIPv4v6"
+  elif [ "${v4_ok:-}" = "true" ]; then
+    xryx="ForceIPv4"
+  elif [ "${v6_ok:-}" = "true" ]; then
+    xryx="ForceIPv6"
+  else
+    xryx="ForceIPv4v6"
+  fi
+
+  if [ "$x1" = "warp-out" ] && [ "$x2" = "direct" ]; then
+    if [ "${xip:-}" = '"::/0"' ]; then
+      wxryx="ForceIPv6"
+    elif [ "${xip:-}" = '"0.0.0.0/0"' ]; then
+      wxryx="ForceIPv4"
+    else
+      wxryx="ForceIPv4v6"
+    fi
+  else
+    wxryx="ForceIPv4v6"
+  fi
+  return 0
+}
 egress_init(){
   egress_sb_outbounds=""; egress_xr_outbounds=""; egress_sb_rules=""; egress_xr_rules=""; egress_tags=""; egress_xr_tags=""; egress_sb_tags=""; egress_xr_only_tags=""; egress_sb_only_tags=""; egress_socks_count=0; egress_vless_count=0; egress_trojan_count=0; egress_vmess_count=0; egress_ss_count=0; egress_tuic_count=0; egress_hy2_count=0; egress_anytls_count=0; egress_naive_count=0; egress_sb_ready=0
   # sing-box-only egress nodes (tuic/anytls/naive) need a sing-box config to
   # live in; at pre_xrsbout time sb.json exists iff sing-box was installed.
   [ -e "$HOME/agsbx/sb.json" ] && egress_sb_ready=1
+  # Resolve outbound IP strategy before early return so standard installs without custom egress also apply it.
+  egress_resolve_outip
   # egress_add: one-time append to egress_nodes, idempotent. If a node
   # (exact ';' delimited string) is already in egress_nodes it is skipped,
   # so calling xrsbout twice (or restarting a container that still has

@@ -53,6 +53,7 @@ argosbx 一键无交互小钢炮脚本💣  项目地址：github.com/qytang2014
   tupt=10003                           TUIC（UDP）
   vmpt="10004,"                        VMess-WS（逗号多实例：10004 + 随机）
   ym=example.com                       节点域名（Reality SNI 自动跟随）
+  outip=4                              出站 IP 策略（留空默认双栈优先v4；可选 4/6/4only/6only）
   egress_nodes="socks5://..."          落地出口节点（; 分隔多节点）
 HELP_EOF
 return 0

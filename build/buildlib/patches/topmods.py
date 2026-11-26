@@ -22,7 +22,7 @@ def apply(t, ctx):
     # Top variable list, flag handling, rep/install guards, port export,
     # recovery line, and vars_save list all gain vmtls, following vmpt.
     t = replace(t, "for v in agqc sub subid subpt snpt uuid vlpt vmpt vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do",
-                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do", "vmtls-top-list", 1)
+                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp outip name oap cfip alns hyjpt; do", "vmtls-top-list", 1)
     # warp 逻辑修复（2026-11-04）：空值不再走 WARP；加显式 off/no/direct；WARP 检测改 WireGuard
     t = replace(t, '""|sx|xs) s1outtag=warp-out;',
                 'sx|xs) s1outtag=warp-out;', "warp-no-empty", 1)
@@ -85,6 +85,6 @@ def apply(t, ctx):
     t = insert_after(t, 'run_hook on_init "$1"\n',
                      build_camouflage(), "camouflage-module-anchor")
     # --- variable lists ---
-    t = replace(t, "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt; do",
-                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp name oap cfip alns hyjpt ym certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add ippz web_port; do", "export-list", 1)
+    t = replace(t, "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp outip name oap cfip alns hyjpt; do",
+                "for v in agqc sub subid subpt snpt uuid vlpt vmpt vmtls vwpt hypt tupt xhpt vxpt anpt arpt sspt sopt nvpt xupt xcpt reym cdnym argo agn agk warp outip name oap cfip alns hyjpt ym certmode certsrc web_proxy vlpt_kernel egress_nodes egress_bind egress_rules egress_add ippz web_port; do", "export-list", 1)
     return t

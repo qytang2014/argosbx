@@ -198,14 +198,23 @@ def build_index():
     h = replace(h, "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/argosbx/main/argosbx.sh)'",
                 "const WGET = 'bash <(wget -qO- https://raw.githubusercontent.com/qytang2014/argosbx/main/argosbx.sh)'", "index-wget", 1)
     h = replace(h, "const optIds = ['warp','ippz','uuid','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt'];",
-                "const optIds = ['warp','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'web_proxy'];", "index-optids", 1)
+                "const optIds = ['warp','outip','ippz','uuid','ym','certsrc','certmode','reym','cfip','alns','hyjpt','cdnym','name', 'oap', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'vlpt_kernel', 'camouflage', 'caddy_email', 'hostname', 'web_proxy'];", "index-optids", 1)
     # index-agqc-field REMOVED: upstream d4f4b91 ships its own
     # id="agqc" select in the Argo card; ours would duplicate the id.
     # warp 修复（2026-11-04）：生成器"默认本地IP"选项 value 从 "" 改 "no"，否则空值进 WARP 分支
     h = replace(h, '<option value="">默认 服务器本地IP出站</option>',
                 '<option value="no">默认 服务器本地IP出站</option>', "warp-default-no", 1)
     h = replace(h, '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>',
-                '<div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>\n        <div class="row"><label>节点名称后缀 <span class="pill">hostname</span></label><input id="hostname" type="text" placeholder="留空则用系统 hostname"/></div>', "index-hostname-field", 1)
+                '        <div class="row"><label>出站 IP 优先级 <span class="pill">outip</span></label>\n'
+                '          <select id="outip">\n'
+                '            <option value="">默认 自动（双栈优先 IPv4，单栈及单栈 WARP 自动匹配）</option>\n'
+                '            <option value="4">优先 IPv4（prefer_ipv4 / ForceIPv4v6）</option>\n'
+                '            <option value="6">优先 IPv6（prefer_ipv6 / ForceIPv6v4）</option>\n'
+                '            <option value="4only">仅 IPv4（ipv4_only / ForceIPv4）</option>\n'
+                '            <option value="6only">仅 IPv6（ipv6_only / ForceIPv6）</option>\n'
+                '          </select>\n'
+                '        </div>\n'
+                '        <div class="row"><label>导出节点名称前缀 <span class="pill">name</span></label><input id="name" type="text" placeholder="留空则默认协议名前缀"/></div>\n        <div class="row"><label>节点名称后缀 <span class="pill">hostname</span></label><input id="hostname" type="text" placeholder="留空则用系统 hostname"/></div>', "index-hostname-field", 1)
     h = replace(h, "    document.getElementById('uuid').value = '';",
                 "    document.getElementById('uuid').value = '';\n    document.getElementById('ym').value = '';\n    document.getElementById('certmode').value = '';\n    document.getElementById('certsrc').value = '';\n    document.getElementById('camouflage').value = '';\n    document.getElementById('vlpt_kernel').value = '';", "index-reset-cert", 1)
     # --- vlpt UI: out of the Xray group, into its own dual-kernel group ---
@@ -260,7 +269,7 @@ def build_index():
         if (!vlessTcpRealityCheckbox.checked) vlptKernelSelect.value = '';
       }""", "index-vlpt-kernel-dynamic", 1)
     h = replace(h, "    document.getElementById('name').value = '';",
-                "    document.getElementById('name').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
+                "    document.getElementById('name').value = '';\n    document.getElementById('outip').value = '';\n    document.getElementById('egress_nodes').value = '';\n    document.getElementById('egress_bind').value = '';\n    document.getElementById('egress_rules').value = '';\n    document.getElementById('egress_add').value = '';", "index-reset-egress", 1)
     # No paste-back migration for vlpt2 / vlpt_more: those old
     # commands are no longer recognised (see vlpt-comma module:
     # vlpt2/vlpt_more are cleared at script start), and QUINN
@@ -290,7 +299,7 @@ def build_index():
         v = v.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean).join(';');
       }""", "index-collect-egress", 1)
     h = replace(h, "    ['warp', 'uuid', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt'].forEach(k => { if (keys.includes(k)) ordered.push(k); });",
-                "    ['warp', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
+                "    ['warp', 'outip', 'uuid', 'ym', 'certsrc', 'certmode', 'vlpt_kernel', 'reym', 'cfip', 'alns', 'hyjpt', 'cdnym', 'name', 'ippz', 'sub', 'subid', 'subpt', 'egress_nodes', 'egress_bind', 'egress_rules', 'egress_add', 'camouflage', 'web_proxy'].forEach(k => { if (keys.includes(k)) ordered.push(k); });", "index-tobash-order", 1)
     h = replace(h, '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>',
                 '<button class="command-button" data-command="rep">调整并更新脚本（注:所有变量设置完成后再点击）：rep</button>\n          <button class="command-button" data-command="add">增量更新（只传本次新增/修改，未传的沿用上次安装）：add</button>', "index-add-button", 1)
     # --- vmess-ws-tls generator: checkbox in the auto group, after vmpt ---

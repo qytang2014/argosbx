@@ -18,7 +18,7 @@ def apply(t, ctx):
                 'echo "订阅同步命令：https 订阅状态异常时运行 agsbx subhttpsync 重新同步（ym 已设、域名证书就绪，且内存大于等于 256M / 订阅 Caddy 已在运行 / 能自动合并到系统 Caddy 时走 https，否则回退 http）"', "showmode-add-line", 1)
     # --- egress exports (after warp export) ---
     t = insert_after(t, "export warp=${warp:-''}\n",
-                     "export egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")
+                     "export outip=${outip:-''}\nexport egress_nodes=${egress_nodes:-''}\nexport egress_bind=${egress_bind:-''}\nexport egress_rules=${egress_rules:-''}\nexport egress_add=${egress_add:-''}\n", "egress-exports-anchor")
 
     # --- cert usage replacements (upstream ygkkkca -> private cert dir / ym) ---
     t = replace(t, 'if [ -s "/root/ygkkkca/private.key" ] && [ -n "$nvp" ]; then',
